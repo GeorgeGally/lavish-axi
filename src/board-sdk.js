@@ -81,6 +81,44 @@
     };
   }
 
+  // What the agent is told about a pinned element: the text a reader sees in it, the
+  // heading of the section it sits in, and its box on the page (for its picture).
+  function visibleText(element) {
+    const own = element instanceof HTMLElement ? element.innerText : element.textContent;
+    const words = String(own || element.getAttribute("aria-label") || element.getAttribute("alt") || "")
+      .replace(/\s+/g, " ")
+      .trim();
+    return words.slice(0, 120);
+  }
+
+  function sectionHeading(element) {
+    const headings = document.querySelectorAll("h1, h2, h3, h4, h5, h6, [role='heading']");
+    let found = null;
+    for (const heading of headings) {
+      if (heading.closest("[data-easel-ui]")) continue;
+      if (
+        heading instanceof HTMLElement &&
+        heading.offsetParent === null &&
+        getComputedStyle(heading).position !== "fixed"
+      )
+        continue;
+      if (heading === element || heading.contains(element) || element.contains(heading)) return visibleText(heading);
+      if (heading.compareDocumentPosition(element) & window.Node.DOCUMENT_POSITION_FOLLOWING) found = heading;
+      else break;
+    }
+    return found ? visibleText(found) : "";
+  }
+
+  function pageBox(element) {
+    const rect = element.getBoundingClientRect();
+    return {
+      x: Math.round(rect.left + window.scrollX),
+      y: Math.round(rect.top + window.scrollY),
+      w: Math.round(rect.width),
+      h: Math.round(rect.height),
+    };
+  }
+
   function pinLayer() {
     let layer = document.getElementById("easel-pins");
     if (layer) return layer;
@@ -425,6 +463,9 @@
           tag: target.tagName.toLowerCase(),
           text: snippet(target),
           ...anchorOf(target, x, y),
+          excerpt: visibleText(target),
+          heading: sectionHeading(target),
+          box: pageBox(target),
         });
       }
     },

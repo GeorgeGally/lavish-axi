@@ -15,6 +15,34 @@ const SELECTOR_MAX = 512;
 const LABEL_MAX = 40;
 export const PROMPT_ID_MAX = 128;
 const PROMPT_ID_RE = /^[A-Za-z0-9_-]+$/;
+// Board replies can announce a version that is on its way (`[[pending: <item>]]`) or
+// call it off (`[[pending-cancel: <item>]]`). The markers drive the board's
+// placeholders and never show as text.
+const PENDING_MARKER = /\[\[\s*pending(-cancel)?\s*:\s*([^\]\s]{1,160})\s*\]\]/gi;
+
+/**
+ * @param {string} text
+ * @returns {{ text: string, pending: string[], cancel: string[] }}
+ */
+export function extractPendingMarkers(text) {
+  /** @type {string[]} */
+  const pending = [];
+  /** @type {string[]} */
+  const cancel = [];
+  const stripped = String(text || "").replace(PENDING_MARKER, (_match, cancelled, id) => {
+    (cancelled ? cancel : pending).push(id);
+    return "";
+  });
+  if (pending.length === 0 && cancel.length === 0) return { text: String(text || ""), pending, cancel };
+  return {
+    text: stripped
+      .replace(/[ \t]+\n/g, "\n")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim(),
+    pending,
+    cancel,
+  };
+}
 export const MAX_CHAT_STORED_BYTES = 5_242_880;
 
 // The chrome mints this at queue time and the server echoes it on the transcript entry. A value
@@ -483,7 +511,11 @@ export function serializeChat(chat) {
     if (!item || typeof item !== "object") continue;
     const text = String(item.text || "");
     if (item.role === "agent") {
-      serialized.push({ ...item, role: "agent", text, html: renderChatMarkdown(text) });
+      const markers = extractPendingMarkers(text);
+      const entry = { ...item, role: "agent", text: markers.text, html: renderChatMarkdown(markers.text) };
+      if (markers.pending.length > 0) entry.pending = markers.pending;
+      if (markers.cancel.length > 0) entry.pending_cancel = markers.cancel;
+      serialized.push(entry);
       continue;
     }
     const entry = {

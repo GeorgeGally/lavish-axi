@@ -19,7 +19,7 @@ const MAX_NOTE_IMAGES = 8;
  * markup or a copy of an item's content.
  */
 /** @typedef {{ id: string, label: string }} BoardTab */
-/** @typedef {{ id: string, number: number, label: string, selector: string, tag: string, text: string, x: number, y: number, ox?: number, oy?: number, attachments?: Array<{ id: string, name?: string }>, prompt_id?: string, at?: string, device?: string }} BoardNote */
+/** @typedef {{ id: string, number: number, label: string, selector: string, tag: string, text: string, x: number, y: number, ox?: number, oy?: number, attachments?: Array<{ id: string, name?: string }>, prompt_id?: string, at?: string, device?: string, excerpt?: string, heading?: string, box?: { x: number, y: number, w: number, h: number }, crop?: { id: string } }} BoardNote */
 /** @typedef {{ id: string, label: string, type: "number" | "color" | "select", css: string, min?: number, max?: number, step?: number, unit?: string, options?: Array<{ value: string, label: string }>, value: string }} TuneControl */
 /** @typedef {{ id: string, label: string, values: Record<string, string>, at: string }} TuneVersion */
 /**
@@ -231,6 +231,23 @@ function normalizeNotes(value) {
       .slice(0, MAX_NOTE_IMAGES)
       .map((ref) => (ref.name ? { id: String(ref.id), name: text(ref.name, 120) } : { id: String(ref.id) }));
     if (attachments.length > 0) note.attachments = attachments;
+    // What the pin points at, for the agent: the element's visible text, the heading of
+    // its section, its box on the page, and a picture of that spot.
+    const excerpt = text(entry.excerpt, 120);
+    if (excerpt) note.excerpt = excerpt;
+    const heading = text(entry.heading, 120);
+    if (heading) note.heading = heading;
+    const box = entry.box && typeof entry.box === "object" ? entry.box : null;
+    if (box && ["x", "y", "w", "h"].every((name) => Number.isFinite(Number(box[name])))) {
+      note.box = {
+        x: Math.round(number(box.x, 0, 0, 200_000)),
+        y: Math.round(number(box.y, 0, 0, 200_000)),
+        w: Math.round(number(box.w, 0, 0, 200_000)),
+        h: Math.round(number(box.h, 0, 0, 200_000)),
+      };
+    }
+    const crop = entry.crop && typeof entry.crop === "object" ? String(entry.crop.id || "") : "";
+    if (/^[0-9a-f]{64}\.(png|jpg|webp)$/.test(crop)) note.crop = { id: crop };
     const at = text(entry.at, 40);
     if (at) note.at = at;
     notes.push(note);
@@ -407,15 +424,18 @@ export function captionFromHtml(html) {
 
 /**
  * What the board explains above a design, from the file's own metas: an optional
- * `easel-title`, and `easel-explain` (falling back to `easel-caption`) for what this
- * version changes and why.
+ * `easel-title`, `easel-explain` (falling back to `easel-caption`) for what this
+ * version changes and why, `easel-changed` for what the latest edit changed, and
+ * `easel-parent` naming the file a derived version grew from.
  * @param {string} html
- * @returns {{ title: string, explain: string }}
+ * @returns {{ title: string, explain: string, changed: string, parent: string }}
  */
 export function explanationFromHtml(html) {
   return {
     title: metaContent(html, "easel-title", 120),
     explain: metaContent(html, "easel-explain", 600) || captionFromHtml(html),
+    changed: metaContent(html, "easel-changed", 400),
+    parent: metaContent(html, "easel-parent", 160).replace(/\.html?$/i, ""),
   };
 }
 

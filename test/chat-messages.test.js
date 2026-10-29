@@ -6,6 +6,7 @@ import {
   boundStoredChat,
   chatEntryForPrompt,
   collectChatAckIds,
+  extractPendingMarkers,
   markPreReceipt,
   MAX_CHAT_STORED_BYTES,
   RECEIPT_NONE,
@@ -466,4 +467,32 @@ test("pre-receipt entries are marked once and excluded from every stamp", () => 
   assert.equal(stampWorking(chat, at), true);
   assert.equal(stampDone(chat, at), true);
   assert.deepEqual(chat[0], userEntry("Old", { receipt: RECEIPT_NONE }));
+});
+
+test("extractPendingMarkers pulls coming-version markers out of a reply", () => {
+  assert.deepEqual(extractPendingMarkers("Plain reply."), { text: "Plain reply.", pending: [], cancel: [] });
+  assert.deepEqual(extractPendingMarkers("On it.\n\n[[pending: 02-why-card-today]]"), {
+    text: "On it.",
+    pending: ["02-why-card-today"],
+    cancel: [],
+  });
+  assert.deepEqual(extractPendingMarkers("Dropped. [[ pending-cancel : hero ]]"), {
+    text: "Dropped.",
+    pending: [],
+    cancel: ["hero"],
+  });
+});
+
+test("serializeChat strips pending markers and lists them on the agent entry", () => {
+  const [agent, user] = serializeChat([
+    { role: "agent", text: "Coming up. [[pending: v1]]", at: "2026-10-29T00:00:00.000Z" },
+    { role: "user", text: "[[pending: v1]]", at: "2026-10-29T00:00:01.000Z" },
+  ]);
+  assert.equal(agent.text, "Coming up.");
+  assert.equal(agent.html, "<p>Coming up.</p>");
+  assert.deepEqual(agent.pending, ["v1"]);
+  assert.equal("pending_cancel" in agent, false);
+  // A reviewer's own words are never read as markers.
+  assert.equal(user.text, "[[pending: v1]]");
+  assert.equal("pending" in user, false);
 });

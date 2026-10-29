@@ -321,3 +321,18 @@ test("poll --agent-reply-file and stdin land multiline Markdown in the transcrip
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test("resolveAgentReply adds a pending marker for --pending", async () => {
+  assert.equal(
+    await resolveAgentReply(["board.json", "--agent-reply", "On it.", "--pending", "02-why-card-today"]),
+    "On it.\n\n[[pending: 02-why-card-today]]",
+  );
+  await assert.rejects(
+    () => resolveAgentReply(["board.json", "--agent-reply", "On it.", "--pending", "../x y"]),
+    (error) => error instanceof AxiError && /--pending/.test(error.message),
+  );
+  await assert.rejects(
+    () => resolveAgentReply(["board.json", "--pending", "v1"]),
+    (error) => error instanceof AxiError && /--pending needs a reply/.test(error.message),
+  );
+});

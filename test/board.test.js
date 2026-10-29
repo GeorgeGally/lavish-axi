@@ -230,3 +230,35 @@ test("board CLI outputs stay small and name the poll command", async (t) => {
   assert.equal(status.board.pairs.length, 0);
   assert.match(status.help.join(" "), /board open/);
 });
+
+test("normalizeBoard keeps what a pin points at", () => {
+  const crop = `${"a".repeat(64)}.png`;
+  const board = normalizeBoard(
+    {
+      items: [
+        {
+          file: "a.html",
+          notes: [
+            {
+              id: "n1",
+              number: 1,
+              excerpt: "Find an adviser",
+              heading: "When opportunity crosses borders",
+              box: { x: 40.4, y: 300, w: 160, h: 44 },
+              crop: { id: crop },
+            },
+            { id: "n2", number: 2, box: { x: "a" }, crop: { id: "../etc/passwd" } },
+          ],
+        },
+      ],
+    },
+    "b",
+  );
+  const [pinned, bare] = board.items[0].notes;
+  assert.equal(pinned.excerpt, "Find an adviser");
+  assert.equal(pinned.heading, "When opportunity crosses borders");
+  assert.deepEqual(pinned.box, { x: 40, y: 300, w: 160, h: 44 });
+  assert.deepEqual(pinned.crop, { id: crop });
+  assert.equal("box" in bare, false);
+  assert.equal("crop" in bare, false);
+});

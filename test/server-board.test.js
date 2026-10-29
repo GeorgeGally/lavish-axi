@@ -271,7 +271,7 @@ test("a pin prompt keeps the item and pin it belongs to, and earns its receipts"
           text: "The whole fleet",
           tag: "pin",
           item: { id: "v1", label: "Hero · A" },
-          pin: { id: "n1", number: 3, viewport: 834 },
+          pin: { id: "n1", number: 3, viewport: 834, excerpt: "  The whole\n fleet ", heading: "Fleet" },
         },
       ],
       domSnapshot: "",
@@ -285,7 +285,13 @@ test("a pin prompt keeps the item and pin it belongs to, and earns its receipts"
   assert.equal(polled.status, "feedback");
   assert.equal(polled.prompts.length, 1);
   assert.deepEqual(polled.prompts[0].item, { id: "v1", label: "Hero · A" });
-  assert.deepEqual(polled.prompts[0].pin, { id: "n1", number: 3, viewport: 834 });
+  assert.deepEqual(polled.prompts[0].pin, {
+    id: "n1",
+    number: 3,
+    viewport: 834,
+    excerpt: "The whole fleet",
+    heading: "Fleet",
+  });
   assert.equal(polled.prompts[0].prompt_id, undefined);
 
   const seen = await fetch(`${base}/api/boards/${registered.key}`).then((response) => response.json());

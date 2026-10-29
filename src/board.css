@@ -335,16 +335,37 @@ body[data-pan="true"] .shield {
   color: var(--ink);
 }
 
+/* What the latest edit changed, from the file's easel-changed meta. */
+.explain-changed {
+  margin: 0.7em 0 0;
+  color: var(--ink-2);
+  line-height: 1.45;
+}
+
+.explain-changed b {
+  font-weight: 600;
+  color: var(--select);
+}
+
 .artboard-label {
   position: absolute;
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-end;
-  gap: 0.6em;
+  align-content: flex-end;
+  gap: 0.35em 0.6em;
   white-space: nowrap;
   --size: clamp(13px, calc(13px / var(--zoom)), var(--label-max, 13px));
   font-size: var(--size);
-  padding-bottom: calc(var(--size) * 0.6);
+  padding-bottom: calc(var(--size) * 0.5);
   color: var(--ink-4);
+}
+
+/* Every part of the row shares the button's height, so text and buttons line up. */
+.artboard-label > span {
+  display: inline-flex;
+  align-items: center;
+  height: 2em;
 }
 
 .artboard-label .name {
@@ -352,8 +373,20 @@ body[data-pan="true"] .shield {
   font-weight: 600;
 }
 
+.artboard-label .updated {
+  color: var(--select);
+  font-weight: 500;
+}
+
+.artboard-label .updated[hidden] {
+  display: none;
+}
+
+/* Out of the flow, so showing it on hover never wraps the row. */
 .artboard-label .tune-toggle {
-  margin-left: auto;
+  position: absolute;
+  right: 0;
+  bottom: calc(var(--size) * 0.5);
   padding: 0.15em 0.55em;
   border-radius: 0.5em;
   font-size: 1em;
@@ -372,30 +405,23 @@ body[data-pan="true"] .shield {
   color: var(--ink);
 }
 
-/* Accept / Keep today, under each compared version. Sized like the labels so it stays
-   readable and clickable at any zoom. */
+/* Accept / Keep today sits in the label row beside the version's name, so it stays
+   put however tall the artboards are. It takes the label's counter-scaled size. */
 .choice {
-  position: absolute;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  white-space: nowrap;
-  --size: clamp(13px, calc(13px / var(--zoom)), var(--label-max, 13px));
-  font-size: var(--size);
-  padding-top: 1.3em;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5em;
 }
 
 .choice .button {
-  height: 2.6em;
-  padding: 0 1.1em;
-  border-radius: 0.7em;
-  font-size: 1em;
+  height: 2em;
+  padding: 0 0.85em;
+  border-radius: 0.55em;
+  font-size: 0.95em;
 }
 
 .choice .button-quiet {
-  height: 2em;
-  margin-left: -0.6em;
-  padding: 0 0.6em;
+  padding: 0 0.5em;
 }
 
 .choice .button-quiet:hover:not(:disabled) {
@@ -403,9 +429,6 @@ body[data-pan="true"] .shield {
 }
 
 .choice-mark {
-  display: inline-flex;
-  align-items: center;
-  height: 2.6em;
   font-weight: 600;
   color: var(--ink);
 }
@@ -426,6 +449,18 @@ body[data-pan="true"] .shield {
   overflow: hidden;
   background: #ffffff;
   box-shadow: var(--shadow-board);
+  transition: box-shadow 1.2s ease;
+}
+
+/* A version whose file just changed carries a soft ring until it has been seen; the
+   ring fades out rather than snapping off. */
+.artboard[data-updated="true"] .screen,
+.artboard[data-framed="true"][data-updated="true"] {
+  box-shadow:
+    0 0 0 calc(3px / var(--zoom, 1)) rgba(37, 99, 235, 0.35),
+    0 0 calc(40px / var(--zoom, 1)) rgba(37, 99, 235, 0.18),
+    var(--shadow-board);
+  transition: box-shadow 200ms ease;
 }
 
 .screen iframe {
@@ -439,6 +474,76 @@ body[data-pan="true"] .shield {
   inset: 0;
   z-index: 2;
   cursor: crosshair;
+}
+
+/* Where a version the agent is still making will land: device-sized, light, with a
+   slow loader and the note that asked for it. Type scales with the zoom like the
+   labels, but never past what the holder's own width can carry. */
+.pending-version {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  container-type: inline-size;
+  border: calc(1.5px / var(--zoom, 1)) dashed var(--line-strong);
+  border-radius: calc(10px / var(--zoom, 1));
+  background: rgba(255, 255, 255, 0.55);
+}
+
+.pending-version[data-framed="true"] {
+  border-radius: 28px;
+}
+
+.pending-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  max-width: 82%;
+  text-align: center;
+  font-size: clamp(14px, calc(14px / var(--zoom, 1)), 6.5cqi);
+}
+
+.pending-loader {
+  width: 2.2em;
+  height: 2.2em;
+  margin-bottom: 1.1em;
+  border: 0.16em solid var(--line);
+  border-top-color: var(--ink-3);
+  border-radius: 50%;
+  animation: pending-spin 1.6s linear infinite;
+}
+
+.pending-title {
+  margin: 0;
+  font-size: 1.15em;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.pending-note {
+  display: -webkit-box;
+  margin: 0.5em 0 0;
+  overflow: hidden;
+  color: var(--ink-3);
+  line-height: 1.45;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.pending-note[hidden] {
+  display: none;
+}
+
+@keyframes pending-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pending-loader {
+    animation-duration: 4s;
+  }
 }
 
 /* Device frames, single-device views only. Drawn in CSS; the screen inside is the
@@ -783,6 +888,31 @@ body[data-pan="true"] .shield {
 
 .entry-agent {
   color: var(--ink-3);
+}
+
+/* The versions an agent reply changed; a click frames that version on the board. */
+.entry-links {
+  grid-column: 2;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin-top: 6px;
+}
+
+.entry-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--select);
+  cursor: pointer;
+}
+
+.entry-link:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 
 .chat-foot {

@@ -45,6 +45,8 @@ const state = {
   explains: new Map(),
   /** @type {Map<string, any>} */
   choices: new Map(),
+  /** @type {Map<string, any>} */
+  placeholders: new Map(),
   /** @type {Map<string, number>} */
   heights: loadHeights(),
   /** @type {Map<string, any[]>} */
@@ -209,13 +211,116 @@ function captionTitle(caption) {
   return capitalize(prefix[1].replace(/\s*\b(today|proposed)\b.*$/i, ""));
 }
 
+function fileStem(item) {
+  return String(item.file || "").replace(/\.html?$/i, "");
+}
+
+// The words a derived file adds to its parent's name: "02-why-card-type-a" grown from
+// "02-why-card-today" reads "Type A".
+function derivedLabel(item, parent) {
+  const own = fileStem(item).split(/[-_ ]+/);
+  const theirs = fileStem(parent).split(/[-_ ]+/);
+  let shared = 0;
+  while (shared < own.length && shared < theirs.length && own[shared].toLowerCase() === theirs[shared].toLowerCase())
+    shared += 1;
+  const rest = own.slice(shared).map((word) => (word.length <= 2 ? word.toUpperCase() : word));
+  return capitalize(rest.join(" ")) || item.label;
+}
+
+/**
+ * The version a new, unpaired file grew from: its `easel-parent` meta, or else the
+ * paired version with the same NN prefix whose name it shares most of (today first).
+ */
+function parentOf(item, pairedItems) {
+  if (item.parent) {
+    const wanted = item.parent.toLowerCase();
+    const named = state.items.find((entry) => fileStem(entry).toLowerCase() === wanted || entry.id === wanted);
+    if (named && named.id !== item.id) return named;
+  }
+  const number = /^(\d+)[-_ ]/.exec(fileStem(item));
+  if (!number) return null;
+  let best = null;
+  let bestScore = -1;
+  for (const candidate of pairedItems) {
+    if (!candidate.pair || !fileStem(candidate).startsWith(number[0])) continue;
+    const a = fileStem(item).toLowerCase();
+    const b = fileStem(candidate).toLowerCase();
+    let score = 0;
+    while (score < a.length && a[score] === b[score]) score += 1;
+    if (candidate.pair.role === "today") score += 0.5;
+    if (score > bestScore) {
+      bestScore = score;
+      best = candidate;
+    }
+  }
+  return best;
+}
+
+/** The board item a reply's marker names, by id or file name. */
+function resolveItemId(raw) {
+  const wanted = String(raw || "").toLowerCase();
+  const found = activeItems().find(
+    (item) => item.id.toLowerCase() === wanted || fileStem(item).toLowerCase() === wanted,
+  );
+  return found ? found.id : "";
+}
+
+// Agent replies carry `pending` (and `pending_cancel`) item ids, parsed from their
+// [[pending: <item>]] markers by the server. Each one is a version on its way; a new
+// file grown from that item, created after the reply, takes its place.
+const PENDING_SLACK_MS = 60 * 1000;
+function pendingFor(parentId, grown) {
+  /** @type {any[]} */
+  let open = [];
+  /** @type {any[]} */
+  const users = [];
+  for (const entry of state.chat) {
+    if (!entry) continue;
+    if (entry.role !== "agent") {
+      users.push(entry);
+      continue;
+    }
+    if ((entry.pending_cancel || []).some((raw) => resolveItemId(raw) === parentId)) open = [];
+    for (const raw of entry.pending || []) {
+      if (resolveItemId(raw) !== parentId) continue;
+      const asked =
+        [...users].reverse().find((user) => noteByPromptId(user.prompt_id)?.item.id === parentId) || users.at(-1);
+      open.push({ at: Date.parse(String(entry.at || "")) || 0, note: String(asked?.text || "") });
+    }
+  }
+  const unused = grown.map((item) => Number(item.created) || Number(item.mtime) || 0).sort((a, b) => a - b);
+  return open
+    .filter((pending) => {
+      const index = unused.findIndex((created) => created >= pending.at - PENDING_SLACK_MS);
+      if (index < 0) return true;
+      unused.splice(index, 1);
+      return false;
+    })
+    .map((pending, index) => ({
+      id: `pending:${parentId}:${index}`,
+      label: "New version coming",
+      placeholder: true,
+      note: pending.note,
+    }));
+}
+
 function buildGroups() {
   /** @type {any[]} */
   const groups = [];
   /** @type {Map<string, any>} */
   const byKey = new Map();
-  for (const item of activeItems()) {
+  const items = activeItems();
+  const paired = items.filter((item) => item.pair);
+  /** @type {Map<string, any[]>} */
+  const children = new Map();
+  for (const item of items) {
     if (!item.pair) {
+      const parent = parentOf(item, paired);
+      if (parent) {
+        if (!children.has(parent.id)) children.set(parent.id, []);
+        children.get(parent.id)?.push(item);
+        continue;
+      }
       groups.push({ key: `item:${item.id}`, members: [{ item }], single: true });
       continue;
     }
@@ -227,22 +332,51 @@ function buildGroups() {
     }
     group.members.push({ item });
   }
+  // Oldest first, so a version that has just arrived lands at the end of the row, where
+  // its holder stood.
+  for (const list of children.values()) list.sort((a, b) => (Number(a.created) || 0) - (Number(b.created) || 0));
+  // A child whose parent is not on the board (archived, or itself a child) stands alone.
+  const parentIds = new Set(groups.flatMap((group) => group.members.map((member) => member.item.id)));
+  for (const [parentId, list] of children) {
+    if (parentIds.has(parentId)) continue;
+    for (const item of list) groups.push({ key: `item:${item.id}`, members: [{ item }], single: true });
+  }
   for (const group of groups) {
     const rank = (member) => (member.item.pair?.role === "today" ? "0" : `1${member.item.pair?.variant || ""}`);
     group.members.sort((left, right) => rank(left).localeCompare(rank(right)));
-    for (const member of group.members) member.label = memberLabel(member.item, group);
+    for (const member of group.members) {
+      member.label = memberLabel(member.item, group);
+      // Versions grown from this one sit in a row under it.
+      member.children = (children.get(member.item.id) || []).map((item) => ({
+        item,
+        label: derivedLabel(item, member.item),
+        children: [],
+      }));
+      // Then a holder for each new version the agent said is on its way.
+      for (const pending of pendingFor(member.item.id, children.get(member.item.id) || [])) {
+        member.children.push({ item: pending, label: "New version coming", children: [] });
+      }
+    }
+    group.compared = group.members.length > 1 || group.members.some((member) => member.children.length > 0);
+    const everyone = [...group.members, ...group.members.flatMap((member) => member.children)];
     if (group.single) {
       const item = group.members[0].item;
       group.title = item.title || item.label;
       group.lines = item.caption ? [{ label: "", text: captionBody(item.caption) }] : [];
+      for (const child of group.members[0].children) {
+        if (child.item.caption) group.lines.push({ label: child.label, text: captionBody(child.item.caption) });
+      }
     } else {
       const titled = group.members.map((member) => member.item.title).find(Boolean);
       const fromCaption = group.members.map((member) => captionTitle(member.item.caption)).find(Boolean);
       group.title = titled || fromCaption || capitalize(group.name);
-      group.lines = group.members
+      group.lines = everyone
         .filter((member) => member.item.caption)
         .map((member) => ({ label: member.label, text: captionBody(member.item.caption) }));
     }
+    group.changes = everyone
+      .filter((member) => member.item.changed)
+      .map((member) => ({ label: member.label, text: capitalize(member.item.changed) }));
   }
   return groups;
 }
@@ -280,6 +414,16 @@ function explainContent(group) {
       list.append(row);
     }
     inner.append(list);
+  }
+  // What the latest edit changed, from each file's `easel-changed` meta.
+  for (const change of group.changes || []) {
+    const row = element("p", { class: "explain-changed" });
+    row.append(
+      element("b", { text: change.label && group.compared ? `What changed in ${change.label}.` : "What changed." }),
+      " ",
+      change.text,
+    );
+    inner.append(row);
   }
   return inner;
 }
@@ -349,15 +493,20 @@ function computeLayout(groups, captionMax, labelMax) {
   const framed = framedView();
   const devices = visibleDevices();
   const memberGap = MEMBER_GAP[state.deviceMode] || MEMBER_GAP.all;
-  const labelReserve = Math.ceil(labelMax * 2);
-  // Room under a compared design for its Accept / Keep today choice.
-  const choiceReserve = Math.ceil(labelMax * 6);
+  // The label row also carries a compared design's Accept / Keep today button, so it
+  // never depends on how tall the artboards are.
+  // A phone is too narrow for name and button on one line: there the button wraps
+  // onto a second line above the frame.
+  const narrow = devices.length === 1 && devices[0].id === "phone";
+  const labelReserve = Math.ceil(labelMax * (narrow ? 5.4 : 3));
   const placed = [];
-  for (const group of groups) {
-    let x = 0;
+  const bandGap = Math.max(memberGap, labelReserve);
+  /** Lay versions side by side from `x0`; each keeps its own artboards in a row. */
+  const band = (list, x0) => {
+    let x = x0;
     let contentH = 0;
     const members = [];
-    for (const member of group.members) {
+    for (const member of list) {
       let mx = 0;
       let mh = 0;
       const boards = [];
@@ -372,10 +521,24 @@ function computeLayout(groups, captionMax, labelMax) {
       x += width + memberGap;
       contentH = Math.max(contentH, mh);
     }
-    const width = x - memberGap;
+    return { members, width: x - memberGap, contentH };
+  };
+  for (const group of groups) {
+    const first = band(group.members, 0);
+    const bands = [first];
+    for (const member of first.members) {
+      if (member.children.length > 0) bands.push(band(member.children, member.x));
+    }
+    let offset = 0;
+    for (const entry of bands) {
+      entry.offset = offset;
+      offset += labelReserve + entry.contentH + bandGap;
+    }
+    const bodyH = offset - bandGap;
+    const width = Math.max(...bands.map((entry) => entry.width));
+    const members = bands.flatMap((entry) => entry.members.map((member) => ({ ...member, band: entry })));
     const captionH = captionMax > 0 ? explainHeight(group, width, captionMax) : 0;
-    const below = group.single ? 0 : choiceReserve;
-    placed.push({ ...group, members, width, captionH, height: captionH + labelReserve + contentH + below, x: 0, y: 0 });
+    placed.push({ ...group, members, width, captionH, height: captionH + bodyH, x: 0, y: 0 });
   }
   const area = availableArea();
   const aspect = area.width / area.height;
@@ -408,14 +571,12 @@ function computeLayout(groups, captionMax, labelMax) {
     for (const group of row) {
       group.x = cursorX;
       group.y = cursorY + captionH - group.captionH;
-      const top = cursorY + captionH + labelReserve;
       for (const member of group.members) {
+        const top = cursorY + captionH + member.band.offset + labelReserve;
         for (const board of member.boards) {
           board.x = cursorX + member.x + board.x;
           board.y = top;
         }
-        member.choiceX = cursorX + member.x;
-        member.choiceY = top + member.contentH;
       }
       group.height = captionH - (group.y - cursorY) + contentH;
       cursorX += group.width + columnGap;
@@ -429,7 +590,6 @@ function computeLayout(groups, captionMax, labelMax) {
     captionMax,
     labelMax,
     labelReserve,
-    choiceReserve,
     bounds: placed.length > 0 ? { left: 0, top: 0, width, height } : null,
   };
 }
@@ -485,16 +645,18 @@ function createArtboard(item, device) {
   const label = element("div", { class: "artboard-label" });
   const name = element("span", { class: "name" });
   const width = element("span", { class: "width" });
+  const updated = element("span", { class: "updated", text: "Updated just now" });
+  updated.hidden = true;
   const tune = element("button", { class: "tune-toggle", type: "button", text: "Tune" });
   tune.addEventListener("click", (event) => {
     event.stopPropagation();
     openTune(item.id, device.id);
   });
-  label.append(name, width, tune);
+  label.append(name, updated, width, tune);
   canvas.append(root, label);
   // Every frame loads up front: the layout needs each page's real height.
   iframe.src = itemUrl(item, device.id);
-  const record = { id, itemId: item.id, device, root, screen, iframe, shield, label, name, width };
+  const record = { id, itemId: item.id, device, root, screen, iframe, shield, label, name, width, updated };
   state.artboards.set(id, record);
   return record;
 }
@@ -504,6 +666,7 @@ function render() {
   const framed = framedView();
   const seen = new Set();
   const seenGroups = new Set();
+  const seenPlaceholders = new Set();
   canvas.style.setProperty("--cap-max", `${layout.captionMax}px`);
   canvas.style.setProperty("--label-max", `${layout.labelMax}px`);
   for (const group of layout.groups) {
@@ -520,6 +683,13 @@ function render() {
     explain.style.width = `${group.width}px`;
     explain.style.height = `${group.captionH}px`;
     for (const member of group.members) {
+      if (member.item.placeholder) {
+        member.boards.forEach((board, index) => {
+          seenPlaceholders.add(board.key);
+          renderPlaceholder(board, index === 0, framed, layout);
+        });
+        continue;
+      }
       member.boards.forEach((board, index) => {
         seen.add(board.key);
         const record = state.artboards.get(board.key) || createArtboard(board.item, board.device);
@@ -541,6 +711,9 @@ function render() {
         record.label.style.width = `${board.width}px`;
         record.label.style.height = `${layout.labelReserve}px`;
         record.name.textContent = index === 0 ? member.label : "";
+        record.updated.hidden = !(index === 0 && updatedItems.has(member.item.id));
+        if (updatedItems.has(member.item.id)) record.root.dataset.updated = "true";
+        else delete record.root.dataset.updated;
         record.width.textContent = framed && member.label ? "" : String(board.device.width);
       });
     }
@@ -558,19 +731,18 @@ function render() {
   }
   const seenChoices = new Set();
   for (const group of layout.groups) {
-    if (group.single) continue;
+    if (!group.compared) continue;
     for (const member of group.members) {
+      if (member.item.placeholder) continue;
       seenChoices.add(member.item.id);
       let choice = state.choices.get(member.item.id);
       if (!choice) {
         choice = element("div", { class: "choice", "data-item": member.item.id });
-        canvas.append(choice);
         state.choices.set(member.item.id, choice);
       }
-      choice.style.left = `${member.choiceX}px`;
-      choice.style.top = `${member.choiceY}px`;
-      choice.style.width = `${member.width}px`;
-      choice.style.height = `${layout.choiceReserve}px`;
+      // Beside the version's name, at the top left of its first artboard.
+      const record = state.artboards.get(member.boards[0]?.key);
+      if (record && choice.parentElement !== record.label) record.label.insertBefore(choice, record.updated);
       renderChoice(choice, group, member);
     }
   }
@@ -579,12 +751,207 @@ function render() {
     choice.remove();
     state.choices.delete(id);
   }
+  for (const [id, holder] of state.placeholders) {
+    if (seenPlaceholders.has(id)) continue;
+    holder.root.remove();
+    holder.label.remove();
+    state.placeholders.delete(id);
+  }
   for (const [id, explain] of state.explains) {
     if (seenGroups.has(id)) continue;
     explain.remove();
     state.explains.delete(id);
   }
   emptyElement.hidden = layout.groups.length > 0;
+}
+
+/** A device-sized holder where a version the agent is making will appear. */
+function renderPlaceholder(board, first, framed, layout) {
+  let holder = state.placeholders.get(board.key);
+  if (!holder) {
+    const root = element("div", { class: "pending-version", "data-device": board.device.id });
+    const body = element("div", { class: "pending-body" });
+    body.append(
+      element("span", { class: "pending-loader", "aria-hidden": "true" }),
+      element("p", { class: "pending-title", text: "New version coming" }),
+      element("p", { class: "pending-note" }),
+    );
+    root.append(body);
+    const label = element("div", { class: "artboard-label" });
+    label.append(element("span", { class: "name" }), element("span", { class: "width" }));
+    canvas.append(root, label);
+    holder = { root, label };
+    state.placeholders.set(board.key, holder);
+  }
+  const note = holder.root.querySelector(".pending-note");
+  if (note) {
+    note.textContent = board.item.note;
+    note.hidden = !board.item.note;
+  }
+  holder.root.dataset.framed = String(framed);
+  Object.assign(holder.root.style, {
+    left: `${board.x}px`,
+    top: `${board.y}px`,
+    width: `${board.width}px`,
+    height: `${board.height}px`,
+  });
+  Object.assign(holder.label.style, {
+    left: `${board.x}px`,
+    top: `${board.y - layout.labelReserve}px`,
+    width: `${board.width}px`,
+    height: `${layout.labelReserve}px`,
+  });
+  const [name, width] = holder.label.children;
+  name.textContent = first ? "New version" : "";
+  width.textContent = framed ? "" : String(board.device.width);
+}
+
+/* ----------------------------------------------------------- live updates */
+
+// The board re-reads itself every couple of seconds; an item whose file changed on
+// disk reloads in place (camera untouched) and is marked "Updated just now" until it
+// has been on screen long enough to be seen. What this browser has seen is kept per
+// board, so an edit made while the board was closed is still marked on the next visit.
+const seenStorageKey = `easel:seen:${key}`;
+/** @type {Map<string, number>} */
+const knownMtimes = new Map();
+/** @type {Set<string>} */
+const updatedItems = new Set();
+/** @type {Map<string, number>} */
+const viewedFor = new Map();
+
+function loadSeen() {
+  try {
+    return JSON.parse(readStorage(seenStorageKey) || "{}") || {};
+  } catch {
+    return {};
+  }
+}
+
+function markSeen(itemId, mtime) {
+  const seen = loadSeen();
+  seen[itemId] = mtime;
+  writeStorage(seenStorageKey, JSON.stringify(seen));
+}
+
+function reloadItem(item) {
+  for (const record of state.artboards.values()) {
+    if (record.itemId !== item.id) continue;
+    record.iframe.src = `${itemUrl(item, record.device.id)}&r=${encodeURIComponent(String(item.mtime || Date.now()))}`;
+  }
+}
+
+function setUpdated(itemId, on) {
+  if (on) updatedItems.add(itemId);
+  else updatedItems.delete(itemId);
+  viewedFor.delete(itemId);
+}
+
+/** @param {boolean} initial */
+function noticeFileChanges(initial) {
+  const seen = loadSeen();
+  const marked = updatedItems.size;
+  for (const item of state.items) {
+    const mtime = Number(item.mtime) || 0;
+    if (!mtime) continue;
+    const before = knownMtimes.get(item.id);
+    knownMtimes.set(item.id, mtime);
+    if (initial) {
+      if (seen[item.id] === undefined) markSeen(item.id, mtime);
+      else if (mtime > Number(seen[item.id])) setUpdated(item.id, true);
+      continue;
+    }
+    if (before === undefined) {
+      setUpdated(item.id, true);
+      continue;
+    }
+    if (mtime !== before) {
+      reloadItem(item);
+      setUpdated(item.id, true);
+    }
+  }
+  if (updatedItems.size !== marked && state.layout) render();
+}
+
+// An update counts as seen once one of its artboards has been on screen, at a size you
+// can read, for a couple of seconds.
+function checkViewed() {
+  if (updatedItems.size === 0) return;
+  const area = { left: 0, top: barHeight(), right: window.innerWidth - panelWidth(), bottom: window.innerHeight };
+  for (const itemId of [...updatedItems]) {
+    let visible = false;
+    for (const record of state.artboards.values()) {
+      if (record.itemId !== itemId || record.root.hidden) continue;
+      const rect = record.screen.getBoundingClientRect();
+      const onScreen =
+        rect.right > area.left && rect.left < area.right && rect.bottom > area.top && rect.top < area.bottom;
+      if (onScreen && rect.width >= 120) visible = true;
+    }
+    if (!visible || document.hidden) {
+      viewedFor.delete(itemId);
+      continue;
+    }
+    const since = viewedFor.get(itemId) || Date.now();
+    viewedFor.set(itemId, since);
+    if (Date.now() - since < 2500) continue;
+    const item = itemById(itemId);
+    if (item) markSeen(itemId, Number(item.mtime) || 0);
+    setUpdated(itemId, false);
+    if (state.layout) render();
+  }
+}
+
+/** Frame one version on screen, from a link in the panel. */
+function focusItem(itemId) {
+  const boards = eachBoard().filter((board) => board.item.id === itemId);
+  if (boards.length === 0) {
+    if (state.deviceMode === "all") return undefined;
+    setDeviceMode("all");
+    return focusItem(itemId);
+  }
+  userAdjustedCamera = true;
+  const left = Math.min(...boards.map((board) => board.x));
+  const top = Math.min(...boards.map((board) => board.y));
+  const right = Math.max(...boards.map((board) => board.x + board.width));
+  const bottom = Math.max(...boards.map((board) => board.y + board.height));
+  const area = availableArea();
+  const zoom = clamp(
+    Math.min(1, (area.width - 96) / (right - left), (area.height - 96) / Math.min(bottom - top, area.height * 3)),
+    MIN_ZOOM,
+    1,
+  );
+  setCamera({ zoom, x: (area.width - (right - left) * zoom) / 2 - left * zoom, y: 48 - top * zoom }, true);
+  return undefined;
+}
+
+// A reply is linked to the versions whose files changed between the previous reply
+// and shortly after this one: that is what the agent just did. Links are kept per
+// reply in this browser, so a later edit does not move an old reply's link.
+const linkStorageKey = `easel:links:${key}`;
+function replyLinks(entry, previousAt) {
+  let stored;
+  try {
+    stored = JSON.parse(readStorage(linkStorageKey) || "{}") || {};
+  } catch {
+    stored = {};
+  }
+  const id = String(entry.at || "");
+  if (Array.isArray(stored[id])) return stored[id].filter((itemId) => itemById(itemId));
+  const at = Date.parse(id);
+  if (!Number.isFinite(at)) return [];
+  // The first reply looks back to the first note the reviewer sent, not to the files the
+  // board started with.
+  const firstUser = state.chat.find((other) => other.role === "user");
+  const from = Date.parse(String(previousAt || firstUser?.at || "")) || at;
+  const links = state.items
+    .filter((item) => Number(item.mtime) > from && Number(item.mtime) <= at + 2 * 60 * 1000)
+    .map((item) => item.id);
+  // Settle the links once the grace window after the reply has passed.
+  if (Date.now() > at + 2 * 60 * 1000) {
+    stored[id] = links;
+    writeStorage(linkStorageKey, JSON.stringify(stored));
+  }
+  return links;
 }
 
 /* ----------------------------------------------------------------- choices */
@@ -627,6 +994,7 @@ function choose(group, member, accept) {
   const today = item.pair?.role === "today";
   const changes = [];
   for (const other of group.members) {
+    if (other.item.placeholder) continue;
     const next = accept && other === member ? chosenStatus(other.item) : "open";
     if (other.item.status !== next) {
       other.item.status = next;
@@ -1110,6 +1478,8 @@ function postAllPins() {
 // page uploads the raw bytes (same-origin, magic-byte checked server side) and a
 // prompt names them by id, so the agent receives a local file path with the note.
 const IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
+// The server takes four images per prompt by default.
+const MAX_PROMPT_IMAGES = 4;
 /** @type {Map<string, Set<Promise<unknown>>>} */
 const uploads = new Map();
 /** @type {Array<{ id: string, name?: string }>} */
@@ -1365,9 +1735,53 @@ function addNote(item, payload, deviceId) {
     oy: Math.round(Number(payload.oy) || 0),
     at: new Date().toISOString(),
   };
+  const excerpt = String(payload.excerpt || "").slice(0, 120);
+  if (excerpt) note.excerpt = excerpt;
+  const heading = String(payload.heading || "").slice(0, 120);
+  if (heading) note.heading = heading;
+  const box = payload.box;
+  if (box && ["x", "y", "w", "h"].every((name) => Number.isFinite(Number(box[name])))) {
+    note.box = { x: Number(box.x), y: Number(box.y), w: Number(box.w), h: Number(box.h) };
+  }
   item.notes = [...(item.notes || []), note];
   postPins(item.id, deviceId);
   showNoteWindow(item, note, { fresh: true });
+  requestCrop(item, note);
+}
+
+// A picture of the pinned spot goes to the agent with the note. It is taken as soon as
+// the pin lands, so it is ready by the time the note is written.
+/** @type {Map<string, Promise<void>>} */
+const crops = new Map();
+const CROP_WAIT_MS = 4000;
+const CROP_NAME = /^pin-\d+-crop\.png$/;
+
+function requestCrop(item, note) {
+  if (!note.box || crops.has(note.id)) return;
+  const done = fetch(`/api/boards/${encodeURIComponent(key)}/crop`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ item: item.id, device: noteDevice(note), box: note.box }),
+  })
+    .then((response) => (response.ok ? response.json() : null))
+    .then((payload) => {
+      const id = String(payload?.attachment?.id || "");
+      const live = liveNote(note.id);
+      if (!id || !live) return;
+      live.note.crop = { id };
+      if (!live.note.prompt_id) persistNotes(live.item.id);
+    })
+    .catch(() => {});
+  crops.set(note.id, done);
+}
+
+/** Wait a little for pictures still being taken; a slow one never holds a note back. */
+function pendingCrops(noteIds) {
+  const waiting = noteIds.map((id) => crops.get(id)).filter(Boolean);
+  if (waiting.length === 0) return Promise.resolve();
+  return Promise.race([Promise.all(waiting), new Promise((resolve) => setTimeout(resolve, CROP_WAIT_MS))]).then(
+    () => {},
+  );
 }
 
 /**
@@ -1380,11 +1794,11 @@ function sendPrompts(noteIds, message = "", images = []) {
   if (state.ended) return Promise.resolve(false);
   const fromComposer = images === composerImages;
   const owners = fromComposer ? [...noteIds, "composer"] : noteIds;
-  if (owners.some((owner) => (uploads.get(owner)?.size || 0) > 0)) {
-    dockStatus.textContent = "Adding images…";
-    return pendingUploads(owners).then(() => sendPromptsNow(noteIds, message, fromComposer ? composerImages : images));
-  }
-  return sendPromptsNow(noteIds, message, images);
+  const uploading = owners.some((owner) => (uploads.get(owner)?.size || 0) > 0);
+  if (uploading) dockStatus.textContent = "Adding images…";
+  return Promise.all([uploading ? pendingUploads(owners) : null, pendingCrops(noteIds)]).then(() =>
+    sendPromptsNow(noteIds, message, fromComposer ? composerImages : images),
+  );
 }
 
 function sendPromptsNow(noteIds, message, images) {
@@ -1397,6 +1811,9 @@ function sendPromptsNow(noteIds, message, images) {
     const text = String(live.note.text || "").trim();
     const attached = Array.isArray(live.note.attachments) ? live.note.attachments : [];
     if (!text && attached.length === 0) continue;
+    // The picture of the spot rides along while the prompt has room for it.
+    const crop = live.note.crop?.id ? [{ id: live.note.crop.id, name: `pin-${live.note.number}-crop.png` }] : [];
+    const withCrop = attached.length < MAX_PROMPT_IMAGES ? [...attached, ...crop] : attached;
     const promptId = randomId();
     live.note.prompt_id = promptId;
     sendingPrompts.add(promptId);
@@ -1409,8 +1826,14 @@ function sendPromptsNow(noteIds, message, images) {
       text: live.note.label,
       tag: "pin",
       item: { id: live.item.id, label: live.item.label },
-      pin: { id: live.note.id, number: live.note.number, viewport: deviceById(noteDevice(live.note)).width },
-      ...(attached.length > 0 ? { attachments: attached } : {}),
+      pin: {
+        id: live.note.id,
+        number: live.note.number,
+        viewport: deviceById(noteDevice(live.note)).width,
+        ...(live.note.excerpt ? { excerpt: live.note.excerpt } : {}),
+        ...(live.note.heading ? { heading: live.note.heading } : {}),
+      },
+      ...(withCrop.length > 0 ? { attachments: withCrop } : {}),
     });
   }
   if (message || images.length > 0) {
@@ -1617,11 +2040,19 @@ function formatTime(value) {
   return date.toLocaleString([], { hour: "2-digit", minute: "2-digit", day: "numeric", month: "short" });
 }
 
+let laidOutPending = "";
 function renderChatPanel() {
+  // A reply that announces or cancels a coming version moves the holders on the board.
+  const pending = pendingSignature(state.chat);
+  if (pending !== laidOutPending) {
+    laidOutPending = pending;
+    if (state.layout) scheduleLayout();
+  }
   const log = document.getElementById("chatLog");
   if (!log) return;
   const rows = [];
   let lastHeading = "";
+  let previousAgentAt = "";
   for (const entry of state.chat) {
     if (!entry) continue;
     if (entry.role === "agent") {
@@ -1631,6 +2062,19 @@ function renderChatPanel() {
       if (entry.html) text.innerHTML = String(entry.html);
       else text.textContent = String(entry.text || "");
       row.append(text);
+      const links = replyLinks(entry, previousAgentAt);
+      previousAgentAt = entry.at;
+      if (links.length > 0) {
+        const list = element("div", { class: "entry-links" });
+        for (const itemId of links) {
+          const item = itemById(itemId);
+          if (!item) continue;
+          const link = element("button", { class: "entry-link", type: "button", text: `${designName(item, "")} ↗` });
+          link.addEventListener("click", () => focusItem(itemId));
+          list.append(link);
+        }
+        row.append(list);
+      }
       rows.push(row);
       continue;
     }
@@ -1649,8 +2093,12 @@ function renderChatPanel() {
       row.addEventListener("click", () => focusPin(matched.item, matched.note));
     }
     if (entry.text) row.append(element("div", { class: "entry-text", text: String(entry.text || "") }));
-    if (Array.isArray(entry.attachments) && entry.attachments.length > 0) {
-      const strip = thumbStrip(entry.attachments, null);
+    // The pin's own picture is for the agent; the panel shows only images people added.
+    const added = Array.isArray(entry.attachments)
+      ? entry.attachments.filter((ref) => !CROP_NAME.test(String(ref?.name || "")))
+      : [];
+    if (added.length > 0) {
+      const strip = thumbStrip(added, null);
       strip.classList.add("entry-thumbs");
       row.append(strip);
     }
@@ -2125,7 +2573,17 @@ function connectLiveEvents() {
 
 function itemsSignature(items) {
   return items
-    .map((item) => `${item.id}|${item.file}|${item.tab}|${item.caption || ""}|${item.title || ""}|${item.status || ""}`)
+    .map(
+      (item) =>
+        `${item.id}|${item.file}|${item.tab}|${item.caption || ""}|${item.title || ""}|${item.changed || ""}|${item.parent || ""}|${item.status || ""}`,
+    )
+    .join("\n");
+}
+
+function pendingSignature(chat) {
+  return chat
+    .filter((entry) => entry?.pending || entry?.pending_cancel)
+    .map((entry) => `${entry.at}|${(entry.pending || []).join(",")}|${(entry.pending_cancel || []).join(",")}`)
     .join("\n");
 }
 
@@ -2151,6 +2609,7 @@ function refreshBoard() {
       if (!state.tabs.some((tab) => tab.id === state.activeTab)) state.activeTab = state.tabs[0]?.id || "";
       if (state.tabs.map((tab) => tab.id).join(",") !== previousTabs) renderTabs();
       if (itemsSignature(state.items) !== before) scheduleLayout();
+      noticeFileChanges(false);
       ensureUniqueNumbers();
       renderChatPanel();
       postAllPins();
@@ -2337,6 +2796,7 @@ composerInput?.addEventListener("keydown", (event) => {
 });
 
 state.activeTab = state.tabs[0]?.id || "";
+noticeFileChanges(true);
 setChatCollapsed(readStorage(panelStorageKey) === "closed");
 setPresence("waiting");
 renderTabs();
@@ -2350,4 +2810,5 @@ renderChatPanel();
 bindNavigation();
 if (state.ended) markEnded();
 connectLiveEvents();
-setInterval(refreshBoard, 5000);
+setInterval(refreshBoard, 2000);
+setInterval(checkViewed, 500);

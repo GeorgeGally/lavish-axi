@@ -140,7 +140,14 @@ A board is a folder your agent fills, not a design tool: `board.json` plus one H
 Every item renders as three whole-page artboards - desktop 1440, iPad 834, phone 390 - at those real viewport widths, each as tall as the page's own content.
 Name files `NN-name-today.html` and `NN-name-proposed.html` (more proposals as `-proposed-b`, `-proposed-c`) and the board shows them side by side under a short explanation taken from each file's `<meta name="easel-caption">` (or `easel-explain`, plus an optional `easel-title`).
 The All view shows one design per row; **Desktop**, **iPad** and **Phone** show that device only, in a device frame, packed in rows, and scrolling over a device scrolls its page.
-Under each version, **Accept** (or **Keep today**) tells the agent at once which one you chose and at which size, marks it with a check, and **Undo** takes it back.
+Beside each version's name, **Accept** (or **Keep today**) tells the agent at once which one you chose and at which size, marks it with a check, and **Undo** takes it back.
+A new version grown from an existing one sits in a row directly under it: name its parent with `<meta name="easel-parent" content="02-why-card-today">`, or the board picks the version with the same `NN-` prefix whose name it shares most.
+`<meta name="easel-changed" content="...">` adds a **What changed** line under the explanation.
+
+The board follows the folder while you look at it: when a file changes, only that design's frames reload, the camera stays put, and the design is marked **Updated just now** until it has been on screen for a moment. An agent reply links to the designs that changed since the previous reply, and clicking a link frames that design.
+An agent that is about to make a new version can say so with `easel reply <board> --agent-reply "On it." --pending <item-id>` (or a `[[pending: <item-id>]]` line in the reply, which never shows): a holder with a loader and your note appears under that item until a file with that parent appears, and `[[pending-cancel: <item-id>]]` removes it.
+
+A pin note tells the agent what it points at: the element's visible text, the heading of its section, and a picture of that spot (the element plus a 40px margin, at the device's width) delivered as an image attachment path. The picture needs a local Chrome (found in the usual places, or set `EASEL_CHROME`); without one, notes go out without it.
 
 Moving around: two-finger scroll pans, pinch or Cmd+scroll zooms around the pointer, holding Space or Cmd turns the pointer into a hand that drags the board from anywhere, and double-clicking a design zooms to 100% there (again to fit). **Fit** (`0`) and **100%** (`1`) sit in the top bar.
 

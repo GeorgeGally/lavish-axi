@@ -76,6 +76,7 @@ import {
   writeBoard,
 } from "./board.js";
 import { createBoardHtml } from "./board-page.js";
+import { captureCrop, cropBox, cropFrameHtml, findChrome } from "./board-crop.js";
 import {
   bindHost,
   extraAllowedHosts,
@@ -906,6 +907,10 @@ export async function serve({
           tuneInstruction: spec.length > 0 ? tuneInstruction(item, spec) : "",
           caption: captions[item.id]?.explain || "",
           title: captions[item.id]?.title || "",
+          changed: captions[item.id]?.changed || "",
+          parent: captions[item.id]?.parent || "",
+          mtime: captions[item.id]?.mtime || 0,
+          created: captions[item.id]?.created || 0,
           pair: pairInfo(item.file),
         };
       }),
@@ -940,14 +945,23 @@ export async function serve({
   async function boardItemMeta(dir, board) {
     /** @type {Record<string, import("./board.js").TuneControl[]>} */
     const specs = {};
-    /** @type {Record<string, { title: string, explain: string }>} */
+    /** @type {Record<string, { title: string, explain: string, changed: string, parent: string, mtime: number, created: number }>} */
     const captions = {};
     for (const item of board.items) {
       const file = await itemFileFor(dir, item).catch(() => null);
       if (!file) continue;
       const html = await readFile(file, "utf8").catch(() => "");
       specs[item.id] = extractTuneSpec(html);
-      captions[item.id] = explanationFromHtml(html);
+      // The file's modification time is how an open board notices an edit and reloads
+      // just that frame.
+      const info = await stat(file).catch(() => null);
+      captions[item.id] = {
+        ...explanationFromHtml(html),
+        mtime: info ? Math.round(info.mtimeMs) : 0,
+        // When the file first appeared: a pending version's placeholder gives way to a
+        // file created after the reply that announced it.
+        created: info ? Math.round(info.birthtimeMs || info.ctimeMs) : 0,
+      };
     }
     return { specs, captions };
   }
@@ -1203,6 +1217,99 @@ export async function serve({
       }
       res.setHeader("content-security-policy", ARTIFACT_CONTENT_SECURITY_POLICY);
       res.sendFile(asset, { dotfiles: "allow" });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // Device sizes the board previews at; a pin's picture is taken at the same width.
+  const BOARD_DEVICE_SIZES = {
+    desktop: { width: 1440, height: 900 },
+    ipad: { width: 834, height: 1194 },
+    phone: { width: 390, height: 844 },
+  };
+  const boardDeviceOf = (value) => (Object.hasOwn(BOARD_DEVICE_SIZES, String(value || "")) ? String(value) : "desktop");
+
+  // The page headless Chrome photographs for a pin's picture: the item, shifted so the
+  // pinned spot fills the window. It frames only an item of this board, sandboxed.
+  app.get("/board/:key/crop-frame", async (req, res, next) => {
+    try {
+      const resolved = await boardForRequest(req.params.key);
+      const item = resolved?.board.items.find((entry) => entry.id === String(req.query.item || ""));
+      if (!resolved || !item) {
+        res.status(404).type("text").send("Item not found");
+        return;
+      }
+      const device = boardDeviceOf(req.query.device);
+      const size = BOARD_DEVICE_SIZES[device];
+      const box = {
+        x: Math.max(0, Math.trunc(Number(req.query.x)) || 0),
+        y: Math.max(0, Math.trunc(Number(req.query.y)) || 0),
+        width: Math.max(1, Math.trunc(Number(req.query.w)) || 1),
+        height: Math.max(1, Math.trunc(Number(req.query.h)) || 1),
+      };
+      const src = `/board/${encodeURIComponent(resolved.session.key)}/item/${encodeURIComponent(item.id)}/index.html?device=${device}`;
+      res.setHeader("cache-control", "no-store");
+      res.type("html").send(cropFrameHtml({ src, deviceWidth: size.width, deviceHeight: size.height, box }));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // Pictures are taken one at a time: each is a short-lived headless Chrome.
+  let cropQueue = Promise.resolve();
+  app.post("/api/boards/:key/crop", async (req, res, next) => {
+    try {
+      if (!boardWriteGuard(req, res)) return;
+      const resolved = await boardForRequest(req.params.key);
+      const item = resolved?.board.items.find((entry) => entry.id === String(req.body?.item || ""));
+      if (!resolved || !item) {
+        res.status(404).json({ status: "error", error: "item not found" });
+        return;
+      }
+      const device = boardDeviceOf(req.body?.device);
+      const size = BOARD_DEVICE_SIZES[device];
+      const box = cropBox(req.body?.box, size.width);
+      if (!box) {
+        res.status(400).json({ status: "error", error: "a crop needs the pinned element's box" });
+        return;
+      }
+      const chrome = findChrome();
+      if (!chrome) {
+        res.json({ status: "unavailable" });
+        return;
+      }
+      const query = new URLSearchParams({
+        item: item.id,
+        device,
+        x: String(box.x),
+        y: String(box.y),
+        w: String(box.width),
+        h: String(box.height),
+      });
+      const url = `http://127.0.0.1:${req.socket.localPort}/board/${encodeURIComponent(resolved.session.key)}/crop-frame?${query}`;
+      const capture = cropQueue.then(() => captureCrop({ chrome, url, width: box.width, height: box.height }));
+      cropQueue = capture.then(
+        () => {},
+        () => {},
+      );
+      const png = await capture;
+      if (!png) {
+        res.json({ status: "failed" });
+        return;
+      }
+      const attachment = await store.runExclusive(async () => {
+        const referenced = await store.referencedAttachmentIds();
+        return writeAttachment(attachmentStateRoot, resolved.session.key, png, {
+          maxBytes: attachmentConfig.maxBytes,
+          maxDiskBytes: attachmentConfig.maxDiskBytes,
+          maxObjects: attachmentConfig.maxObjects,
+          ttlMs: attachmentConfig.ttlMs,
+          referenced,
+          evictionGraceMs: attachmentConfig.evictionGraceMs,
+        });
+      });
+      res.json({ status: "stored", attachment });
     } catch (error) {
       next(error);
     }

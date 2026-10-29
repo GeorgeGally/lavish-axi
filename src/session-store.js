@@ -888,18 +888,32 @@ function normalizeBoardItemRef(value) {
 
 /**
  * @param {unknown} value
- * @returns {{ id?: string, number: number } | null}
+ * @returns {{ id?: string, number: number, viewport?: number, excerpt?: string, heading?: string } | null}
  */
 function normalizeBoardPinRef(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-  const entry = /** @type {{ id?: unknown, number?: unknown, viewport?: unknown }} */ (value);
+  const entry =
+    /** @type {{ id?: unknown, number?: unknown, viewport?: unknown, excerpt?: unknown, heading?: unknown }} */ (value);
   const number = Math.trunc(Number(entry.number));
   if (!Number.isFinite(number) || number < 1) return null;
   const id = String(entry.id || "")
     .trim()
     .slice(0, 60);
   const viewport = Math.trunc(Number(entry.viewport));
+  /** @type {{ viewport?: number, excerpt?: string, heading?: string }} */
   const reference = Number.isFinite(viewport) && viewport > 0 ? { viewport } : {};
+  // The pinned element's visible text and its section heading, so the agent can find
+  // the spot without decoding the selector.
+  const excerpt = String(entry.excerpt || "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 120);
+  if (excerpt) reference.excerpt = excerpt;
+  const heading = String(entry.heading || "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 120);
+  if (heading) reference.heading = heading;
   return id ? { id, number, ...reference } : { number, ...reference };
 }
 
