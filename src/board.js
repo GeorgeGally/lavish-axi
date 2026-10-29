@@ -18,7 +18,7 @@ const MAX_TUNE_CONTROLS = 24;
  * markup or a copy of an item's content.
  */
 /** @typedef {{ id: string, label: string }} BoardTab */
-/** @typedef {{ id: string, number: number, label: string, selector: string, tag: string, text: string, x: number, y: number, prompt_id?: string, at?: string }} BoardNote */
+/** @typedef {{ id: string, number: number, label: string, selector: string, tag: string, text: string, x: number, y: number, prompt_id?: string, at?: string, device?: string }} BoardNote */
 /** @typedef {{ id: string, label: string, type: "number" | "color" | "select", css: string, min?: number, max?: number, step?: number, unit?: string, options?: Array<{ value: string, label: string }>, value: string }} TuneControl */
 /** @typedef {{ id: string, label: string, values: Record<string, string>, at: string }} TuneVersion */
 /**
@@ -183,8 +183,8 @@ function normalizeItems(value, tabIds, fallbackTab) {
       tab,
       x: number(entry.x, 0, -100_000, 100_000),
       y: number(entry.y, 0, -100_000, 100_000),
-      w: number(entry.w, 420, 160, 4000),
-      h: number(entry.h, 320, 120, 4000),
+      w: number(entry.w, 1440, 160, 4000),
+      h: number(entry.h, 900, 120, 4000),
       status: text(entry.status, 40) || "open",
       notes: normalizeNotes(entry.notes),
       tune: normalizeTuneValues(entry.tune),
@@ -215,6 +215,8 @@ function normalizeNotes(value) {
       x: number(entry.x, 0, -100_000, 100_000),
       y: number(entry.y, 0, -100_000, 100_000),
     };
+    const device = text(entry.device, 20);
+    if (device) note.device = device;
     const promptId = text(entry.prompt_id, 80);
     if (promptId) note.prompt_id = promptId;
     const at = text(entry.at, 40);
@@ -284,8 +286,8 @@ export function addItem(board, { file, label, tab, w, h }) {
   if (!relativeFile) throw new BoardError("An item needs an HTML file");
   const id = uniqueId(board, slug(path.basename(relativeFile, path.extname(relativeFile)), "item"));
   const tabId = board.tabs.some((entry) => entry.id === tab) ? String(tab) : board.tabs[0].id;
-  const width = number(w, 420, 160, 4000);
-  const height = number(h, 320, 120, 4000);
+  const width = number(w, 1440, 160, 4000);
+  const height = number(h, 900, 120, 4000);
   const slot = nextSlot(board, tabId);
   const item = {
     id,

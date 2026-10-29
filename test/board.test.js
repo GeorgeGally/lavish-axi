@@ -55,6 +55,26 @@ test("normalizeBoard drops an item whose file escapes the board directory", () =
   );
 });
 
+test("normalizeBoard keeps the device a note was made on", () => {
+  const board = normalizeBoard(
+    {
+      items: [
+        {
+          id: "v1",
+          file: "v1.html",
+          notes: [
+            { id: "n1", number: 1, selector: "h1", tag: "h1", text: "t", x: 1, y: 2, device: "phone" },
+            { id: "n2", number: 2, selector: "p", tag: "p", text: "u", x: 3, y: 4 },
+          ],
+        },
+      ],
+    },
+    "b",
+  );
+  assert.equal(board.items[0].notes[0].device, "phone");
+  assert.equal(board.items[0].notes[1].device, undefined);
+});
+
 test("normalizeBoard keeps items on a known tab and clamps geometry", () => {
   const board = normalizeBoard(
     {
@@ -71,6 +91,7 @@ test("normalizeBoard keeps items on a known tab and clamps geometry", () => {
 test("addItem places new variants in a free slot below the tab", () => {
   const board = normalizeBoard({}, "b");
   const first = addItem(board, { file: "a.html", label: "A" });
+  assert.equal(first.w, 1440);
   const second = addItem(board, { file: "a.html", label: "B" });
   assert.equal(first.id, "a");
   assert.equal(second.id, "a-2");

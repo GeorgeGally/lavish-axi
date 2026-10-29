@@ -137,7 +137,8 @@ pnpm link
 ## Board mode
 
 A board is a folder your agent fills, not a design tool: `board.json` plus one HTML file per item.
-Every item of the active tab renders as its own sandboxed frame on one pannable, zoomable plane, and the camera is remembered per tab in the browser.
+Every item renders as a row of three whole-page artboards - desktop 1440, iPad 834, phone 390 - at those real viewport widths and scaled together, so a desktop page looks like a desktop page in miniature rather than a phone-width reflow.
+The top-bar device switch (All / Desktop / iPad / Phone) narrows the row, each artboard's title bar names its width, and the board opens at fit so the whole pages are visible at once. Double-click an artboard's title bar to see it at full width.
 
 ```sh
 easel board open hero-directions --name "Hero directions"
@@ -174,8 +175,8 @@ easel poll hero-directions                 # the agent waits here
 }
 ```
 
-Clicking an element on an item drops a numbered pin on it and puts the selection in the composer as a chip; several chips then go to the agent in one send.
-Each note reaches the agent with the item and pin it belongs to, and the pin turns green once the agent has replied.
+With **Annotate** on (`A`), hovering an artboard outlines the element under the cursor and clicking drops a numbered pin with its note field right there; the composer lists the notes as chips, and several go to the agent in one send.
+With Annotate off, clicks pass through to the page as normal. Each note reaches the agent with the item, the pin, and the viewport width it was made at, and the pin turns green once the agent has replied.
 
 ### Tuning
 
@@ -192,7 +193,7 @@ An item declares its own controls in a `application/easel-tune` JSON array, bind
 ```
 
 The tune panel writes those properties live, saves named versions with thumbnails, and **Copy for agent** produces the values plus the instruction that bakes them into the item's file.
-An item with no declaration gets no panel.
+Every item has a tune button. When it declares no controls, the panel is built from the page's own CSS custom properties: colours become swatches and pickers, lengths, radii, spacing and font sizes become sliders, grouped and labelled from the property names.
 
 ## How It Works
 

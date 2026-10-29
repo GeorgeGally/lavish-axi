@@ -1,4 +1,4 @@
-/* global CSS, Element, HTMLElement, ResizeObserver, document, parent, window */
+/* global CSS, Element, HTMLElement, ResizeObserver, document, getComputedStyle, parent, window */
 // The board item SDK. It is deliberately small: the board owns the notes, the pins and
 // the composer, so an item only reports a clicked element, draws the pins it is told
 // about, and applies tune values as CSS custom properties.
@@ -7,8 +7,9 @@
   const script = document.currentScript;
   const url = new URL(script ? script.src : window.location.href);
   const itemId = url.searchParams.get("item") || "";
+  const deviceId = url.searchParams.get("device") || "desktop";
   const channel = "easel";
-  const state = { pins: [], tuning: {} };
+  const state = { pins: [], tuning: {}, annotate: false };
 
   function parentWindow() {
     return parent && parent !== window ? parent : null;
@@ -19,7 +20,7 @@
     const target = parentWindow();
     if (!target) return;
     try {
-      target.postMessage({ channel, item: itemId, ...message }, "*");
+      target.postMessage({ channel, item: itemId, device: deviceId, ...message }, "*");
     } catch {
       // A parent that went away is not an item failure.
     }
@@ -181,36 +182,186 @@
     }, 900);
   }
 
+  function hoverLayer() {
+    let layer = document.getElementById("easel-hover");
+    if (layer) return layer;
+    layer = document.createElement("div");
+    layer.id = "easel-hover";
+    layer.setAttribute("data-easel-ui", "hover");
+    layer.style.cssText = [
+      "position:absolute",
+      "pointer-events:none",
+      "border:1.5px solid rgba(244,201,93,.9)",
+      "border-radius:3px",
+      "background:rgba(244,201,93,.08)",
+      "z-index:2147482900",
+      "display:none",
+    ].join(";");
+    document.body.appendChild(layer);
+    return layer;
+  }
+
+  let hoverTarget = null;
+  function drawHover(target) {
+    const layer = hoverLayer();
+    if (!target) {
+      layer.style.display = "none";
+      hoverTarget = null;
+      return;
+    }
+    if (hoverTarget === target && layer.style.display === "block") return;
+    hoverTarget = target;
+    const rect = target.getBoundingClientRect();
+    layer.style.display = "block";
+    layer.style.left = `${rect.left + window.scrollX}px`;
+    layer.style.top = `${rect.top + window.scrollY}px`;
+    layer.style.width = `${rect.width}px`;
+    layer.style.height = `${rect.height}px`;
+  }
+
+  function setAnnotate(value) {
+    state.annotate = value;
+    document.documentElement.style.cursor = value ? "crosshair" : "";
+    if (!value) drawHover(null);
+  }
+
+  function plainLabel(name) {
+    const text = String(name).replace(/^--/, "").replace(/[-_]+/g, " ").trim();
+    return text.charAt(0).toUpperCase() + text.slice(1);
+  }
+
+  function groupLabel(name) {
+    const parts = String(name).replace(/^--/, "").split(/[-_]/);
+    if (parts.length < 2) return "Page";
+    return parts[0].charAt(0).toUpperCase() + parts[0].slice(1);
+  }
+
+  function isColor(value) {
+    return (
+      /^(#[0-9a-f]{3,8}|rgba?\(|hsla?\(|color\()/i.test(value) ||
+      /^(white|black|red|green|blue|gray|grey)$/i.test(value)
+    );
+  }
+
+  // With no declaration from the page, the panel is built from the CSS custom
+  // properties the page actually uses, so every variant is tunable.
+  function collectTuneControls() {
+    const names = new Set();
+    const walk = (rules) => {
+      for (const rule of rules) {
+        if (rule.cssRules) walk(rule.cssRules);
+        const style = rule.style;
+        if (!style) continue;
+        for (const property of Array.from(style)) {
+          if (property.startsWith("--")) names.add(property);
+          const value = style.getPropertyValue(property);
+          for (const match of value.matchAll(/var\(\s*(--[\w-]+)/g)) names.add(match[1]);
+        }
+      }
+    };
+    try {
+      for (const sheet of Array.from(document.styleSheets)) {
+        if (sheet.cssRules) walk(sheet.cssRules);
+      }
+    } catch {
+      // Cross-origin sheets are not readable; the page's own sheet is.
+    }
+    const root = getComputedStyle(document.documentElement);
+    const controls = [];
+    for (const name of names) {
+      const value = root.getPropertyValue(name).trim();
+      if (!value) continue;
+      const control = { id: name.slice(2), css: name, label: plainLabel(name), group: groupLabel(name) };
+      if (isColor(value)) {
+        controls.push({ ...control, type: "color", value });
+        continue;
+      }
+      const px = /^(-?\d*\.?\d+)px$/.exec(value);
+      const unitless = /^-?\d*\.?\d+$/.exec(value);
+      if (px) {
+        const size = Number(px[1]);
+        controls.push({
+          ...control,
+          type: "number",
+          unit: "px",
+          value: String(size),
+          min: Math.min(0, Math.floor(size / 2)),
+          max: Math.max(64, Math.ceil(Math.abs(size) * 3)),
+          step: 1,
+        });
+        continue;
+      }
+      if (unitless) {
+        const size = Number(value);
+        controls.push({
+          ...control,
+          type: "number",
+          value: String(size),
+          min: Math.min(0, Math.floor(size / 2)),
+          max: Math.max(2, Number((Math.abs(size) * 3).toFixed(2))),
+          step: 0.1,
+        });
+        continue;
+      }
+      const rem = /^(-?\d*\.?\d+)(rem|em)$/.exec(value);
+      if (rem) {
+        const size = Number(rem[1]);
+        controls.push({
+          ...control,
+          type: "number",
+          unit: rem[2],
+          value: String(size),
+          min: 0,
+          max: Math.max(4, Math.ceil(size * 3)),
+          step: 0.1,
+        });
+      }
+    }
+    controls.sort((left, right) => {
+      if (left.group !== right.group) return left.group.localeCompare(right.group);
+      return left.css.localeCompare(right.css);
+    });
+    return controls.slice(0, 18);
+  }
+
   function applyTune(values) {
     if (!values || typeof values !== "object") return;
     state.tuning = values;
     for (const [property, value] of Object.entries(values)) {
       if (!property.startsWith("--")) continue;
-      document.documentElement.style.setProperty(property, String(value));
+      // A tuned `vh` would re-open the loop the layout pinning closed: the taller
+      // frame makes the value bigger, which makes the page taller again. Express it
+      // against the viewport height the page opened at instead.
+      const relative = /^(-?\d*\.?\d+)(dvh|svh|vh)$/.exec(String(value).trim());
+      const next = relative && pinnedVh ? `${((Number(relative[1]) * pinnedVh) / 100).toFixed(2)}px` : String(value);
+      document.documentElement.style.setProperty(property, next);
     }
   }
 
-  /** @param {EventTarget | null} target */
-  function isEditable(target) {
-    if (!(target instanceof Element)) return false;
-    return Boolean(
-      target.closest(
-        "a, button, input, select, textarea, label, summary, [contenteditable=true], [data-easel-action], [data-easel-ui]",
-      ),
-    );
-  }
+  document.addEventListener(
+    "mousemove",
+    (event) => {
+      if (!state.annotate) return;
+      if (!(event.target instanceof Element)) return;
+      drawHover(event.target.closest("[data-easel-ui]") ? null : event.target);
+    },
+    true,
+  );
 
   document.addEventListener(
     "click",
     (event) => {
+      if (!state.annotate) return;
       if (!(event.target instanceof Element)) return;
-      if (isEditable(event.target) || event.altKey || event.metaKey || event.ctrlKey) return;
       const element = event.target;
+      if (element.closest("[data-easel-ui]")) return;
       if (element === document.body || element === document.documentElement) return;
       const selected = window.getSelection();
       if (selected && String(selected).trim().length > 0) return;
       const selector = selectorFor(element);
       if (!selector) return;
+      event.preventDefault();
+      event.stopPropagation();
       post({
         type: "select",
         selector,
@@ -242,6 +393,13 @@
         applyTune(data.values);
         return;
       }
+      if (data.type === "tune-spec") {
+        post({ type: "tune-spec", controls: collectTuneControls() });
+        return;
+      }
+      if (data.type === "mode") {
+        setAnnotate(Boolean(data.annotate));
+      }
     },
     false,
   );
@@ -270,9 +428,11 @@
   // taller again. Pinning viewport units to the height the item opened at keeps the
   // design exactly as it renders at its normal size, and the frame can then grow to
   // the full document height without the page reflowing.
+  let pinnedVh = 0;
   function pinViewportUnits() {
     const viewport = Math.round(window.innerHeight);
     if (!viewport) return;
+    pinnedVh = viewport;
     const replace = (value) =>
       value.replace(/(\d*\.?\d+)(dvh|svh|lvh|vh)\b/g, (_match, amount, unit) => {
         if (unit !== "vh") return `${amount}${unit}`;

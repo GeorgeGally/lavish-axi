@@ -892,13 +892,15 @@ function normalizeBoardItemRef(value) {
  */
 function normalizeBoardPinRef(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-  const entry = /** @type {{ id?: unknown, number?: unknown }} */ (value);
+  const entry = /** @type {{ id?: unknown, number?: unknown, viewport?: unknown }} */ (value);
   const number = Math.trunc(Number(entry.number));
   if (!Number.isFinite(number) || number < 1) return null;
   const id = String(entry.id || "")
     .trim()
     .slice(0, 60);
-  return id ? { id, number } : { number };
+  const viewport = Math.trunc(Number(entry.viewport));
+  const reference = Number.isFinite(viewport) && viewport > 0 ? { viewport } : {};
+  return id ? { id, number, ...reference } : { number, ...reference };
 }
 
 // Settlement identity is transcript-owned. The agent-facing prompt list must not carry it:

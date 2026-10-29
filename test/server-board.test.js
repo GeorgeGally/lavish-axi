@@ -104,7 +104,7 @@ test("a board item is served with its own SDK and its sibling assets", async (t)
   const item = await fetch(`${base}/board/${registered.key}/item/v1/index.html`);
   assert.equal(item.status, 200);
   const html = await item.text();
-  assert.match(html, /<script src="\/board-sdk\.js\?key=[0-9a-f]+&item=v1"><\/script><\/body>/);
+  assert.match(html, /<script src="\/board-sdk\.js\?key=[0-9a-f]+&item=v1&device=desktop"><\/script><\/body>/);
   assert.match(html, /The whole fleet/);
   assert.doesNotMatch(html, /\/sdk\.js/);
 
@@ -252,7 +252,7 @@ test("a pin prompt keeps the item and pin it belongs to, and earns its receipts"
           text: "The whole fleet",
           tag: "pin",
           item: { id: "v1", label: "Hero · A" },
-          pin: { id: "n1", number: 3 },
+          pin: { id: "n1", number: 3, viewport: 834 },
         },
       ],
       domSnapshot: "",
@@ -266,7 +266,7 @@ test("a pin prompt keeps the item and pin it belongs to, and earns its receipts"
   assert.equal(polled.status, "feedback");
   assert.equal(polled.prompts.length, 1);
   assert.deepEqual(polled.prompts[0].item, { id: "v1", label: "Hero · A" });
-  assert.deepEqual(polled.prompts[0].pin, { id: "n1", number: 3 });
+  assert.deepEqual(polled.prompts[0].pin, { id: "n1", number: 3, viewport: 834 });
   assert.equal(polled.prompts[0].prompt_id, undefined);
 
   const seen = await fetch(`${base}/api/boards/${registered.key}`).then((response) => response.json());

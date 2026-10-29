@@ -49,6 +49,8 @@ export function createBoardHtml(session, board, { tuneSpecs = {}, chat = [], end
   <div class="board-name" id="boardName">${escapeHtml(board.name)}</div>
   <nav class="tabs" id="tabs" role="tablist" aria-label="Board tabs"></nav>
   <div class="bar-spacer"></div>
+  <button class="annotate" id="annotate" type="button" aria-pressed="false" title="Annotate (A)">Annotate</button>
+  <div class="devices" id="devices" role="group" aria-label="Device width"></div>
   <div class="presence" id="presence" data-state="waiting" role="status" aria-live="polite"></div>
   <div class="zoom">
     <button id="zoomOut" type="button" title="Zoom out (-)" aria-label="Zoom out">&minus;</button>

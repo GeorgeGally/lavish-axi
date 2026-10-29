@@ -1148,7 +1148,10 @@ export async function serve({
         res.status(404).type("text").send("Item not found");
         return;
       }
-      const src = `/board-sdk.js?key=${encodeURIComponent(resolved.session.key)}&item=${encodeURIComponent(item.id)}`;
+      const device = ["desktop", "ipad", "phone"].includes(String(req.query.device || ""))
+        ? String(req.query.device)
+        : "desktop";
+      const src = `/board-sdk.js?key=${encodeURIComponent(resolved.session.key)}&item=${encodeURIComponent(item.id)}&device=${device}`;
       res.setHeader("content-security-policy", ARTIFACT_CONTENT_SECURITY_POLICY);
       res.setHeader("cache-control", "no-store");
       res.type("html").send(injectBoardSdk(await readFile(file, "utf8"), src));
