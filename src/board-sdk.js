@@ -249,6 +249,58 @@
   for (const type of ["scroll", "resize"])
     window.addEventListener(type, schedulePins, { capture: true, passive: true });
 
+  let reportedHeight = 0;
+  function reportSize() {
+    const height = Math.round(
+      Math.max(document.body ? document.body.scrollHeight : 0, document.documentElement.scrollHeight),
+    );
+    if (height === reportedHeight) return;
+    reportedHeight = height;
+    post({ type: "size", height, width: document.documentElement.scrollWidth });
+  }
+
+  let sizeTimer = 0;
+  function scheduleSize() {
+    window.clearTimeout(sizeTimer);
+    sizeTimer = window.setTimeout(reportSize, 180);
+  }
+
+  // A page that sizes a band with `100vh` re-lays itself out when the review frame
+  // grows, so "full height" could never settle: the taller viewport makes the page
+  // taller again. Pinning viewport units to the height the item opened at keeps the
+  // design exactly as it renders at its normal size, and the frame can then grow to
+  // the full document height without the page reflowing.
+  function pinViewportUnits() {
+    const viewport = Math.round(window.innerHeight);
+    if (!viewport) return;
+    const replace = (value) =>
+      value.replace(/(\d*\.?\d+)(dvh|svh|lvh|vh)\b/g, (_match, amount, unit) => {
+        if (unit !== "vh") return `${amount}${unit}`;
+        return `${((Number(amount) * viewport) / 100).toFixed(2)}px`;
+      });
+    const walk = (rules) => {
+      for (const rule of rules) {
+        if (rule.cssRules) walk(rule.cssRules);
+        const style = rule.style;
+        if (!style) continue;
+        for (const property of Array.from(style)) {
+          const value = style.getPropertyValue(property);
+          if (!/\d(dvh|svh|lvh|vh)\b/.test(value)) continue;
+          const next = replace(value);
+          if (next !== value) style.setProperty(property, next);
+        }
+      }
+    };
+    try {
+      for (const sheet of Array.from(document.styleSheets)) {
+        if (!sheet.cssRules) continue;
+        walk(sheet.cssRules);
+      }
+    } catch {
+      // A stylesheet that cannot be read is left alone; the page still renders.
+    }
+  }
+
   function auditLayout() {
     const root = document.documentElement;
     const overflow = root.scrollWidth > root.clientWidth + 2;
@@ -266,15 +318,34 @@
     auditTimer = window.setTimeout(auditLayout, 400);
   }
 
+  pinViewportUnits();
   if (document.readyState === "complete") {
     auditLayout();
+    reportSize();
   } else {
-    window.addEventListener("load", () => window.setTimeout(auditLayout, 120));
+    window.addEventListener("load", () => {
+      window.setTimeout(auditLayout, 120);
+      reportSize();
+      window.setTimeout(reportSize, 600);
+    });
   }
+  // A page can finish laying out long after load (fonts, images, charts). Report the
+  // height a few more times while that settles, then only on real resizes.
+  let settleChecks = 0;
+  const settle = window.setInterval(() => {
+    settleChecks += 1;
+    reportSize();
+    if (settleChecks >= 15) window.clearInterval(settle);
+  }, 1000);
   window.addEventListener("resize", scheduleAudit, { passive: true });
+  window.addEventListener("resize", scheduleSize, { passive: true });
   if (typeof ResizeObserver === "function") {
     const observer = new ResizeObserver(scheduleAudit);
     observer.observe(document.documentElement);
+    if (document.body) {
+      const sizeObserver = new ResizeObserver(scheduleSize);
+      sizeObserver.observe(document.body);
+    }
   }
 
   post({ type: "ready", title: document.title, height: document.documentElement.scrollHeight });

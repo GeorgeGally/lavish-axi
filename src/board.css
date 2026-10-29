@@ -309,6 +309,40 @@ button:disabled {
   opacity: 1;
 }
 
+.full-toggle {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.02em;
+  color: var(--fg-label);
+  padding: 3px 7px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  opacity: 0;
+  transition:
+    opacity 120ms ease,
+    color 120ms ease,
+    border-color 120ms ease;
+}
+
+.item:hover .full-toggle {
+  opacity: 1;
+}
+
+.full-toggle:hover {
+  color: var(--cream-50);
+  border-color: var(--border-strong);
+}
+
+.full-toggle[aria-pressed="true"] {
+  opacity: 1;
+  color: var(--accent);
+  border-color: rgba(244, 201, 93, 0.5);
+}
+
+.item[data-full="true"] .item-resize {
+  display: none;
+}
+
 .pair-badge {
   font-family: var(--font-mono);
   font-size: 10px;
@@ -328,6 +362,7 @@ button:disabled {
   height: 100%;
   border: 0;
   background: #fff;
+  overscroll-behavior: contain;
 }
 
 .item-resize {

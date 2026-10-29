@@ -17,7 +17,28 @@ const state = {
   entries: new Map(),
   mounted: new Set(),
   overflow: new Set(),
+  full: new Set(loadFullItems()),
 };
+
+const fullStorageKey = `easel:full:${key}`;
+const MAX_FULL_HEIGHT = 12000;
+
+function loadFullItems() {
+  try {
+    const stored = JSON.parse(localStorage.getItem(fullStorageKey) || "[]");
+    return Array.isArray(stored) ? stored.map(String) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveFullItems() {
+  try {
+    localStorage.setItem(fullStorageKey, JSON.stringify([...state.full]));
+  } catch {
+    // A browser that refuses storage still keeps the toggle for this session.
+  }
+}
 
 const plane = document.getElementById("plane");
 const canvas = document.getElementById("canvas");
@@ -106,7 +127,7 @@ function boundsOf(items) {
   const left = Math.min(...items.map((item) => item.x));
   const top = Math.min(...items.map((item) => item.y));
   const right = Math.max(...items.map((item) => item.x + item.w));
-  const bottom = Math.max(...items.map((item) => item.y + item.h));
+  const bottom = Math.max(...items.map((item) => item.y + itemHeight(item)));
   return { left, top, width: right - left, height: bottom - top };
 }
 
@@ -193,6 +214,17 @@ function pairFor(id) {
   return state.pairs.find((pair) => pair.locked && (pair.a === id || pair.b === id)) || null;
 }
 
+function toggleFullHeight(id) {
+  const record = state.entries.get(id);
+  const item = itemById(id);
+  if (!record || !item) return;
+  if (state.full.has(id)) state.full.delete(id);
+  else state.full.add(id);
+  saveFullItems();
+  refreshItemChrome(id);
+  positionItem(record.element, item);
+}
+
 /** @param {any} item */
 function createItem(item) {
   const article = element("article", { class: "item", "data-id": item.id, "data-active": "true" });
@@ -200,7 +232,14 @@ function createItem(item) {
   const dot = element("span", { class: "dot", "aria-hidden": "true" });
   const label = element("span", { class: "item-label", text: item.label });
   const meta = element("span", { class: "item-meta", text: `${item.w}×${item.h}` });
+  const fullToggle = element("button", { class: "full-toggle", type: "button", text: "full height" });
+  fullToggle.setAttribute("aria-pressed", String(state.full.has(item.id)));
+  fullToggle.addEventListener("click", (event) => {
+    event.stopPropagation();
+    toggleFullHeight(item.id);
+  });
   bar.append(dot, label, meta);
+  bar.append(fullToggle);
   const pair = pairFor(item.id);
   if (pair) bar.append(element("span", { class: "pair-badge", text: "locked pair" }));
   if (Array.isArray(item.tuneSpec) && item.tuneSpec.length > 0) {
@@ -230,11 +269,18 @@ function createItem(item) {
   return { element: article, iframe, bar, label, meta };
 }
 
+function itemHeight(item) {
+  const record = state.entries.get(item.id);
+  if (!state.full.has(item.id) || !record || !record.pageHeight) return item.h;
+  return Math.min(MAX_FULL_HEIGHT, Math.max(item.h, record.pageHeight + 30));
+}
+
 function positionItem(article, item) {
   article.style.left = `${item.x}px`;
   article.style.top = `${item.y}px`;
   article.style.width = `${item.w}px`;
-  article.style.height = `${item.h}px`;
+  article.style.height = `${itemHeight(item)}px`;
+  article.dataset.full = String(state.full.has(item.id));
 }
 
 function refreshItemChrome(id) {
@@ -243,7 +289,15 @@ function refreshItemChrome(id) {
   if (!item || !entry) return;
   positionItem(entry.element, item);
   entry.label.textContent = item.label;
-  entry.meta.textContent = item.w + "×" + item.h + (state.overflow.has(id) ? " · overflows" : "");
+  const record = state.entries.get(id);
+  const pageHeight = record?.pageHeight ? ` · page ${record.pageHeight}` : "";
+  entry.meta.textContent = item.w + "×" + item.h + pageHeight + (state.overflow.has(id) ? " · overflows" : "");
+  entry.element.dataset.full = String(state.full.has(id));
+  const toggle = entry.element.querySelector(".full-toggle");
+  if (toggle) {
+    toggle.setAttribute("aria-pressed", String(state.full.has(id)));
+    toggle.textContent = state.full.has(id) ? "fit height" : "full height";
+  }
   entry.element.dataset.pair = String(Boolean(pairFor(id)));
   entry.element.dataset.state = itemState(item);
 }
@@ -392,6 +446,7 @@ function bindDrag(article, handle, id) {
 function bindResize(handle, id) {
   handle.addEventListener("pointerdown", (event) => {
     if (event.button !== 0) return;
+    if (state.full.has(id)) return;
     event.preventDefault();
     event.stopPropagation();
     const item = itemById(id);
@@ -640,6 +695,13 @@ function onItemMessage(event) {
     if (item && !state.ended) addNote(item, data);
   }
   if (data.type === "pin") focusNote(String(data.id || ""));
+  if (data.type === "size") {
+    const height = Math.max(0, Math.round(Number(data.height) || 0));
+    if (height > 0) {
+      entry.pageHeight = height;
+      refreshItemChrome(id);
+    }
+  }
   if (data.type === "layout") {
     if (data.overflow) state.overflow.add(id);
     else state.overflow.delete(id);
