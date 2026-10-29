@@ -404,13 +404,11 @@
         }
         const onPin = pinAt(x, y);
         const target = document.elementFromPoint(x, y);
+        // Empty page background still takes a note: it is about that part of the page.
         const usable =
-          target instanceof Element &&
-          !target.closest("[data-easel-ui]") &&
-          target !== document.body &&
-          target !== document.documentElement;
+          target instanceof Element && !target.closest("[data-easel-ui]") && target !== document.documentElement;
         if (data.hover) {
-          drawHover(!onPin && usable ? target : null);
+          drawHover(!onPin && usable && target !== document.body ? target : null);
           return;
         }
         if (onPin) {

@@ -1422,9 +1422,15 @@ function renderDrafts() {
         if (event.target instanceof Element && event.target.closest("button")) return;
         focusPin(item, note);
       });
-      const input = element("textarea", { class: "draft-input", rows: "2" });
+      const input = element("textarea", { class: "draft-input", rows: "1" });
       input.value = note.text || "";
+      const fitHeight = () => {
+        input.style.height = "auto";
+        input.style.height = `${input.scrollHeight + 2}px`;
+      };
+      window.requestAnimationFrame(fitHeight);
       input.addEventListener("input", () => {
+        fitHeight();
         note.text = input.value;
         persistNotes(item.id);
         updateSendButton();

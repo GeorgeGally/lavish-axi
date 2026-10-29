@@ -520,6 +520,24 @@ body[data-pan="true"] .shield {
   border-color: var(--ink-3);
 }
 
+/* A queued draft reads as text until it is touched. */
+.draft-input {
+  min-height: 0;
+  padding: 6px 8px;
+  margin: 0 -8px;
+  width: calc(100% + 16px);
+  border-color: transparent;
+  background: transparent;
+}
+
+.draft-input:hover {
+  border-color: var(--line);
+}
+
+.draft-input:focus {
+  background: var(--surface-strong);
+}
+
 .note-input {
   min-height: 84px;
 }
@@ -945,4 +963,16 @@ body[data-panel="closed"] .tune {
   .note-pop {
     width: calc(100vw - 32px);
   }
+}
+
+.entry-text > :first-child {
+  margin-top: 0;
+}
+
+.entry-text > :last-child {
+  margin-bottom: 0;
+}
+
+.entry-text p {
+  margin: 0 0 0.5em;
 }

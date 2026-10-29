@@ -57,7 +57,17 @@ test("normalizeBoard drops an item whose file escapes the board directory", () =
 
 test("normalizeBoard keeps where inside its element a note was dropped", () => {
   const board = normalizeBoard(
-    { items: [{ file: "a.html", notes: [{ id: "n1", number: 1, selector: "h1", ox: 12.4, oy: 7, x: 40, y: 50 }, { id: "n2", number: 2 }] }] },
+    {
+      items: [
+        {
+          file: "a.html",
+          notes: [
+            { id: "n1", number: 1, selector: "h1", ox: 12.4, oy: 7, x: 40, y: 50 },
+            { id: "n2", number: 2 },
+          ],
+        },
+      ],
+    },
     "b",
   );
   assert.equal(board.items[0].notes[0].ox, 12);
