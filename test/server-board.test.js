@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -20,7 +20,7 @@ const ITEM_HTML = `<!doctype html>
 </script>
 </body></html>`;
 
-async function setup(t) {
+async function setup(t, { env = {} } = {}) {
   const dir = await mkdtemp(path.join(tmpdir(), "easel-board-server-"));
   const boardDirectory = path.join(dir, "hero");
   await mkdir(boardDirectory, { recursive: true });
@@ -34,6 +34,7 @@ async function setup(t) {
     version: "9.9.9-test",
     detectTailscale: async () => null,
     idleTimeoutMs: null,
+    ...(Object.keys(env).length > 0 ? { env: { ...process.env, ...env }, log: () => {} } : {}),
   });
   const base = `http://127.0.0.1:${server.port}`;
   t.after(async () => {
@@ -313,4 +314,52 @@ test("an unknown board key is not a board", async (t) => {
   assert.equal(missing.status, 404);
   const page = await fetch(`${base}/board/deadbeef`);
   assert.equal(page.status, 404);
+});
+
+test("a board submission runs EASEL_NOTIFY_CMD once and leaves the feedback for poll", async (t) => {
+  const scratch = await mkdtemp(path.join(tmpdir(), "easel-notify-"));
+  t.after(() => rm(scratch, { recursive: true, force: true }));
+  const out = path.join(scratch, "calls.txt");
+  const script = path.join(scratch, "notify.sh");
+  await writeFile(
+    script,
+    `#!/bin/sh\nprintf '%s|%s|%s|%s|%s\\n' "$1" "$2" "$3" "$EASEL_BOARD" "$EASEL_SUBMISSION_ID" >> '${out}'\n`,
+  );
+  await chmod(script, 0o755);
+  const { base, boardDirectory } = await setup(t, { env: { EASEL_NOTIFY_CMD: script } });
+  const registered = await register(base, boardDirectory);
+
+  for (const text of ["Tighten the headline", "Accepted: Hero - Proposed (all sizes)"]) {
+    const queued = await fetch(`${base}/api/${registered.key}/prompts`, {
+      method: "POST",
+      headers: write(base),
+      body: JSON.stringify({ prompts: [{ uid: text, prompt: text, tag: "message" }], domSnapshot: "" }),
+    });
+    assert.equal(queued.status, 200);
+  }
+  let calls = [];
+  for (let attempt = 0; attempt < 50 && calls.length < 2; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    calls = (await readFile(out, "utf8").catch(() => ""))
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => line.split("|"));
+  }
+  assert.equal(calls.length, 2, "one run per submission");
+  const boardJson = boardFilePath(boardDirectory);
+  for (const [name, file, id, envBoard, envId] of calls) {
+    assert.equal(name, registered.board.name);
+    assert.equal(path.basename(file), "board.json");
+    assert.equal(await readFile(file, "utf8"), await readFile(boardJson, "utf8"));
+    assert.match(id, /^[0-9a-z]+-[0-9a-f]{8}$/);
+    assert.equal(envBoard, name);
+    assert.equal(envId, id);
+  }
+  assert.notEqual(calls[0][2], calls[1][2]);
+
+  const polled = await fetch(`${base}/api/poll?file=${encodeURIComponent(boardJson)}&timeoutMs=2000`).then((response) =>
+    response.json(),
+  );
+  assert.equal(polled.status, "feedback");
+  assert.equal(polled.prompts.length, 2);
 });

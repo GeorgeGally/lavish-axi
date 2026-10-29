@@ -77,6 +77,7 @@ import {
 } from "./board.js";
 import { createBoardHtml } from "./board-page.js";
 import { captureCrop, cropBox, cropFrameHtml, findChrome } from "./board-crop.js";
+import { newSubmissionId, runNotifyCommand } from "./board-notify.js";
 import {
   bindHost,
   extraAllowedHosts,
@@ -1592,6 +1593,27 @@ export async function serve({
   // reaches the agent as the user's own instructions. The session key is derived
   // from the artifact path, not a secret, so knowing it must not be enough -
   // only this server's own chrome may queue prompts.
+  // A board submission (a note sent, the queue flushed, Accept / Keep today) runs the
+  // operator's EASEL_NOTIFY_CMD once, after the batch is queued, without waiting on it.
+  function notifyBoardSubmission(key, session) {
+    const command = productEnv("NOTIFY_CMD", env);
+    if (!command || path.basename(String(session?.file || "")) !== BOARD_FILE_NAME) return;
+    boardForRequest(key)
+      .then((resolved) => {
+        const submissionId = newSubmissionId();
+        const board = resolved?.board.name || path.basename(path.dirname(session.file));
+        writeLog(`[easel] board notify key=${key} submission=${submissionId}`);
+        runNotifyCommand({
+          command,
+          board,
+          boardJson: session.file,
+          submissionId,
+          log: (line) => writeLog(`[easel] ${line}`),
+        });
+      })
+      .catch((error) => writeLog(`[easel] board notify skipped key=${key}: ${error?.message || error}`));
+  }
+
   app.post("/api/:key/prompts", async (req, res, next) => {
     try {
       if (!isSameOriginRequest(req, allowedHostnames, allowAnyHostname)) {
@@ -1659,6 +1681,7 @@ export async function serve({
         pending_prompts: publishedSession.pending_prompts,
         ...serializeChatSync(publishedSession),
       });
+      if (freshFeedback || shouldEndSession) notifyBoardSubmission(req.params.key, publishedSession);
       if (shouldEndSession) await shutdownIfNoLiveSessions();
     } catch (error) {
       next(error);

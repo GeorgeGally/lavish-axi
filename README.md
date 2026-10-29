@@ -149,6 +149,8 @@ An agent that is about to make a new version can say so with `easel reply <board
 
 A pin note tells the agent what it points at: the element's visible text, the heading of its section, and a picture of that spot (the element plus a 40px margin, at the device's width) delivered as an image attachment path. The picture needs a local Chrome (found in the usual places, or set `EASEL_CHROME`); without one, notes go out without it.
 
+To hear about board feedback without keeping a poll open, start the server with `EASEL_NOTIFY_CMD` set to a command. Each submission on a board (a note sent, the queue sent, Accept or Keep today) runs it once, after the feedback is queued, with the board name, the `board.json` path and a submission id as its three arguments and as `EASEL_BOARD`, `EASEL_BOARD_JSON` and `EASEL_SUBMISSION_ID`. The board never waits for it, a failure only reaches `server.log`, and `easel poll` still collects the feedback.
+
 Moving around: two-finger scroll pans, pinch or Cmd+scroll zooms around the pointer, holding Space or Cmd turns the pointer into a hand that drags the board from anywhere, and double-clicking a design zooms to 100% there (again to fit). **Fit** (`0`) and **100%** (`1`) sit in the top bar.
 
 ```sh
