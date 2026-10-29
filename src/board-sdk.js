@@ -406,6 +406,18 @@
     false,
   );
 
+  // A pinch or Cmd+scroll that reaches the page itself zooms the board, never the
+  // browser window: the frame swallows the wheel, so hand it to the board.
+  window.addEventListener(
+    "wheel",
+    (event) => {
+      if (!event.ctrlKey && !event.metaKey) return;
+      event.preventDefault();
+      post({ type: "zoom-wheel", x: event.clientX, y: event.clientY, deltaY: event.deltaY, deltaMode: event.deltaMode });
+    },
+    { capture: true, passive: false },
+  );
+
   for (const type of ["scroll", "resize"])
     window.addEventListener(type, schedulePins, { capture: true, passive: true });
 

@@ -727,6 +727,18 @@ function bindPlane() {
   plane.addEventListener("pointerup", end);
   plane.addEventListener("pointercancel", end);
   plane.addEventListener("wheel", handleBoardWheel, { passive: false });
+  // Pinch (ctrl+wheel) and Cmd+scroll must zoom the canvas wherever the pointer is:
+  // over the bar, the panel or a gap, Chrome would otherwise zoom the whole window.
+  window.addEventListener(
+    "wheel",
+    (event) => {
+      if (!event.ctrlKey && !event.metaKey) return;
+      event.preventDefault();
+      event.stopPropagation();
+      zoomWithWheel(event.clientX, event.clientY, event);
+    },
+    { capture: true, passive: false },
+  );
 }
 
 /** @type {ReturnType<typeof setTimeout> | undefined} */
@@ -772,13 +784,7 @@ function handleBoardWheel(event) {
   // A gesture must not fight an easing transition left over from a fit or a zoom click.
   canvas.style.transition = "";
   if (event.ctrlKey || event.metaKey) {
-    const worldX = (event.clientX - state.camera.x) / state.camera.zoom;
-    const worldY = (event.clientY - state.camera.y) / state.camera.zoom;
-    state.camera.zoom = clamp(state.camera.zoom * Math.exp(-normalizedWheelDelta(event) * 0.012), MIN_ZOOM, MAX_ZOOM);
-    state.camera.x = event.clientX - worldX * state.camera.zoom;
-    state.camera.y = event.clientY - worldY * state.camera.zoom;
-    scheduleApplyCamera();
-    scheduleCameraSave();
+    zoomWithWheel(event.clientX, event.clientY, event);
     return;
   }
   const scale = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? window.innerHeight : 1;
@@ -786,6 +792,15 @@ function handleBoardWheel(event) {
   state.camera.y -= event.deltaY * scale;
   scheduleApplyCamera();
   scheduleCameraSave();
+}
+
+// Figma-like: continuous, no steps, anchored at the cursor. A mouse wheel's big
+// notches are capped so one click is a firm step rather than a jump.
+function zoomWithWheel(clientX, clientY, event) {
+  userAdjustedCamera = true;
+  canvas.style.transition = "";
+  const delta = clamp(normalizedWheelDelta(event), -60, 60);
+  zoomAt(clientX, clientY, Math.exp(-delta * 0.016));
 }
 
 function zoomAt(clientX, clientY, factor) {
@@ -1765,6 +1780,15 @@ function onArtboardMessage(event) {
   const deviceId = String(data.device || "");
   const record = state.entries.get(artboardKey(itemId, deviceId));
   if (!record || event.source !== record.iframe.contentWindow) return;
+  if (data.type === "zoom-wheel") {
+    const rect = record.iframe.getBoundingClientRect();
+    const scale = rect.width / (record.device?.width || rect.width || 1) || 1;
+    zoomWithWheel(rect.left + (Number(data.x) || 0) * scale, rect.top + (Number(data.y) || 0) * scale, {
+      deltaY: Number(data.deltaY) || 0,
+      deltaMode: Number(data.deltaMode) || 0,
+    });
+    return;
+  }
   if (data.type === "ready") {
     postPins(itemId, deviceId);
     postTune(itemId, deviceId);
