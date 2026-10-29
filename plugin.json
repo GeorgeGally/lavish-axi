@@ -1,8 +1,8 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
-  "name": "lavish-axi",
+  "name": "easel",
   "version": "0.1.95",
-  "description": "HTML is the new markdown. Lavish is the new editor for your HTML artifacts.",
+  "description": "HTML is the new markdown. Easel is a board for reviewing and tuning HTML designs with your agent.",
   "author": {
     "name": "Kun Chen",
     "url": "https://github.com/kunchenguid"
@@ -16,6 +16,7 @@
     "cli",
     "html",
     "review",
+    "board",
     "collaboration"
   ]
 }

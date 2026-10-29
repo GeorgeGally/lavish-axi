@@ -851,8 +851,8 @@ test("chrome top bar follows the design mock wordmark and overflow menu treatmen
   const html = createChromeHtml({ key: "abc", file: "/tmp/artifact.html" });
   const css = await chromeCssSource();
 
-  assert.match(html, /class="brand-mark">Lavish/);
-  assert.match(html, /class="brand-support">Editor/);
+  assert.match(html, /class="brand-mark">Easel/);
+  assert.match(html, /class="brand-support">Board/);
   assert.match(css, /font-family:var\(--font-serif\)/);
   assert.match(css, /letter-spacing:\.18em/);
   assert.match(html, /class="more-button" id="moreButton"/);
@@ -6541,7 +6541,7 @@ test("chrome falls back to a default favicon and title when none are provided", 
   const html = createChromeHtml({ key: "abc", file: "/tmp/artifact.html" });
 
   assert.match(html, /<link rel="icon" href="data:image\/svg\+xml,/);
-  assert.match(html, /<title>Lavish Editor<\/title>/);
+  assert.match(html, /<title>Easel<\/title>/);
 });
 
 test("chrome adopts a favicon tag and tab title passed from the artifact", () => {

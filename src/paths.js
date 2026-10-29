@@ -6,6 +6,8 @@ import { isIP } from "node:net";
 import os from "node:os";
 import path from "node:path";
 
+import { productEnv, STATE_DIR_NAME } from "./brand.js";
+
 export const LOOPBACK_HOST = "127.0.0.1";
 export const IPV6_LOOPBACK_HOST = "::1";
 
@@ -28,7 +30,7 @@ export function isWildcardHost(host) {
 // Address the server binds to (LAVISH_AXI_HOST). Defaults to loopback. A wildcard value
 // (0.0.0.0 or ::) is never listened on; resolveListenHosts maps it to loopback.
 export function bindHost(env = process.env) {
-  return env.LAVISH_AXI_HOST?.trim() || LOOPBACK_HOST;
+  return productEnv("HOST", env)?.trim() || LOOPBACK_HOST;
 }
 
 /**
@@ -42,7 +44,7 @@ export function bindHost(env = process.env) {
  * @returns {string[]}
  */
 export function resolveListenHosts({ host, env = process.env, tailscale = null, extraHosts = [] } = {}) {
-  const envHost = env.LAVISH_AXI_HOST?.trim() || "";
+  const envHost = productEnv("HOST", env)?.trim() || "";
   const autoTailscale = !envHost;
   const requested = host || bindHost(env);
   const primary = isWildcardHost(requested) ? LOOPBACK_HOST : requested || LOOPBACK_HOST;
@@ -105,7 +107,7 @@ export async function resolveConcreteListenHosts(hosts, { lookup = dnsLookup, ke
  */
 export function resolveLinkHost({ env = process.env, tailscale = null, fallbackHost = LOOPBACK_HOST } = {}) {
   if (tailscale?.magicDnsName) return tailscale.magicDnsName;
-  const explicit = env.LAVISH_AXI_LINK_HOST?.trim();
+  const explicit = productEnv("LINK_HOST", env)?.trim();
   if (explicit) return explicit;
   return isWildcardHost(fallbackHost) ? LOOPBACK_HOST : fallbackHost || LOOPBACK_HOST;
 }
@@ -119,7 +121,7 @@ export function clientHost(env = process.env) {
 // Hostname written into the session URLs the server generates (LAVISH_AXI_LINK_HOST).
 // Defaults to the host the CLI dials.
 export function linkHost(env = process.env) {
-  return env.LAVISH_AXI_LINK_HOST?.trim() || clientHost(env);
+  return productEnv("LINK_HOST", env)?.trim() || clientHost(env);
 }
 
 // Extra Host header values the server's DNS-rebinding guard accepts beyond the
@@ -127,7 +129,7 @@ export function linkHost(env = process.env) {
 // (whitespace-separated). A lone "*" disables the guard entirely - an explicit
 // opt-out for operators fronting the server with their own auth/proxy.
 export function extraAllowedHosts(env = process.env) {
-  return (env.LAVISH_AXI_ALLOWED_HOSTS || "").split(/\s+/).filter(Boolean);
+  return (productEnv("ALLOWED_HOSTS", env) || "").split(/\s+/).filter(Boolean);
 }
 
 // Brackets an IPv6 literal so it can be safely interpolated into a URL authority.
@@ -138,7 +140,7 @@ export function hostForUrl(host) {
 }
 
 export function stateDir() {
-  return process.env.LAVISH_AXI_STATE_DIR || path.join(os.homedir(), ".lavish-axi");
+  return productEnv("STATE_DIR") || path.join(os.homedir(), STATE_DIR_NAME);
 }
 
 export function stateFile() {
@@ -173,5 +175,5 @@ export async function ensureStateDir() {
 }
 
 export function defaultPort() {
-  return Number(process.env.LAVISH_AXI_PORT || 4387);
+  return Number(productEnv("PORT") || 4387);
 }

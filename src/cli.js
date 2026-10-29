@@ -18,6 +18,8 @@ import { fileURLToPath } from "node:url";
 
 import { AxiError, installSessionStartHooks, RESERVED_COMMANDS, runAxiCli } from "axi-sdk-js";
 
+import { productEnv } from "./brand.js";
+
 import { createDesignOutput, DESIGN_PRIORITY_RULE, DESIGN_SYSTEM_HINT } from "./design-reference.js";
 import {
   buildSelfContainedHtml,
@@ -113,6 +115,7 @@ const CODEX_POLL_WAKE_PATH_GUIDANCE =
   "Codex detected: completed background tasks may not resume Codex automatically, so keep the poll attached to the active turn.";
 // Inlined at build time from package.json; falls back to reading package.json so source-run tests work.
 export const VERSION =
+  process.env.EASEL_BUILD_VERSION ||
   process.env.LAVISH_AXI_BUILD_VERSION ||
   JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version;
 
@@ -125,7 +128,7 @@ export function shouldNarratePollWaitTicks({ isTTY }) {
 }
 
 export function herdrPollChimeEnabled(env = process.env) {
-  return env.HERDR_ENV === "1" && env.LAVISH_AXI_HERDR_CHIME === "1";
+  return env.HERDR_ENV === "1" && productEnv("HERDR_CHIME", env) === "1";
 }
 
 /**
@@ -421,7 +424,7 @@ async function selfPaintWarningForFile(absolute) {
 }
 
 export function shouldOpenBrowser(args, env) {
-  return !args.includes("--no-open") && env.LAVISH_AXI_NO_OPEN !== "1";
+  return !args.includes("--no-open") && productEnv("NO_OPEN", env) !== "1";
 }
 
 async function pollCommand(args) {
@@ -1720,7 +1723,7 @@ function deepEqual(a, b) {
 
 async function serverCommand(args) {
   const port = Number(flagValue(args, "--port") || defaultPort());
-  const debug = args.includes("--verbose") || process.env.LAVISH_AXI_DEBUG === "1";
+  const debug = args.includes("--verbose") || productEnv("DEBUG") === "1";
   const server = await serve({
     port,
     stateFile: stateFile(),
@@ -2277,7 +2280,7 @@ export function createServerSpawnOptions(logFd = null) {
   return {
     detached: true,
     stdio,
-    env: { ...process.env, LAVISH_AXI_NO_OPEN: "1" },
+    env: { ...process.env, EASEL_NO_OPEN: "1" },
   };
 }
 

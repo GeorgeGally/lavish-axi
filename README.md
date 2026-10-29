@@ -1,4 +1,4 @@
-<h1 align="center">lavish-axi</h1>
+<h1 align="center">Easel</h1>
 <p align="center">
   <a href="https://github.com/kunchenguid/lavish-axi/actions/workflows/ci.yml"
     ><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/kunchenguid/lavish-axi/ci.yml?style=flat-square&label=ci"
@@ -26,7 +26,9 @@
   <img alt="Lavish Editor demo" src="lavish-editor-marketing/renders/lavish-editor-marketing.gif" width="960" />
 </p>
 
-HTML is the new markdown. Lavish is the new editor for your HTML artifacts.
+HTML is the new markdown. Easel is the board your HTML designs get reviewed on.
+
+Easel is George's fork of [lavish-axi](https://github.com/kunchenguid/lavish-axi), kept close enough to upstream that a good fix can still be merged back. The review loop is Lavish's; the board, pins, composer and tune panel are Easel's. Lavish attribution stays because the licence requires it and because the credit is owed.
 
 Agents are good at producing rich HTML artifacts, but the human-agent collaboration loop on such artifacts is lacking and falls back into screenshots and long responses for “tell me what to change.”
 That loses the thing HTML is best at: interactivity.
@@ -247,7 +249,7 @@ pnpm link
   The agent updates the artifact's Mermaid source, which remains authoritative.
   Flowchart, sequence, class, ER, and state diagrams convert to editable shapes; other diagram types are images that reviewers can draw and annotate.
   Lavish changes only the browser view, so saved, standalone, and exported artifacts still render plain Mermaid.
-- **Whiteboard libraries** - Copy Excalidraw library files (`.excalidrawlib`, for example from [libraries.excalidraw.com](https://libraries.excalidraw.com)) into `~/.lavish-axi/excalidraw-libraries/`, or `LAVISH_AXI_STATE_DIR/excalidraw-libraries/` when set. Every whiteboard's library panel lists their items, and an item you drop on the canvas reaches the agent by name in the edit summary.
+- **Whiteboard libraries** - Copy Excalidraw library files (`.excalidrawlib`, for example from [libraries.excalidraw.com](https://libraries.excalidraw.com)) into `~/.easel/excalidraw-libraries/`, or `EASEL_STATE_DIR/excalidraw-libraries/` when set. Every whiteboard's library panel lists their items, and an item you drop on the canvas reaches the agent by name in the edit summary.
   Agents run `lavish-axi libraries` to find item refs and can show a flowchart node as one of those icons by adding a `%% lavish-icon <node-id> <library-id>/<item name>` comment to the Mermaid source. Mermaid ignores the comment, so saved, exported, and shared copies, and whiteboards missing that library, show the plain node.
   Lavish only reads that directory and never downloads libraries. Files over 10 MB, more than 25 MB or 5,000 items in total, and unreadable files are skipped; `lavish-axi libraries` lists each skip with its reason.
   Each library carries its author's terms (AWS Architecture Icons, for example, are covered by AWS's own usage terms), so check them before using one.
@@ -258,7 +260,7 @@ pnpm link
   Every **Check and reload** control asks the server whether it is running before it navigates; while nothing answers, the page stays where it is and says so, and a check that gets no answer at all says that instead of guessing.
   In-flight `lavish-axi poll` commands end with an interrupted-poll error and are safe to re-run; server-accepted feedback remains queued until delivery, while never-sent notes and supported annotation drafts survive a same-tab reload as described under **Live reload**.
   A page waits for the replacement rather than reloading into a port nothing is listening on, and tells the user to restart Lavish if it never returns.
-- **Local-first state** - Session state stays under `~/.lavish-axi/` by default, or `LAVISH_AXI_STATE_DIR` when set.
+- **Local-first state** - Session and board state stays under `~/.easel/` by default, or `EASEL_STATE_DIR` when set. Every `LAVISH_AXI_*` setting is still read as a fallback.
 - **Diagnostic viewports** - `LAVISH_AXI_DIAGNOSTIC_VIEWPORTS` sets which viewport classes the layout-issue inbox tracks (`mobile`, `compact`, `desktop`; comma-separated, default all). Warnings whose class leaves the set are marked obsolete with an explicit reason instead of silently reading as fixed.
 - **Server port** - Set `LAVISH_AXI_PORT` to choose the server port; it defaults to `4387`.
 - **Network binding** - With Tailscale running, the review server automatically listens only on loopback (`127.0.0.1`) and this machine's Tailscale IPv4 address - never on `0.0.0.0` or every interface. The generated session link uses the machine's MagicDNS name, so it is the phone-ready URL to open from another device on the same tailnet. When Tailscale is absent or down, Lavish silently falls back to loopback-only and prints no phone URL. If Tailscale is running but MagicDNS is unavailable, Lavish visibly warns that phone access is unavailable and remains loopback-only. Binding beyond loopback exposes an unauthenticated server that can read and serve arbitrary local files to devices that can reach it, so the tailnet should be trusted. Any explicit `LAVISH_AXI_HOST` overrides automatic Tailscale binding; wildcard values are restricted to loopback, while a non-wildcard value selects that concrete bind address, and the server listens on loopback as well so every local CLI finds it whatever its own `LAVISH_AXI_HOST` says. An address that cannot be bound - the tailnet address while another process holds it, while Tailscale restarts, or an explicit hostname that temporarily does not resolve - is reported as `network_warning` in `lavish-axi <file>` output and logged to `server.log`; session links point at loopback meanwhile unless `LAVISH_AXI_LINK_HOST` overrides them, and the server keeps retrying that address in the background and immediately on the next CLI invocation. Once it binds, the warning clears and new session links use it again, with no restart. If no listener can bind, startup fails rather than claiming a reachable server. `LAVISH_AXI_LINK_HOST` controls the link host when automatic Tailscale binding is disabled.
@@ -313,7 +315,7 @@ For flows, architecture, state, or sequence diagrams, open the diagram playbook 
 | `lavish-axi reply`       | `--agent-reply "..."`       | Concise reply text. Required unless `--agent-reply-file` is set. The command exits 0 only after the server accepts it. Empty text is refused. Prefer this over `poll --agent-reply` when you are not about to long-poll.                                                                                                      |
 | `lavish-axi reply`       | `--agent-reply-file <path>` | Read the reply from a file (`-` for stdin) so newlines survive quoting. Cannot be combined with `--agent-reply`. Same Markdown guidance as `poll --agent-reply-file`.                                                                                                                                                         |
 | `lavish-axi stop`        | `--port <port>`             | Shut down a server running on a non-default port.                                                                                                                                                                                                                                                                             |
-| `lavish-axi server`      | `--verbose`                 | Log session and watcher events to stderr; can also be enabled with `LAVISH_AXI_DEBUG=1`. Detached server output is appended with UTC timestamps to `~/.lavish-axi/server.log` (or `LAVISH_AXI_STATE_DIR/server.log`) for startup, shutdown-cause, and crash diagnostics.                                                      |
+| `lavish-axi server`      | `--verbose`                 | Log session and watcher events to stderr; can also be enabled with `LAVISH_AXI_DEBUG=1`. Detached server output is appended with UTC timestamps to `~/.easel/server.log` (or `EASEL_STATE_DIR/server.log`) for startup, shutdown-cause, and crash diagnostics.                                                                |
 | `lavish-axi server`      | `--also-listen <host>`      | Also listen on this concrete address (repeatable). The CLI passes it when it replaces a running server, so the replacement keeps every address the old one served; see One server per port.                                                                                                                                   |
 
 ## Telemetry

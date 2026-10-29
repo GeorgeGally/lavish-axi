@@ -1,10 +1,11 @@
 {
-  "name": "lavish-axi",
+  "name": "easel",
   "version": "0.1.95",
   "packageManager": "pnpm@11.1.1",
-  "description": "HTML is the new markdown. Lavish is the new editor for your HTML artifacts.",
+  "description": "HTML is the new markdown. Easel is a board for reviewing and tuning HTML designs with your agent.",
   "type": "module",
   "bin": {
+    "easel": "dist/cli.mjs",
     "lavish-axi": "dist/cli.mjs"
   },
   "files": [
@@ -65,6 +66,7 @@
     "cli",
     "html",
     "review",
+    "board",
     "collaboration"
   ],
   "license": "MIT",
