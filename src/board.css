@@ -602,6 +602,86 @@ body[data-pan="true"] .shield {
   font-size: 13px;
 }
 
+/* Images pasted or dropped into a note or the composer */
+.thumbs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.thumb {
+  position: relative;
+  width: 56px;
+  height: 56px;
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--line);
+  box-shadow: inset 0 0 0 1px rgba(22, 24, 29, 0.08);
+}
+
+.thumb img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.thumb-remove {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: rgba(22, 24, 29, 0.72);
+  color: #ffffff;
+  font-size: 13px;
+  line-height: 1;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.thumb:hover .thumb-remove,
+.thumb-remove:focus-visible {
+  opacity: 1;
+}
+
+.note-images,
+.composer-images {
+  margin-top: 10px;
+}
+
+.composer-images {
+  margin: 0 0 10px;
+}
+
+.note-images[hidden],
+.composer-images[hidden] {
+  display: none;
+}
+
+.draft .thumbs {
+  margin-top: 6px;
+}
+
+.entry-thumbs {
+  grid-column: 2;
+  margin-top: 6px;
+}
+
+.note-pop[data-dropping="true"],
+.chat-foot[data-dropping="true"] {
+  box-shadow:
+    inset 0 0 0 2px var(--select),
+    var(--shadow-float);
+}
+
+.draft-input[data-dropping="true"] {
+  border-color: var(--select);
+}
+
 /* Notes panel */
 .chat {
   position: fixed;

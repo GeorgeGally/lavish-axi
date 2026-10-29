@@ -97,7 +97,8 @@ export function createBoardHtml(
   <div class="chat-log" id="chatLog"></div>
   <div class="chat-foot">
     <div class="chat-drafts" id="chatDrafts"></div>
-    <textarea id="composerInput" rows="2" placeholder="Write a note"></textarea>
+    <div class="composer-images" id="composerImages" hidden></div>
+    <textarea id="composerInput" rows="2" placeholder="Write a note, or paste an image"></textarea>
     <div class="chat-actions">
       <span class="chat-status" id="dockStatus" role="status"></span>
       <button class="button button-primary" id="send" type="button">Send</button>

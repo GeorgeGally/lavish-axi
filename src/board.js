@@ -11,6 +11,7 @@ const MAX_ITEMS = 400;
 const MAX_NOTES_PER_ITEM = 300;
 const MAX_VERSIONS_PER_ITEM = 30;
 const MAX_TUNE_CONTROLS = 24;
+const MAX_NOTE_IMAGES = 8;
 
 /**
  * A board is a directory holding one `board.json` and one HTML file per item. The
@@ -18,7 +19,7 @@ const MAX_TUNE_CONTROLS = 24;
  * markup or a copy of an item's content.
  */
 /** @typedef {{ id: string, label: string }} BoardTab */
-/** @typedef {{ id: string, number: number, label: string, selector: string, tag: string, text: string, x: number, y: number, ox?: number, oy?: number, prompt_id?: string, at?: string, device?: string }} BoardNote */
+/** @typedef {{ id: string, number: number, label: string, selector: string, tag: string, text: string, x: number, y: number, ox?: number, oy?: number, attachments?: Array<{ id: string, name?: string }>, prompt_id?: string, at?: string, device?: string }} BoardNote */
 /** @typedef {{ id: string, label: string, type: "number" | "color" | "select", css: string, min?: number, max?: number, step?: number, unit?: string, options?: Array<{ value: string, label: string }>, value: string }} TuneControl */
 /** @typedef {{ id: string, label: string, values: Record<string, string>, at: string }} TuneVersion */
 /**
@@ -224,6 +225,12 @@ function normalizeNotes(value) {
     }
     const promptId = text(entry.prompt_id, 80);
     if (promptId) note.prompt_id = promptId;
+    // Images pasted into a note, by attachment id; the bytes live in the state dir.
+    const attachments = (Array.isArray(entry.attachments) ? entry.attachments : [])
+      .filter((ref) => ref && /^[0-9a-f]{64}\.(png|jpg|webp)$/.test(String(ref.id || "")))
+      .slice(0, MAX_NOTE_IMAGES)
+      .map((ref) => (ref.name ? { id: String(ref.id), name: text(ref.name, 120) } : { id: String(ref.id) }));
+    if (attachments.length > 0) note.attachments = attachments;
     const at = text(entry.at, 40);
     if (at) note.at = at;
     notes.push(note);

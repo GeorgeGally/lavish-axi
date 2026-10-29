@@ -179,7 +179,7 @@ easel poll hero-directions                 # the agent waits here
 }
 ```
 
-Annotation is always on: hovering a design outlines the element under the pointer, and clicking drops a numbered pin there with a note card. **Send now** (Enter) sends that note at once, **Queue** keeps it as a draft in the notes panel to send later with **Send**, and clicking away keeps a written note as a draft and discards an empty one. **Remove** appears only on a note that was already saved.
+Annotation is always on: hovering a design outlines the element under the pointer, and clicking drops a numbered pin there with a note card. **Send now** (Enter) sends that note at once, **Queue** keeps it as a draft in the notes panel to send later with **Send**, and clicking away keeps a written note as a draft and discards an empty one. **Remove** appears only on a note that was already saved. Paste (Cmd+V) or drop PNG, JPEG or WebP images into a note or the message box; they show as thumbnails and reach the agent as local file paths with the note.
 The notes panel down the right lists what you sent, grouped under the design it is about, with the agent's replies in between. A note reads **Not read yet** until the agent's poll has taken it, then nothing. Each note reaches the agent with the item, the pin number, and the viewport width it was made at; a sent pin is filled, a draft pin is an outline.
 
 ### Tuning

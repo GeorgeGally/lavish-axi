@@ -1104,6 +1104,161 @@ function postAllPins() {
   for (const record of state.artboards.values()) postPins(record.itemId, record.device.id);
 }
 
+/* ----------------------------------------------------------------- images */
+
+// Pasted or dropped images ride the session's existing attachment store: the board
+// page uploads the raw bytes (same-origin, magic-byte checked server side) and a
+// prompt names them by id, so the agent receives a local file path with the note.
+const IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
+/** @type {Map<string, Set<Promise<unknown>>>} */
+const uploads = new Map();
+/** @type {Array<{ id: string, name?: string }>} */
+let composerImages = [];
+
+function attachmentUrl(id) {
+  return `/api/${encodeURIComponent(key)}/attachments/${encodeURIComponent(id)}`;
+}
+
+/** @param {DataTransfer | null} transfer */
+function imageFiles(transfer) {
+  if (!transfer) return [];
+  const files = [];
+  for (const entry of Array.from(transfer.items || [])) {
+    if (entry.kind !== "file") continue;
+    const file = entry.getAsFile();
+    if (file && IMAGE_TYPES.has(file.type)) files.push(file);
+  }
+  if (files.length === 0) {
+    for (const file of Array.from(transfer.files || [])) if (IMAGE_TYPES.has(file.type)) files.push(file);
+  }
+  return files;
+}
+
+/** @param {File} file @returns {Promise<{ id: string, name?: string }>} */
+function uploadImage(file) {
+  return fetch(`/api/${encodeURIComponent(key)}/attachments`, {
+    method: "POST",
+    headers: { "content-type": "application/octet-stream" },
+    body: file,
+  }).then(async (response) => {
+    if (!response.ok) {
+      const reason = response.status === 413 ? "That image is too large." : "That image could not be added.";
+      throw new Error(reason);
+    }
+    const payload = await response.json();
+    const id = String(payload?.attachment?.id || "");
+    if (!id) throw new Error("That image could not be added.");
+    return file.name && file.name !== "image.png" ? { id, name: file.name.slice(0, 120) } : { id };
+  });
+}
+
+/**
+ * Upload images for one owner (a note id, or "composer") and add them to its list as
+ * they land. Sending waits for whatever is still uploading.
+ * @param {string} owner
+ * @param {File[]} files
+ * @param {(ref: { id: string, name?: string }) => void} add
+ */
+function addImages(owner, files, add) {
+  for (const file of files) {
+    const task = uploadImage(file)
+      .then(add)
+      .catch((error) => {
+        dockStatus.textContent = error.message;
+      })
+      .finally(() => {
+        uploads.get(owner)?.delete(task);
+      });
+    if (!uploads.has(owner)) uploads.set(owner, new Set());
+    uploads.get(owner)?.add(task);
+  }
+}
+
+function pendingUploads(owners) {
+  const tasks = [];
+  for (const owner of owners) tasks.push(...(uploads.get(owner) || []));
+  return Promise.all(tasks);
+}
+
+/**
+ * Paste (Cmd+V) and drop images onto a field.
+ * @param {HTMLElement} target
+ * @param {(files: File[]) => void} onImages
+ */
+function acceptImages(target, onImages) {
+  target.addEventListener("paste", (event) => {
+    const files = imageFiles(event.clipboardData);
+    if (files.length === 0) return;
+    // A screenshot paste carries only the image; keep any real text that came with it.
+    const text = event.clipboardData?.getData("text/plain") || "";
+    if (!text.trim() || files.some((file) => file.name && text.includes(file.name))) event.preventDefault();
+    onImages(files);
+  });
+  target.addEventListener("dragover", (event) => {
+    if (!event.dataTransfer?.types.includes("Files")) return;
+    event.preventDefault();
+    event.stopPropagation();
+    target.dataset.dropping = "true";
+  });
+  target.addEventListener("dragleave", () => {
+    delete target.dataset.dropping;
+  });
+  target.addEventListener("drop", (event) => {
+    delete target.dataset.dropping;
+    const files = imageFiles(event.dataTransfer);
+    if (!event.dataTransfer?.types.includes("Files")) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (files.length > 0) onImages(files);
+    else dockStatus.textContent = "Only PNG, JPEG and WebP images can be added.";
+  });
+}
+
+/**
+ * @param {Array<{ id: string }>} list
+ * @param {((id: string) => void) | null} onRemove
+ */
+function thumbStrip(list, onRemove) {
+  const strip = element("div", { class: "thumbs" });
+  for (const ref of list || []) {
+    const thumb = element("span", { class: "thumb" });
+    thumb.append(element("img", { src: attachmentUrl(ref.id), alt: "", loading: "lazy" }));
+    if (onRemove) {
+      const remove = element("button", {
+        class: "thumb-remove",
+        type: "button",
+        text: "×",
+        "aria-label": "Remove image",
+      });
+      remove.addEventListener("click", () => onRemove(ref.id));
+      thumb.append(remove);
+    }
+    strip.append(thumb);
+  }
+  return strip;
+}
+
+function renderComposerImages() {
+  const holder = document.getElementById("composerImages");
+  if (!holder) return;
+  holder.replaceChildren(
+    thumbStrip(composerImages, (id) => {
+      composerImages = composerImages.filter((ref) => ref.id !== id);
+      renderComposerImages();
+      updateSendButton();
+    }),
+  );
+  holder.hidden = composerImages.length === 0;
+}
+
+// A file dropped anywhere else on the board must never navigate the page away.
+/** @param {DragEvent} event */
+function refuseStrayFileDrop(event) {
+  if (event.dataTransfer?.types.includes("Files")) event.preventDefault();
+}
+window.addEventListener("dragover", refuseStrayFileDrop);
+window.addEventListener("drop", refuseStrayFileDrop);
+
 /* ------------------------------------------------------------------ notes */
 
 /** @type {null | { key: string, x: number, y: number, time: number }} */
@@ -1221,8 +1376,18 @@ function addNote(item, payload, deviceId) {
  * @param {string} [message]
  * @returns {Promise<boolean>}
  */
-function sendPrompts(noteIds, message = "") {
+function sendPrompts(noteIds, message = "", images = []) {
   if (state.ended) return Promise.resolve(false);
+  const fromComposer = images === composerImages;
+  const owners = fromComposer ? [...noteIds, "composer"] : noteIds;
+  if (owners.some((owner) => (uploads.get(owner)?.size || 0) > 0)) {
+    dockStatus.textContent = "Adding images…";
+    return pendingUploads(owners).then(() => sendPromptsNow(noteIds, message, fromComposer ? composerImages : images));
+  }
+  return sendPromptsNow(noteIds, message, images);
+}
+
+function sendPromptsNow(noteIds, message, images) {
   const sent = [];
   /** @type {any[]} */
   const prompts = [];
@@ -1230,7 +1395,8 @@ function sendPrompts(noteIds, message = "") {
     const live = liveNote(noteId);
     if (!live || live.note.prompt_id) continue;
     const text = String(live.note.text || "").trim();
-    if (!text) continue;
+    const attached = Array.isArray(live.note.attachments) ? live.note.attachments : [];
+    if (!text && attached.length === 0) continue;
     const promptId = randomId();
     live.note.prompt_id = promptId;
     sendingPrompts.add(promptId);
@@ -1244,9 +1410,17 @@ function sendPrompts(noteIds, message = "") {
       tag: "pin",
       item: { id: live.item.id, label: live.item.label },
       pin: { id: live.note.id, number: live.note.number, viewport: deviceById(noteDevice(live.note)).width },
+      ...(attached.length > 0 ? { attachments: attached } : {}),
     });
   }
-  if (message) prompts.push({ uid: randomId(), prompt: message, tag: "message" });
+  if (message || images.length > 0) {
+    prompts.push({
+      uid: randomId(),
+      prompt: message,
+      tag: "message",
+      ...(images.length > 0 ? { attachments: images } : {}),
+    });
+  }
   if (prompts.length === 0) return Promise.resolve(false);
   for (const entry of sent) postPins(entry.item.id, noteDevice(entry.note));
   renderChatPanel();
@@ -1288,7 +1462,8 @@ function closeNoteWindow() {
   noteWindow = null;
   const live = liveNote(noteId);
   if (!live) return;
-  if (!live.note.prompt_id && !String(live.note.text || "").trim()) {
+  const empty = !String(live.note.text || "").trim() && !(live.note.attachments || []).length;
+  if (!live.note.prompt_id && empty && !(uploads.get(noteId)?.size || 0)) {
     removeNote(noteId);
     return;
   }
@@ -1337,7 +1512,7 @@ function showNoteWindow(item, note, { fresh = false } = {}) {
   textarea.readOnly = sent;
   const sendNow = () => {
     note.text = textarea.value;
-    if (!String(note.text).trim()) {
+    if (!String(note.text).trim() && !(note.attachments || []).length && !(uploads.get(note.id)?.size || 0)) {
       textarea.focus();
       return;
     }
@@ -1381,7 +1556,33 @@ function showNoteWindow(item, note, { fresh = false } = {}) {
     send.addEventListener("click", sendNow);
     actions.append(queue, send);
   }
-  pop.append(head, textarea, actions);
+  const images = element("div", { class: "note-images" });
+  const drawImages = () => {
+    images.replaceChildren(
+      thumbStrip(
+        note.attachments || [],
+        sent
+          ? null
+          : (id) => {
+              note.attachments = (note.attachments || []).filter((ref) => ref.id !== id);
+              persistNotes(item.id);
+              drawImages();
+            },
+      ),
+    );
+    images.hidden = (note.attachments || []).length === 0;
+  };
+  drawImages();
+  if (!sent) {
+    acceptImages(pop, (files) =>
+      addImages(note.id, files, (ref) => {
+        note.attachments = [...(note.attachments || []), ref];
+        persistNotes(item.id);
+        drawImages();
+      }),
+    );
+  }
+  pop.append(head, textarea, images, actions);
   document.body.append(pop);
   noteWindow = pop;
   const point = popoverPoint(item, note);
@@ -1447,7 +1648,12 @@ function renderChatPanel() {
       row.append(element("span", { class: "entry-number", text: String(matched.note.number) }));
       row.addEventListener("click", () => focusPin(matched.item, matched.note));
     }
-    row.append(element("div", { class: "entry-text", text: String(entry.text || "") }));
+    if (entry.text) row.append(element("div", { class: "entry-text", text: String(entry.text || "") }));
+    if (Array.isArray(entry.attachments) && entry.attachments.length > 0) {
+      const strip = thumbStrip(entry.attachments, null);
+      strip.classList.add("entry-thumbs");
+      row.append(strip);
+    }
     const quiet = entryStateText(entry);
     if (quiet) row.append(element("div", { class: "entry-state", text: quiet }));
     rows.push(row);
@@ -1475,7 +1681,9 @@ function renderChatPanel() {
 }
 
 function draftsToSend() {
-  return boardNotes().filter(({ note }) => !note.prompt_id && String(note.text || "").trim());
+  return boardNotes().filter(
+    ({ note }) => !note.prompt_id && (String(note.text || "").trim() || (note.attachments || []).length > 0),
+  );
 }
 
 function renderDrafts() {
@@ -1535,7 +1743,23 @@ function renderDrafts() {
           sendPrompts([note.id]);
         }
       });
+      acceptImages(input, (files) =>
+        addImages(note.id, files, (ref) => {
+          note.attachments = [...(note.attachments || []), ref];
+          persistNotes(item.id);
+          renderDrafts();
+        }),
+      );
       draft.append(name, input);
+      if ((note.attachments || []).length > 0) {
+        draft.append(
+          thumbStrip(note.attachments, (id) => {
+            note.attachments = (note.attachments || []).filter((ref) => ref.id !== id);
+            persistNotes(item.id);
+            renderDrafts();
+          }),
+        );
+      }
       return draft;
     }),
   );
@@ -1550,7 +1774,7 @@ function renderDrafts() {
 }
 
 function updateSendButton() {
-  const count = draftsToSend().length + (composerInput.value.trim() ? 1 : 0);
+  const count = draftsToSend().length + (composerInput.value.trim() || composerImages.length > 0 ? 1 : 0);
   sendButton.textContent = count > 1 ? `Send ${count}` : "Send";
   sendButton.disabled = state.ended || count === 0;
 }
@@ -1558,11 +1782,13 @@ function updateSendButton() {
 function sendAll() {
   const message = composerInput.value.trim();
   const ids = draftsToSend().map(({ note }) => note.id);
-  if (!message && ids.length === 0) return;
+  if (!message && ids.length === 0 && composerImages.length === 0 && !(uploads.get("composer")?.size || 0)) return;
   sendButton.disabled = true;
-  sendPrompts(ids, message).then((ok) => {
+  sendPrompts(ids, message, composerImages).then((ok) => {
     if (ok) {
       composerInput.value = "";
+      composerImages = [];
+      renderComposerImages();
       autosize();
     }
     updateSendButton();
@@ -2089,6 +2315,16 @@ document.getElementById("chatOpen")?.addEventListener("click", () => {
   setChatCollapsed(false);
   if (!userAdjustedCamera) fit(false);
 });
+const chatFoot = document.querySelector(".chat-foot");
+if (chatFoot instanceof HTMLElement) {
+  acceptImages(chatFoot, (files) =>
+    addImages("composer", files, (ref) => {
+      composerImages = [...composerImages, ref];
+      renderComposerImages();
+      updateSendButton();
+    }),
+  );
+}
 composerInput?.addEventListener("input", () => {
   autosize();
   updateSendButton();
