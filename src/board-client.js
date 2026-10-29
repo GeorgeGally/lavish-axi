@@ -25,7 +25,8 @@ const DEVICES = [
 const FRAME = {
   desktop: { top: 20, side: 20, bottom: 44, below: 70 },
   ipad: { top: 26, side: 26, bottom: 26, below: 0 },
-  phone: { top: 14, side: 14, bottom: 14, below: 0 },
+  // A phone page starts below the status bar, so the island sits in the bezel.
+  phone: { top: 54, side: 14, bottom: 14, below: 0 },
 };
 const DEVICE_GAP = 56;
 const MEMBER_GAP = { all: 200, desktop: 140, ipad: 100, phone: 72 };

@@ -445,20 +445,20 @@ body[data-pan="true"] .shield {
 }
 
 .artboard[data-framed="true"][data-device="phone"] .screen {
-  border-radius: 44px;
+  border-radius: 0 0 44px 44px;
 }
 
 .artboard[data-framed="true"][data-device="phone"]::before {
   content: "";
   position: absolute;
   z-index: 3;
-  top: 24px;
+  top: 16px;
   left: 50%;
-  width: 112px;
-  height: 32px;
+  width: 104px;
+  height: 28px;
   transform: translateX(-50%);
   border-radius: 999px;
-  background: #0b0c0e;
+  background: #000000;
   pointer-events: none;
 }
 
