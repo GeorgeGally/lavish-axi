@@ -21,7 +21,7 @@ function jsonScript(value) {
 /**
  * @param {{ key: string, file: string }} session
  * @param {import("./board.js").Board} board
- * @param {{ tuneSpecs?: Record<string, import("./board.js").TuneControl[]>, captions?: Record<string, string>, chat?: unknown[], ended?: boolean, endedBy?: string | null, assetVersion?: string }} [options]
+ * @param {{ tuneSpecs?: Record<string, import("./board.js").TuneControl[]>, captions?: Record<string, { title: string, explain: string }>, chat?: unknown[], ended?: boolean, endedBy?: string | null, assetVersion?: string }} [options]
  */
 export function createBoardHtml(
   session,
@@ -31,7 +31,8 @@ export function createBoardHtml(
   const items = board.items.map((item) => ({
     ...item,
     tuneSpec: tuneSpecs[item.id] || [],
-    caption: captions[item.id] || "",
+    caption: captions[item.id]?.explain || "",
+    title: captions[item.id]?.title || "",
     pair: pairInfo(item.file),
   }));
   const bootstrap = jsonScript({
@@ -59,51 +60,51 @@ export function createBoardHtml(
   <div class="board-name" id="boardName">${escapeHtml(board.name)}</div>
   <nav class="tabs" id="tabs" role="tablist" aria-label="Board tabs"></nav>
   <div class="bar-spacer"></div>
-  <div class="devices" id="devices" role="group" aria-label="Device width"></div>
-  <div class="zoom">
-    <button id="zoomOut" type="button" title="Zoom out (-)" aria-label="Zoom out">&minus;</button>
+  <div class="segmented" id="devices" role="group" aria-label="Device"></div>
+  <div class="zoom" role="group" aria-label="Zoom">
+    <button id="zoomOut" type="button" title="Zoom out" aria-label="Zoom out">&minus;</button>
     <span class="zoom-label" id="zoomLabel">100%</span>
-    <button id="zoomIn" type="button" title="Zoom in (+)" aria-label="Zoom in">+</button>
-    <button id="fit" type="button" title="Fit the board (0)" aria-label="Fit the board">fit</button>
-    <button id="actual" type="button" title="Actual size, 1:1 (1)" aria-label="Actual size">100%</button>
+    <button id="zoomIn" type="button" title="Zoom in" aria-label="Zoom in">+</button>
+    <button class="zoom-text" id="fit" type="button" title="Fit everything (0)">Fit</button>
+    <button class="zoom-text" id="actual" type="button" title="Actual size (1)">100%</button>
   </div>
 </header>
 <main class="plane" id="plane">
   <div class="canvas" id="canvas"></div>
-  <div class="empty" id="empty" hidden>
-    Nothing on this tab yet.<br>
-    <code>easel board add &lt;dir&gt; &lt;file.html&gt;</code>
-  </div>
+  <div class="empty" id="empty" hidden>Nothing on this board yet.</div>
 </main>
-<aside class="tune" id="tune" hidden aria-label="Tune panel">
+<aside class="tune" id="tune" hidden aria-label="Tune">
   <div class="tune-head">
     <span class="tune-title">Tune</span>
     <span class="tune-sub" id="tuneSub"></span>
-    <button class="tune-close" id="tuneClose" type="button" aria-label="Close tune panel">&times;</button>
+    <button class="icon-button" id="tuneClose" type="button" aria-label="Close">&times;</button>
   </div>
-  <div id="tuneBody"></div>
+  <div class="tune-body" id="tuneBody"></div>
   <div class="tune-actions">
-    <button class="tune-action" id="tuneSave" type="button">Save version</button>
-    <button class="tune-action" id="tuneCopy" type="button">Copy</button>
-    <button class="tune-action" id="tuneReset" type="button">Reset</button>
+    <button class="button" id="tuneReset" type="button">Reset</button>
+    <button class="button" id="tuneCopy" type="button">Copy</button>
+    <button class="button button-primary" id="tuneSave" type="button">Save version</button>
   </div>
   <div class="versions" id="tuneVersions"></div>
 </aside>
-<aside class="chat" id="chat" aria-label="Conversation">
+<aside class="chat" id="chat" aria-label="Notes">
   <header class="chat-head">
-    <h2 class="chat-title">Conversation</h2>
     <span class="presence" id="presence" data-state="waiting" role="status" aria-live="polite"></span>
-    <button class="chat-collapse" id="chatToggle" type="button" aria-expanded="true" title="Hide conversation">Hide</button>
+    <button class="icon-button chat-collapse" id="chatToggle" type="button" aria-expanded="true" aria-label="Hide notes" title="Hide notes">
+      <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="M5 3l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </button>
   </header>
   <div class="chat-log" id="chatLog"></div>
-  <div class="chat-drafts" id="chatDrafts"></div>
-  <div class="chat-compose">
-    <textarea id="composerInput" rows="2" placeholder="Write for the agent..."></textarea>
-    <button class="send" id="send" type="button">Send</button>
+  <div class="chat-foot">
+    <div class="chat-drafts" id="chatDrafts"></div>
+    <textarea id="composerInput" rows="2" placeholder="Write a note"></textarea>
+    <div class="chat-actions">
+      <span class="chat-status" id="dockStatus" role="status"></span>
+      <button class="button button-primary" id="send" type="button">Send</button>
+    </div>
   </div>
-  <div class="chat-status" id="dockStatus"></div>
 </aside>
-<button class="chat-open" id="chatOpen" type="button" hidden title="Show conversation">Notes</button>
+<button class="chat-open" id="chatOpen" type="button" hidden>Notes</button>
 <div class="ended" id="ended" hidden>Session ended. Run <code>easel board open</code> when you want it reopened.</div>
 <script id="easel-board" type="application/json">${bootstrap}</script>
 <script src="/board-client.js?v=${encodeURIComponent(assetVersion)}"></script>

@@ -63,7 +63,7 @@ import {
   BoardError,
   boardDirPath,
   boardFilePath,
-  captionFromHtml,
+  explanationFromHtml,
   extractTuneSpec,
   injectBoardSdk,
   pairInfo,
@@ -904,7 +904,8 @@ export async function serve({
           ...item,
           tuneSpec: spec,
           tuneInstruction: spec.length > 0 ? tuneInstruction(item, spec) : "",
-          caption: captions[item.id] || "",
+          caption: captions[item.id]?.explain || "",
+          title: captions[item.id]?.title || "",
           pair: pairInfo(item.file),
         };
       }),
@@ -939,15 +940,14 @@ export async function serve({
   async function boardItemMeta(dir, board) {
     /** @type {Record<string, import("./board.js").TuneControl[]>} */
     const specs = {};
-    /** @type {Record<string, string>} */
+    /** @type {Record<string, { title: string, explain: string }>} */
     const captions = {};
     for (const item of board.items) {
       const file = await itemFileFor(dir, item).catch(() => null);
       if (!file) continue;
       const html = await readFile(file, "utf8").catch(() => "");
       specs[item.id] = extractTuneSpec(html);
-      const caption = captionFromHtml(html);
-      if (caption) captions[item.id] = caption;
+      captions[item.id] = explanationFromHtml(html);
     }
     return { specs, captions };
   }

@@ -68,11 +68,8 @@ test("a board registers as a session and renders one page for its items", async 
   const registered = await register(base, boardDirectory);
   assert.match(registered.url, /\/board\/[0-9a-f]{16}$/);
   assert.equal(registered.board.tabs[0].id, "main");
-  assert.equal(registered.board.items.length, 0);
-
-  const board = await readBoard(boardDirectory);
-  seedItem(board, { file: "v1.html", label: "Hero · A" });
-  await writeFile(boardFilePath(boardDirectory), `${JSON.stringify(board, null, 2)}\n`);
+  // Opening a board picks up every HTML file already in its folder.
+  assert.deepEqual(registered.board.items.map((item) => item.file).sort(), ["v1.html", "v2.html"]);
 
   const page = await fetch(registered.url);
   assert.equal(page.status, 200);
@@ -84,14 +81,36 @@ test("a board registers as a session and renders one page for its items", async 
 
   const registeredAgain = await register(base, boardDirectory);
   assert.equal(registeredAgain.key, registered.key);
-  assert.equal(registeredAgain.board.items.length, 1);
-  assert.equal(registeredAgain.board.items[0].tuneSpec.length, 3);
+  assert.equal(registeredAgain.board.items.length, 2);
+  assert.equal(registeredAgain.board.items.find((item) => item.id === "v1").tuneSpec.length, 3);
 
   const state = await fetch(`${base}/api/boards/${registered.key}`).then((response) => response.json());
   assert.equal(state.name, path.basename(dir) === "hero" ? "hero" : state.name);
-  assert.equal(state.items[0].tuneSpec[0].css, "--radius");
-  assert.match(state.items[0].tuneInstruction, /v1\.html/);
+  const v1 = state.items.find((item) => item.id === "v1");
+  assert.equal(v1.tuneSpec[0].css, "--radius");
+  assert.match(v1.tuneInstruction, /v1\.html/);
   assert.equal(state.ended, false);
+});
+
+test("a board item's explanation comes from its own easel metas", async (t) => {
+  const { base, boardDirectory } = await setup(t);
+  await writeFile(
+    path.join(boardDirectory, "01-hero-today.html"),
+    '<!doctype html><html><head><meta name="easel-caption" content="Hero today: two identical buttons."></head><body></body></html>',
+  );
+  await writeFile(
+    path.join(boardDirectory, "01-hero-proposed-b.html"),
+    '<!doctype html><html><head><meta name="easel-title" content="Hero buttons"><meta name="easel-explain" content="One button &amp; a link."></head><body></body></html>',
+  );
+  const registered = await register(base, boardDirectory);
+  const state = await fetch(`${base}/api/boards/${registered.key}`).then((response) => response.json());
+  const today = state.items.find((item) => item.file === "01-hero-today.html");
+  const proposed = state.items.find((item) => item.file === "01-hero-proposed-b.html");
+  assert.equal(today.caption, "Hero today: two identical buttons.");
+  assert.deepEqual(today.pair, { key: "01-hero", name: "hero", role: "today", variant: "" });
+  assert.equal(proposed.title, "Hero buttons");
+  assert.equal(proposed.caption, "One button & a link.");
+  assert.deepEqual(proposed.pair, { key: "01-hero", name: "hero", role: "proposed", variant: "b" });
 });
 
 test("a board item is served with its own SDK and its sibling assets", async (t) => {

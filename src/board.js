@@ -18,7 +18,7 @@ const MAX_TUNE_CONTROLS = 24;
  * markup or a copy of an item's content.
  */
 /** @typedef {{ id: string, label: string }} BoardTab */
-/** @typedef {{ id: string, number: number, label: string, selector: string, tag: string, text: string, x: number, y: number, prompt_id?: string, at?: string, device?: string }} BoardNote */
+/** @typedef {{ id: string, number: number, label: string, selector: string, tag: string, text: string, x: number, y: number, ox?: number, oy?: number, prompt_id?: string, at?: string, device?: string }} BoardNote */
 /** @typedef {{ id: string, label: string, type: "number" | "color" | "select", css: string, min?: number, max?: number, step?: number, unit?: string, options?: Array<{ value: string, label: string }>, value: string }} TuneControl */
 /** @typedef {{ id: string, label: string, values: Record<string, string>, at: string }} TuneVersion */
 /**
@@ -217,6 +217,11 @@ function normalizeNotes(value) {
     };
     const device = text(entry.device, 20);
     if (device) note.device = device;
+    // Where inside its element the note was dropped, so the pin follows the element.
+    if (Number.isFinite(Number(entry.ox)) && Number.isFinite(Number(entry.oy))) {
+      note.ox = Math.round(number(entry.ox, 0, -10_000, 10_000));
+      note.oy = Math.round(number(entry.oy, 0, -10_000, 10_000));
+    }
     const promptId = text(entry.prompt_id, 80);
     if (promptId) note.prompt_id = promptId;
     const at = text(entry.at, 40);
@@ -358,28 +363,73 @@ function uniqueId(board, base) {
 }
 
 /**
+ * One `<meta name="...">` value from a designer's file, entity-decoded.
+ * @param {string} html
+ * @param {string} name
+ * @param {number} limit
+ * @returns {string}
+ */
+function metaContent(html, name, limit) {
+  const tag = new RegExp(`<meta[^>]+name=["']${name}["'][^>]*>`, "i").exec(String(html || ""));
+  if (!tag) return "";
+  const content = /content=(?:"([^"]*)"|'([^']*)')/i.exec(tag[0]);
+  if (!content) return "";
+  return text(decodeEntities(content[1] ?? content[2] ?? ""), limit);
+}
+
+/** @param {string} value */
+function decodeEntities(value) {
+  return value
+    .replace(/&#x([0-9a-f]+);/gi, (_match, hex) => String.fromCodePoint(Number.parseInt(hex, 16)))
+    .replace(/&#(\d+);/g, (_match, decimal) => String.fromCodePoint(Number(decimal)))
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&amp;/g, "&");
+}
+
+/**
  * A designer's pair file carries its own caption: `<meta name="easel-caption" content="...">`.
  * @param {string} html
  * @returns {string}
  */
 export function captionFromHtml(html) {
-  const tag = /<meta[^>]+name=["']easel-caption["'][^>]*>/i.exec(String(html || ""));
-  if (!tag) return "";
-  const content = /content=["']([^"']*)["']/i.exec(tag[0]);
-  return content ? text(content[1], 240) : "";
+  return metaContent(html, "easel-caption", 400);
 }
 
 /**
- * `NN-name-today.html` / `NN-name-proposed.html` form one before/after pair.
+ * What the board explains above a design, from the file's own metas: an optional
+ * `easel-title`, and `easel-explain` (falling back to `easel-caption`) for what this
+ * version changes and why.
+ * @param {string} html
+ * @returns {{ title: string, explain: string }}
+ */
+export function explanationFromHtml(html) {
+  return {
+    title: metaContent(html, "easel-title", 120),
+    explain: metaContent(html, "easel-explain", 600) || captionFromHtml(html),
+  };
+}
+
+/**
+ * `NN-name-today.html` / `NN-name-proposed.html` form one before/after group; a
+ * `-proposed-b` (or `-c`, ...) file is another proposal in the same group.
  * @param {string} file
- * @returns {{ key: string, role: "today" | "proposed" } | null}
+ * @returns {{ key: string, name: string, role: "today" | "proposed", variant: string } | null}
  */
 export function pairInfo(file) {
   const base = path.basename(String(file || ""), path.extname(String(file || "")));
-  const match = /^(\d+)[-_ ]?(.+?)[-_ ](today|proposed)$/i.exec(base);
+  const match = /^(\d+)[-_ ]?(.+?)[-_ ](today|proposed)(?:[-_ ]?([a-z0-9]{1,3}))?$/i.exec(base);
   if (!match) return null;
   const role = match[3].toLowerCase() === "today" ? "today" : "proposed";
-  return { key: `${match[1]}-${match[2].toLowerCase()}`, role };
+  const name = match[2].toLowerCase();
+  return {
+    key: `${match[1]}-${name}`,
+    name: name.replace(/[-_]+/g, " "),
+    role,
+    variant: (match[4] || "").toLowerCase(),
+  };
 }
 
 /**

@@ -64,19 +64,20 @@
     return text.slice(0, 120);
   }
 
-  /** @param {Element} element */
-  function anchorOf(element) {
+  /**
+   * @param {Element} element
+   * @param {number} clickX viewport x of the click
+   * @param {number} clickY viewport y of the click
+   */
+  function anchorOf(element, clickX, clickY) {
     const rect = element.getBoundingClientRect();
     return {
-      // Document coordinates keep the pin glued to the content as the page scrolls.
-      x: Math.round(rect.left + window.scrollX),
-      y: Math.round(rect.top + window.scrollY),
-      // Viewport coordinates are where the element is right now, which is where a
-      // popover opened from this click belongs.
-      vx: Math.round(rect.left),
-      vy: Math.round(rect.top),
-      width: Math.round(rect.width),
-      height: Math.round(rect.height),
+      // Document coordinates of the click keep the pin where it was dropped as the
+      // page scrolls; the offset inside the element keeps it there if layout shifts.
+      x: Math.round(clickX + window.scrollX),
+      y: Math.round(clickY + window.scrollY),
+      ox: Math.round(clickX - rect.left),
+      oy: Math.round(clickY - rect.top),
     };
   }
 
@@ -99,56 +100,40 @@
       /** @type {HTMLElement | null} */
       let element = layer.querySelector(`[data-pin="${CSS.escape(pin.id)}"]`);
       if (!element) {
-        element = document.createElement("button");
-        element.setAttribute("type", "button");
+        element = document.createElement("div");
         element.className = "easel-pin";
         element.dataset.pin = pin.id;
         element.style.cssText = [
           "position:absolute",
           "display:grid",
           "place-content:center",
-          "min-width:22px",
-          "height:22px",
-          "padding:0 5px",
+          "box-sizing:border-box",
+          "min-width:24px",
+          "height:24px",
+          "padding:0 6px",
           "border-radius:999px",
-          "border:1px solid rgba(0,0,0,.35)",
-          "background:#f4c95d",
-          "color:#17130a",
-          "font:600 11px/1 'Geist Mono',ui-monospace,Menlo,monospace",
-          "box-shadow:0 3px 10px rgba(0,0,0,.35)",
-          "cursor:pointer",
-          "transition:background-color .18s ease, transform .18s ease",
+          "font:600 12px/1 ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif",
+          "font-variant-numeric:tabular-nums",
+          "box-shadow:0 1px 2px rgba(0,0,0,.18),0 4px 12px rgba(0,0,0,.18)",
+          "pointer-events:none",
+          "transition:transform .16s ease, box-shadow .16s ease",
+          "transform:translate(-50%,-50%)",
           "z-index:2147483000",
         ].join(";");
-        element.addEventListener("click", (event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          const rect = element.getBoundingClientRect();
-          post({ type: "pin", id: pin.id, vx: Math.round(rect.left), vy: Math.round(rect.top) });
-        });
         layer.appendChild(element);
       }
       element.textContent = String(pin.number);
-      element.title = pin.text || "";
       element.dataset.state = pin.state || "draft";
-      const colors = {
-        queued: "#b9c0cf",
-        seen: "#6fa8ff",
-        working: "#f4c95d",
-        done: "#8fe39e",
-        sent: "#f4c95d",
-      };
       if (pin.state === "draft") {
-        // A pin that has not been sent is an outline; a sent one is filled, so the
-        // artboard itself shows what the agent has already received.
-        element.style.background = "rgba(15,17,21,.55)";
-        element.style.color = "#f4c95d";
-        element.style.border = "2px solid #f4c95d";
+        // Not sent yet: an outline. Sent: filled. The artboard itself shows what the
+        // agent already has.
+        element.style.background = "#ffffff";
+        element.style.color = "#16181d";
+        element.style.border = "2px solid #16181d";
       } else {
-        const color = colors[pin.state] || colors.sent;
-        element.style.background = color;
-        element.style.color = "#17130a";
-        element.style.border = "1px solid rgba(0,0,0,.35)";
+        element.style.background = "#16181d";
+        element.style.color = "#ffffff";
+        element.style.border = "2px solid #ffffff";
       }
       const anchor = resolution(pin);
       if (!anchor.visible) {
@@ -156,24 +141,44 @@
         continue;
       }
       element.style.display = "grid";
-      element.style.left = `${anchor.x - 10}px`;
-      element.style.top = `${anchor.y - 10}px`;
+      element.style.left = `${anchor.x}px`;
+      element.style.top = `${anchor.y}px`;
     }
     for (const node of Array.from(layer.children)) {
       if (!(node instanceof HTMLElement) || !seen.has(node.dataset.pin)) node.remove();
     }
   }
 
-  /** @param {{ selector?: string, x?: number, y?: number }} pin */
+  /** @param {{ selector?: string, x?: number, y?: number, ox?: number, oy?: number }} pin */
   function resolution(pin) {
-    let rect = null;
-    if (pin.selector) {
-      const element = document.querySelector(pin.selector);
-      if (element) rect = element.getBoundingClientRect();
+    if (pin.selector && Number.isFinite(Number(pin.ox)) && Number.isFinite(Number(pin.oy))) {
+      let element;
+      try {
+        element = document.querySelector(pin.selector);
+      } catch {
+        element = null;
+      }
+      if (element) {
+        const rect = element.getBoundingClientRect();
+        return {
+          visible: true,
+          x: rect.left + window.scrollX + Math.min(Number(pin.ox), rect.width),
+          y: rect.top + window.scrollY + Math.min(Number(pin.oy), rect.height),
+        };
+      }
     }
-    if (!rect) return { visible: true, x: Number(pin.x) || 0, y: Number(pin.y) || 0 };
-    if (rect.bottom < -40 || rect.top > window.innerHeight + 40 || rect.right < -40) return { visible: false };
-    return { visible: true, x: rect.left + window.scrollX, y: rect.top + window.scrollY };
+    return { visible: true, x: Number(pin.x) || 0, y: Number(pin.y) || 0 };
+  }
+
+  /** The pin drawn at a viewport point, so a click on it opens that note. */
+  function pinAt(x, y) {
+    const docX = x + window.scrollX;
+    const docY = y + window.scrollY;
+    for (const pin of state.pins) {
+      const anchor = resolution(pin);
+      if (Math.abs(anchor.x - docX) <= 13 && Math.abs(anchor.y - docY) <= 13) return pin;
+    }
+    return null;
   }
 
   let frame = 0;
@@ -189,12 +194,12 @@
     /** @type {HTMLElement | null} */
     const element = pinLayer().querySelector(`[data-pin="${CSS.escape(id)}"]`);
     if (!element) return;
-    element.style.transform = "scale(1.45)";
-    element.style.boxShadow = "0 0 0 7px rgba(244,201,93,.22), 0 3px 10px rgba(0,0,0,.35)";
+    element.style.transform = "translate(-50%,-50%) scale(1.35)";
+    element.style.boxShadow = "0 0 0 6px rgba(37,99,235,.28), 0 4px 12px rgba(0,0,0,.2)";
     window.setTimeout(() => {
-      element.style.transform = "";
-      element.style.boxShadow = "";
-    }, 900);
+      element.style.transform = "translate(-50%,-50%)";
+      element.style.boxShadow = "0 1px 2px rgba(0,0,0,.18),0 4px 12px rgba(0,0,0,.18)";
+    }, 1100);
   }
 
   function hoverLayer() {
@@ -206,9 +211,9 @@
     layer.style.cssText = [
       "position:absolute",
       "pointer-events:none",
-      "border:1.5px solid rgba(244,201,93,.9)",
-      "border-radius:3px",
-      "background:rgba(244,201,93,.08)",
+      "border:1.5px solid #2563eb",
+      "border-radius:2px",
+      "background:rgba(37,99,235,.06)",
       "z-index:2147482900",
       "display:none",
     ].join(";");
@@ -360,6 +365,14 @@
         return;
       }
       if (data.type === "focus") {
+        const pin = state.pins.find((entry) => entry.id === String(data.id || ""));
+        if (pin && data.reveal) {
+          const anchor = resolution(pin);
+          const top = anchor.y - window.scrollY;
+          if (top < 40 || top > window.innerHeight - 40)
+            window.scrollTo({ top: Math.max(0, anchor.y - window.innerHeight / 3) });
+          schedulePins();
+        }
         flashPin(String(data.id || ""));
         return;
       }
@@ -385,21 +398,35 @@
         const x = Number(data.x);
         const y = Number(data.y);
         if (!Number.isFinite(x) || !Number.isFinite(y)) return;
-        const target = document.elementFromPoint(x, y);
-        if (data.hover) {
-          drawHover(target instanceof Element && !target.closest("[data-easel-ui]") ? target : null);
+        if (x < 0 || y < 0) {
+          drawHover(null);
           return;
         }
-        if (!(target instanceof Element) || target.closest("[data-easel-ui]")) return;
-        if (target === document.body || target === document.documentElement) return;
+        const onPin = pinAt(x, y);
+        const target = document.elementFromPoint(x, y);
+        const usable =
+          target instanceof Element &&
+          !target.closest("[data-easel-ui]") &&
+          target !== document.body &&
+          target !== document.documentElement;
+        if (data.hover) {
+          drawHover(!onPin && usable ? target : null);
+          return;
+        }
+        if (onPin) {
+          post({ type: "pin", id: onPin.id });
+          return;
+        }
+        if (!usable) return;
         const selector = selectorFor(target);
         if (!selector) return;
+        drawHover(null);
         post({
           type: "select",
           selector,
           tag: target.tagName.toLowerCase(),
           text: snippet(target),
-          ...anchorOf(target),
+          ...anchorOf(target, x, y),
         });
       }
     },
@@ -413,7 +440,13 @@
     (event) => {
       if (!event.ctrlKey && !event.metaKey) return;
       event.preventDefault();
-      post({ type: "zoom-wheel", x: event.clientX, y: event.clientY, deltaY: event.deltaY, deltaMode: event.deltaMode });
+      post({
+        type: "zoom-wheel",
+        x: event.clientX,
+        y: event.clientY,
+        deltaY: event.deltaY,
+        deltaMode: event.deltaMode,
+      });
     },
     { capture: true, passive: false },
   );
@@ -421,11 +454,46 @@
   for (const type of ["scroll", "resize"])
     window.addEventListener(type, schedulePins, { capture: true, passive: true });
 
+  // The board sizes each artboard to its content, so the height reported here must
+  // be the content's own, never the frame's: scrollHeight can only grow with the
+  // frame, which leaves short sections as tall white columns. When the content
+  // overflows, scrollHeight is exact; when it fits, the bottom of the body's own
+  // boxes is. The floor stops a page whose overflow comes from something outside those
+  // boxes from bouncing between the two answers.
   let reportedHeight = 0;
+  let overflowFloor = 0;
+  function contentHeight() {
+    const root = document.documentElement;
+    const body = document.body;
+    const viewport = Math.round(window.innerHeight);
+    if (root.scrollHeight > viewport + 1 || !body) {
+      overflowFloor = Math.max(overflowFloor, root.scrollHeight);
+      return root.scrollHeight;
+    }
+    let bottom = 0;
+    for (const child of Array.from(body.children)) {
+      if (child.closest("[data-easel-ui]") || /^(SCRIPT|STYLE|LINK|TEMPLATE)$/.test(child.tagName)) continue;
+      const style = getComputedStyle(child);
+      if (style.display === "none" || style.position === "fixed") continue;
+      const range = document.createRange();
+      range.selectNode(child);
+      const rect = range.getBoundingClientRect();
+      if (rect.width === 0 && rect.height === 0) continue;
+      bottom = Math.max(bottom, rect.bottom + (Number.parseFloat(style.marginBottom) || 0));
+    }
+    const bodyStyle = getComputedStyle(body);
+    bottom +=
+      (Number.parseFloat(bodyStyle.paddingBottom) || 0) +
+      (Number.parseFloat(bodyStyle.borderBottomWidth) || 0) +
+      (Number.parseFloat(bodyStyle.marginBottom) || 0) +
+      window.scrollY;
+    const measured = Math.ceil(Math.max(bottom, overflowFloor, 40));
+    // Only a clear shrink counts; anything near the frame is the frame itself.
+    return measured < viewport - 4 ? measured : viewport;
+  }
+
   function reportSize() {
-    const height = Math.round(
-      Math.max(document.body ? document.body.scrollHeight : 0, document.documentElement.scrollHeight),
-    );
+    const height = contentHeight();
     if (height === reportedHeight) return;
     reportedHeight = height;
     post({ type: "size", height, width: document.documentElement.scrollWidth });
@@ -444,7 +512,10 @@
   // the full document height without the page reflowing.
   let pinnedVh = 0;
   function pinViewportUnits() {
-    const viewport = Math.round(window.innerHeight);
+    // The board may open the frame at any height; a design's 100vh always means one
+    // screen of the device it is shown on.
+    const deviceHeights = { desktop: 900, ipad: 1112, phone: 844 };
+    const viewport = deviceHeights[deviceId] || Math.round(window.innerHeight);
     if (!viewport) return;
     pinnedVh = viewport;
     const replace = (value) =>
