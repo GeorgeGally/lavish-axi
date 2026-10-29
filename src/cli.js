@@ -555,9 +555,11 @@ async function replyCommand(args) {
 }
 
 function createReplyOutput(file) {
+  const isBoard = path.basename(file) === BOARD_FILE_NAME;
+  const subject = isBoard ? "the board" : file;
   return {
     reply: { file, status: "sent" },
-    next_step: `Lavish Editor accepted the reply for ${file} and is no longer showing Working. Run \`lavish-axi poll ${file}\` when you are ready to wait for more feedback.`,
+    next_step: `Lavish Editor accepted the reply for ${subject} and is no longer showing Working; every note it had delivered now reads Done on the board. Run \`lavish-axi poll ${file}\` when you are ready to wait for more feedback.`,
   };
 }
 

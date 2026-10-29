@@ -71,7 +71,7 @@
   --track-tight: -0.01em;
   --track-normal: 0;
   --track-brand: 0.02em;
-  --track-label: 0.08em;
+  --track-label: 0.02em;
   --track-caps: 0.12em;
   --space-1: 2px;
   --space-2: 4px;
@@ -160,8 +160,7 @@ body.lavish {
   font-family: var(--font-sans);
   font-size: 10px;
   font-weight: 600;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
+  letter-spacing: 0.02em;
   color: var(--fg-muted);
   position: relative;
   top: 1px;

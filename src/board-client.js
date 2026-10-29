@@ -1,4 +1,4 @@
-/* global document, window, location, IntersectionObserver, Element, HTMLElement */
+/* global CSS, document, window, location, IntersectionObserver, Element, HTMLElement */
 
 const bootstrap = JSON.parse(document.getElementById("easel-board")?.textContent || "{}");
 const key = String(bootstrap.key || "");
@@ -32,7 +32,12 @@ const sendButton = document.getElementById("send");
 const dockStatus = document.getElementById("dockStatus");
 const endedBanner = document.getElementById("ended");
 
-/** @param {string} tag @param {Record<string, string>} [attributes] @param {Array<Node | string>} [children] */
+/**
+ * @param {string} tag
+ * @param {Record<string, string>} [attributes]
+ * @param {Array<Node | string>} [children]
+ * @returns {any}
+ */
 function element(tag, attributes = {}, children = []) {
   const node = document.createElement(tag);
   for (const [name, value] of Object.entries(attributes)) {
@@ -240,6 +245,7 @@ function refreshItemChrome(id) {
   entry.label.textContent = item.label;
   entry.meta.textContent = item.w + "×" + item.h + (state.overflow.has(id) ? " · overflows" : "");
   entry.element.dataset.pair = String(Boolean(pairFor(id)));
+  entry.element.dataset.state = itemState(item);
 }
 
 function syncItems() {
@@ -295,6 +301,16 @@ function postPins(id) {
   postToItem(id, { type: "pins", pins: pinsFor(item) });
 }
 
+function receiptFor(note) {
+  if (!note.prompt_id) return "draft";
+  const entry = state.chat.find((message) => message && message.prompt_id === note.prompt_id);
+  if (!entry) return "queued";
+  if (entry.done_at) return "done";
+  if (entry.working_at) return "working";
+  if (entry.delivered_at) return "seen";
+  return "queued";
+}
+
 function pinsFor(item) {
   return (item.notes || []).map((note) => ({
     id: note.id,
@@ -302,8 +318,8 @@ function pinsFor(item) {
     selector: note.selector,
     x: note.x,
     y: note.y,
-    text: note.text,
-    state: "draft",
+    text: note.text || note.label,
+    state: receiptFor(note),
   }));
 }
 
@@ -479,27 +495,52 @@ function randomId() {
 
 async function send() {
   if (state.ended) return;
-  const text = composerInput.value.trim();
-  if (!text) return;
+  const message = composerInput.value.trim();
+  const drafts = boardNotes().filter(({ note }) => !note.prompt_id && String(note.text || "").trim());
+  if (!message && drafts.length === 0) return;
+  const sent = [];
+  /** @type {any[]} */
+  const prompts = drafts.map(({ item, note }) => {
+    const promptId = randomId();
+    note.prompt_id = promptId;
+    sent.push({ item, note, promptId });
+    return {
+      uid: randomId(),
+      prompt_id: promptId,
+      prompt: String(note.text || "").trim(),
+      selector: note.selector,
+      text: note.label,
+      tag: "pin",
+      item: { id: item.id, label: item.label },
+      pin: { id: note.id, number: note.number },
+    };
+  });
+  if (message) prompts.push({ uid: randomId(), prompt: message, tag: "message" });
   sendButton.disabled = true;
   try {
     const response = await fetch(`/api/${encodeURIComponent(key)}/prompts`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ prompts: [{ uid: randomId(), prompt: text, tag: "message" }], domSnapshot: "" }),
+      body: JSON.stringify({ prompts, domSnapshot: "" }),
     });
     if (!response.ok) {
-      dockStatus.textContent = "Could not reach the agent. Your text is still here.";
+      for (const entry of sent) delete entry.note.prompt_id;
+      dockStatus.textContent = "Could not reach the agent. Your notes are still here.";
+      renderChips();
       return;
     }
     composerInput.value = "";
     autosize();
+    for (const itemId of new Set(sent.map((entry) => entry.item.id))) persistNotes(itemId, { immediate: true });
+    renderChips();
     dockStatus.textContent = "Sent.";
     setTimeout(() => {
       if (dockStatus.textContent === "Sent.") dockStatus.textContent = "";
     }, 1800);
   } catch {
-    dockStatus.textContent = "Could not reach the agent. Your text is still here.";
+    for (const entry of sent) delete entry.note.prompt_id;
+    renderChips();
+    dockStatus.textContent = "Could not reach the agent. Your notes are still here.";
   } finally {
     sendButton.disabled = state.ended;
   }
@@ -548,7 +589,11 @@ async function refreshBoard() {
     const payload = await response.json();
     if (Array.isArray(payload.items)) {
       const previousTabs = state.tabs.map((tab) => tab.id).join(",");
-      state.items = payload.items;
+      const pendingNotes = new Set(noteTimers.keys());
+      state.items = payload.items.map((item) => {
+        const local = itemById(item.id);
+        return pendingNotes.has(item.id) && local ? { ...item, notes: local.notes } : item;
+      });
       state.tabs = payload.tabs || state.tabs;
       state.pairs = payload.pairs || state.pairs;
       state.chat = Array.isArray(payload.chat) ? payload.chat : state.chat;
@@ -571,6 +616,11 @@ function onItemMessage(event) {
   const entry = state.entries.get(id);
   if (!entry || event.source !== entry.iframe.contentWindow) return;
   if (data.type === "ready") postPins(id);
+  if (data.type === "select") {
+    const item = itemById(id);
+    if (item && !state.ended) addNote(item, data);
+  }
+  if (data.type === "pin") focusNote(String(data.id || ""));
   if (data.type === "layout") {
     if (data.overflow) state.overflow.add(id);
     else state.overflow.delete(id);
@@ -578,8 +628,136 @@ function onItemMessage(event) {
   }
 }
 
+function boardNotes() {
+  const entries = [];
+  for (const item of state.items) {
+    for (const note of item.notes || []) entries.push({ item, note });
+  }
+  return entries.sort((left, right) => left.note.number - right.note.number);
+}
+
+function nextNoteNumber() {
+  return boardNotes().reduce((highest, entry) => Math.max(highest, entry.note.number || 0), 0) + 1;
+}
+
+/** @type {Map<string, ReturnType<typeof setTimeout>>} */
+const noteTimers = new Map();
+
+function persistNotes(itemId, { immediate = false } = {}) {
+  const item = itemById(itemId);
+  if (!item || state.ended) return;
+  const pending = noteTimers.get(itemId);
+  if (pending) clearTimeout(pending);
+  const write = () => {
+    noteTimers.delete(itemId);
+    fetch(`/api/boards/${encodeURIComponent(key)}/notes`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ item: itemId, notes: item.notes || [] }),
+    }).catch(() => {});
+  };
+  if (immediate) write();
+  else noteTimers.set(itemId, setTimeout(write, 450));
+}
+
+function itemState(item) {
+  const states = (item.notes || []).map((note) => receiptFor(note));
+  if (states.length === 0) return "";
+  if (states.includes("draft")) return "note";
+  if (states.includes("working")) return "working";
+  if (states.includes("queued") || states.includes("seen")) return "seen";
+  return "done";
+}
+
+function anchorLabel(note) {
+  const excerpt = String(note.label || "").slice(0, 48);
+  return excerpt ? `${note.tag || "element"} "${excerpt}"` : note.tag || "element";
+}
+
+function createChip(item, note) {
+  const chip = element("div", { class: "chip", "data-state": receiptFor(note), "data-note": note.id });
+  chip.append(element("span", { class: "chip-number", text: String(note.number) }));
+  const anchor = element("button", { class: "chip-anchor", type: "button", text: anchorLabel(note) });
+  anchor.title = `Show pin ${note.number} on ${item.label}`;
+  anchor.addEventListener("click", () => focusNote(note.id));
+  const input = element("input", { class: "chip-input", type: "text", placeholder: "What should change?" });
+  input.value = note.text || "";
+  input.addEventListener("input", () => {
+    note.text = input.value;
+    persistNotes(item.id);
+  });
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      send();
+    }
+  });
+  const close = element("button", { class: "chip-close", type: "button", text: "×" });
+  close.title = note.prompt_id ? "Sent notes stay on the board" : "Remove this note";
+  close.disabled = Boolean(note.prompt_id);
+  if (!note.prompt_id) {
+    close.addEventListener("click", () => {
+      item.notes = (item.notes || []).filter((entry) => entry.id !== note.id);
+      persistNotes(item.id, { immediate: true });
+      renderChips();
+      postPins(item.id);
+    });
+  }
+  chip.append(anchor, input, close);
+  return chip;
+}
+
+function renderChips() {
+  const chips = document.getElementById("chips");
+  if (!chips) return;
+  chips.replaceChildren(...boardNotes().map(({ item, note }) => createChip(item, note)));
+}
+
+/** @type {ReturnType<typeof setTimeout> | undefined} */
+let flashTimer;
+function focusNote(noteId) {
+  const entry = boardNotes().find((candidate) => candidate.note.id === noteId);
+  if (!entry) return;
+  /** @type {any} */
+  const chip = document.getElementById("chips")?.querySelector(`[data-note="${CSS.escape(noteId)}"]`);
+  if (!chip) return;
+  if (entry.item.tab !== state.activeTab) setTab(entry.item.tab);
+  chip.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" });
+  const input = chip.querySelector("input");
+  if (input && !entry.note.prompt_id) input.focus();
+  chip.dataset.flash = "true";
+  clearTimeout(flashTimer);
+  flashTimer = setTimeout(() => {
+    delete chip.dataset.flash;
+  }, 1100);
+  postToItem(entry.item.id, { type: "focus", id: noteId });
+}
+
+function addNote(item, payload) {
+  const note = {
+    id: `n${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`,
+    number: nextNoteNumber(),
+    label: String(payload.text || "").slice(0, 90),
+    selector: payload.selector,
+    tag: payload.tag,
+    text: "",
+    x: Math.round(Number(payload.x) || 0),
+    y: Math.round(Number(payload.y) || 0),
+    at: new Date().toISOString(),
+  };
+  item.notes = [...(item.notes || []), note];
+  persistNotes(item.id, { immediate: true });
+  renderChips();
+  postPins(item.id);
+  focusNote(note.id);
+}
+
 function renderNotes() {
-  // Milestone 3 fills the composer chips from notes and chat receipts.
+  renderChips();
+  for (const [id] of state.entries) {
+    postPins(id);
+    refreshItemChrome(id);
+  }
 }
 
 function openTune(_id) {

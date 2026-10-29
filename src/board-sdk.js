@@ -126,6 +126,7 @@
       element.dataset.state = pin.state || "draft";
       const colors = {
         draft: "#f4c95d",
+        queued: "#b9c0cf",
         seen: "#6fa8ff",
         working: "#f4c95d",
         done: "#8fe39e",

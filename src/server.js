@@ -936,6 +936,36 @@ export async function serve({
    * @param {string} itemId
    * @param {(item: import("./board.js").BoardItem, board: import("./board.js").Board) => void} mutate
    */
+  // Board writes are read-modify-write on one file, so they serialize through the store's
+  // lock: two notes saved from different items at once would otherwise each rewrite
+  // board.json from a stale read and drop the other's change.
+  /**
+   * @param {string} key
+   * @param {import("express").Response} res
+   * @param {(resolved: { session: any, dir: string, board: import("./board.js").Board }) => Promise<void>} mutate
+   */
+  async function withBoardWrite(key, res, mutate) {
+    await store.runExclusive(async () => {
+      // Read the session straight from state: `findByKey` takes this same lock, and
+      // acquiring it again inside a critical section would deadlock.
+      const state = await store.readState();
+      const session = state.sessions[String(key || "")];
+      const resolved =
+        session && path.basename(session.file) === BOARD_FILE_NAME
+          ? { session, dir: path.dirname(session.file), board: await readBoard(path.dirname(session.file)) }
+          : null;
+      if (!resolved) {
+        res.status(404).json({ status: "error", error: "board not found" });
+        return;
+      }
+      try {
+        await mutate(resolved);
+      } catch (error) {
+        if (!boardErrorResponse(error, res)) throw error;
+      }
+    });
+  }
+
   async function savedBoardItem(dir, board, itemId, mutate) {
     const next = {
       ...board,
@@ -1001,25 +1031,21 @@ export async function serve({
   app.post("/api/boards/:key/place", async (req, res, next) => {
     try {
       if (!boardWriteGuard(req, res)) return;
-      const resolved = await boardForRequest(req.params.key);
-      if (!resolved) {
-        res.status(404).json({ status: "error", error: "board not found" });
-        return;
-      }
       const changes = Array.isArray(req.body?.items) ? req.body.items.slice(0, 200) : [];
-      if (changes.length === 0) {
-        res.json({ status: "ok" });
-        return;
-      }
-      const next = { ...resolved.board, items: resolved.board.items.map((item) => ({ ...item })) };
-      for (const change of changes) {
-        if (!change || typeof change !== "object") continue;
-        placeItem(next, String(change.id || ""), change);
-      }
-      const saved = await writeBoard(resolved.dir, next);
-      res.json({ status: "ok", board: publicBoard(saved) });
+      await withBoardWrite(req.params.key, res, async (resolved) => {
+        if (changes.length === 0) {
+          res.json({ status: "ok" });
+          return;
+        }
+        const next = { ...resolved.board, items: resolved.board.items.map((item) => ({ ...item })) };
+        for (const change of changes) {
+          if (!change || typeof change !== "object") continue;
+          placeItem(next, String(change.id || ""), change);
+        }
+        const saved = await writeBoard(resolved.dir, next);
+        res.json({ status: "ok", board: publicBoard(saved) });
+      });
     } catch (error) {
-      if (boardErrorResponse(error, res)) return;
       next(error);
     }
   });
@@ -1027,19 +1053,15 @@ export async function serve({
   app.post("/api/boards/:key/notes", async (req, res, next) => {
     try {
       if (!boardWriteGuard(req, res)) return;
-      const resolved = await boardForRequest(req.params.key);
-      if (!resolved) {
-        res.status(404).json({ status: "error", error: "board not found" });
-        return;
-      }
       const itemId = String(req.body?.item || "");
       const notes = Array.isArray(req.body?.notes) ? req.body.notes.slice(0, 300) : [];
-      const item = await savedBoardItem(resolved.dir, resolved.board, itemId, (entry) => {
-        entry.notes = notes;
+      await withBoardWrite(req.params.key, res, async (resolved) => {
+        const item = await savedBoardItem(resolved.dir, resolved.board, itemId, (entry) => {
+          entry.notes = notes;
+        });
+        res.json({ status: "ok", notes: item.notes });
       });
-      res.json({ status: "ok", notes: item.notes });
     } catch (error) {
-      if (boardErrorResponse(error, res)) return;
       next(error);
     }
   });
@@ -1047,24 +1069,20 @@ export async function serve({
   app.post("/api/boards/:key/tune", async (req, res, next) => {
     try {
       if (!boardWriteGuard(req, res)) return;
-      const resolved = await boardForRequest(req.params.key);
-      if (!resolved) {
-        res.status(404).json({ status: "error", error: "board not found" });
-        return;
-      }
-      const specs = await boardTuneSpecs(resolved.dir, resolved.board);
-      const values = req.body?.values && typeof req.body.values === "object" ? req.body.values : {};
       const itemId = String(req.body?.item || "");
-      const item = await savedBoardItem(resolved.dir, resolved.board, itemId, (entry) => {
-        entry.tune = values;
-      });
-      res.json({
-        status: "ok",
-        tune: item.tune,
-        css: tuneCssValues(resolved.board, itemId, specs[itemId] || [], item.tune),
+      const values = req.body?.values && typeof req.body.values === "object" ? req.body.values : {};
+      await withBoardWrite(req.params.key, res, async (resolved) => {
+        const specs = await boardTuneSpecs(resolved.dir, resolved.board);
+        const item = await savedBoardItem(resolved.dir, resolved.board, itemId, (entry) => {
+          entry.tune = values;
+        });
+        res.json({
+          status: "ok",
+          tune: item.tune,
+          css: tuneCssValues(resolved.board, itemId, specs[itemId] || [], item.tune),
+        });
       });
     } catch (error) {
-      if (boardErrorResponse(error, res)) return;
       next(error);
     }
   });
@@ -1072,25 +1090,21 @@ export async function serve({
   app.post("/api/boards/:key/versions", async (req, res, next) => {
     try {
       if (!boardWriteGuard(req, res)) return;
-      const resolved = await boardForRequest(req.params.key);
-      if (!resolved) {
-        res.status(404).json({ status: "error", error: "board not found" });
-        return;
-      }
       const itemId = String(req.body?.item || "");
       const label = String(req.body?.label || "").trim();
-      const item = await savedBoardItem(resolved.dir, resolved.board, itemId, (entry) => {
-        const number = entry.versions.length + 1;
-        entry.versions.push({
-          id: `v${number}`,
-          label: label || `V${number}`,
-          values: { ...entry.tune },
-          at: new Date().toISOString(),
+      await withBoardWrite(req.params.key, res, async (resolved) => {
+        const item = await savedBoardItem(resolved.dir, resolved.board, itemId, (entry) => {
+          const number = entry.versions.length + 1;
+          entry.versions.push({
+            id: `v${number}`,
+            label: label || `V${number}`,
+            values: { ...entry.tune },
+            at: new Date().toISOString(),
+          });
         });
+        res.json({ status: "ok", versions: item.versions });
       });
-      res.json({ status: "ok", versions: item.versions });
     } catch (error) {
-      if (boardErrorResponse(error, res)) return;
       next(error);
     }
   });

@@ -854,11 +854,51 @@ function normalizePrompt(prompt) {
   };
   const promptId = normalizePromptId(prompt.prompt_id);
   if (promptId) normalized.prompt_id = promptId;
+  // A board note names the item and pin it belongs to, so the agent knows which
+  // HTML file on the plane to change without guessing from a selector.
+  const item = normalizeBoardItemRef(prompt.item);
+  if (item) normalized.item = item;
+  const pin = normalizeBoardPinRef(prompt.pin);
+  if (pin) normalized.pin = pin;
   const target = normalizeTarget(prompt.target);
   if (target) normalized.target = target;
   const { refs, malformed } = normalizeAttachmentRefs(prompt.attachments);
   if (refs.length > 0) normalized.attachments = refs;
   return { prompt: normalized, malformed };
+}
+
+/**
+ * @param {unknown} value
+ * @returns {{ id: string, label: string } | null}
+ */
+function normalizeBoardItemRef(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const entry = /** @type {{ id?: unknown, label?: unknown }} */ (value);
+  const id = String(entry.id || "")
+    .trim()
+    .slice(0, 60);
+  if (!id) return null;
+  return {
+    id,
+    label: String(entry.label || "")
+      .trim()
+      .slice(0, 120),
+  };
+}
+
+/**
+ * @param {unknown} value
+ * @returns {{ id?: string, number: number } | null}
+ */
+function normalizeBoardPinRef(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const entry = /** @type {{ id?: unknown, number?: unknown }} */ (value);
+  const number = Math.trunc(Number(entry.number));
+  if (!Number.isFinite(number) || number < 1) return null;
+  const id = String(entry.id || "")
+    .trim()
+    .slice(0, 60);
+  return id ? { id, number } : { number };
 }
 
 // Settlement identity is transcript-owned. The agent-facing prompt list must not carry it:

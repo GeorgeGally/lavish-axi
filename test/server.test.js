@@ -854,7 +854,7 @@ test("chrome top bar follows the design mock wordmark and overflow menu treatmen
   assert.match(html, /class="brand-mark">Easel/);
   assert.match(html, /class="brand-support">Board/);
   assert.match(css, /font-family:var\(--font-serif\)/);
-  assert.match(css, /letter-spacing:\.18em/);
+  assert.match(css, /letter-spacing:\.02em/);
   assert.match(html, /class="more-button" id="moreButton"/);
   assert.match(html, /class="menu more-menu" id="moreMenu" hidden/);
   assert.doesNotMatch(html, /class="file-input"/);

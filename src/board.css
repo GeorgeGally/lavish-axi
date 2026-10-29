@@ -87,9 +87,8 @@ button:disabled {
 
 .brand {
   font-family: var(--font-serif);
-  font-size: 17px;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
+  font-size: 18px;
+  letter-spacing: 0.02em;
   color: var(--cream-50);
 }
 
@@ -412,7 +411,7 @@ button:disabled {
 
 .chips {
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
   gap: 6px;
 }
 
@@ -424,7 +423,7 @@ button:disabled {
   display: flex;
   align-items: center;
   gap: 8px;
-  max-width: 100%;
+  width: 100%;
   padding: 6px 8px 6px 10px;
   border: 1px solid var(--border-subtle);
   border-radius: 10px;
@@ -438,6 +437,11 @@ button:disabled {
 
 .chip[data-state="done"] {
   border-color: rgba(143, 227, 158, 0.5);
+}
+
+.chip[data-flash="true"] {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(244, 201, 93, 0.16);
 }
 
 .chip-number {
@@ -494,8 +498,12 @@ button:disabled {
   padding: 0 4px;
 }
 
-.chip-close:hover {
+.chip-close:hover:not(:disabled) {
   color: var(--danger);
+}
+
+.chip-close:disabled {
+  opacity: 0.35;
 }
 
 .composer-row {
@@ -636,8 +644,7 @@ button:disabled {
   font-family: var(--font-mono);
   font-size: 10px;
   color: var(--fg-label);
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
+  letter-spacing: 0.02em;
 }
 
 .tune-control-value {
@@ -685,7 +692,7 @@ button:disabled {
   border-radius: 8px;
   font-family: var(--font-mono);
   font-size: 10px;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.02em;
   color: var(--fg-dim);
   transition:
     border-color 120ms ease,

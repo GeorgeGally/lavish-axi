@@ -227,6 +227,56 @@ test("a board session accepts queued notes and reports them as pending", async (
   assert.equal(state.chat.at(-1).text, "Tighten the headline");
 });
 
+test("a pin prompt keeps the item and pin it belongs to, and earns its receipts", async (t) => {
+  const { base, boardDirectory } = await setup(t);
+  const registered = await register(base, boardDirectory);
+  const board = await readBoard(boardDirectory);
+  seedItem(board, { file: "v1.html", label: "Hero · A" });
+  await writeFile(boardFilePath(boardDirectory), `${JSON.stringify(board, null, 2)}\n`);
+
+  const queued = await fetch(`${base}/api/${registered.key}/prompts`, {
+    method: "POST",
+    headers: write(base),
+    body: JSON.stringify({
+      prompts: [
+        {
+          uid: "u1",
+          prompt_id: "p-1",
+          prompt: "Too loud",
+          selector: "h1",
+          text: "The whole fleet",
+          tag: "pin",
+          item: { id: "v1", label: "Hero · A" },
+          pin: { id: "n1", number: 3 },
+        },
+      ],
+      domSnapshot: "",
+    }),
+  });
+  assert.equal(queued.status, 200);
+
+  const polled = await fetch(
+    `${base}/api/poll?file=${encodeURIComponent(boardFilePath(boardDirectory))}&timeoutMs=4000`,
+  ).then((response) => response.json());
+  assert.equal(polled.status, "feedback");
+  assert.equal(polled.prompts.length, 1);
+  assert.deepEqual(polled.prompts[0].item, { id: "v1", label: "Hero · A" });
+  assert.deepEqual(polled.prompts[0].pin, { id: "n1", number: 3 });
+  assert.equal(polled.prompts[0].prompt_id, undefined);
+
+  const seen = await fetch(`${base}/api/boards/${registered.key}`).then((response) => response.json());
+  assert.ok(seen.chat.at(-1).delivered_at, "the note reads Seen once a poll takes it");
+
+  const reply = await fetch(`${base}/api/${registered.key}/agent-reply`, {
+    method: "POST",
+    headers: write(base),
+    body: JSON.stringify({ agent_reply: "Made the headline quieter." }),
+  });
+  assert.equal(reply.status, 200);
+  const done = await fetch(`${base}/api/boards/${registered.key}`).then((response) => response.json());
+  assert.ok(done.chat.find((entry) => entry.prompt_id === "p-1").done_at, "the note reads Done after a reply");
+});
+
 test("an unknown board key is not a board", async (t) => {
   const { base } = await setup(t);
   const missing = await fetch(`${base}/api/boards/deadbeef`);
