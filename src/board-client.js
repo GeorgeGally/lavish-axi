@@ -301,6 +301,22 @@ function postPins(id) {
   postToItem(id, { type: "pins", pins: pinsFor(item) });
 }
 
+function tuneCss(item, values = item.tune) {
+  const css = {};
+  for (const control of item.tuneSpec || []) {
+    const raw = values?.[control.id];
+    if (raw === undefined || raw === "") continue;
+    css[control.css] = control.type === "number" && control.unit ? `${raw}${control.unit}` : String(raw);
+  }
+  return css;
+}
+
+function postTune(id) {
+  const item = itemById(id);
+  if (!item || !Array.isArray(item.tuneSpec) || item.tuneSpec.length === 0) return;
+  postToItem(id, { type: "tune", values: tuneCss(item) });
+}
+
 function receiptFor(note) {
   if (!note.prompt_id) return "draft";
   const entry = state.chat.find((message) => message && message.prompt_id === note.prompt_id);
@@ -615,7 +631,10 @@ function onItemMessage(event) {
   const id = String(data.item || "");
   const entry = state.entries.get(id);
   if (!entry || event.source !== entry.iframe.contentWindow) return;
-  if (data.type === "ready") postPins(id);
+  if (data.type === "ready") {
+    postPins(id);
+    postTune(id);
+  }
   if (data.type === "select") {
     const item = itemById(id);
     if (item && !state.ended) addNote(item, data);
@@ -760,8 +779,192 @@ function renderNotes() {
   }
 }
 
-function openTune(_id) {
-  // Milestone 4 fills the tune panel.
+let tuneItemId = "";
+/** @type {ReturnType<typeof setTimeout> | undefined} */
+let tuneSaveTimer;
+
+function tunePanel() {
+  return document.getElementById("tune");
+}
+
+function openTune(id) {
+  const item = itemById(id);
+  if (!item) return;
+  tuneItemId = id;
+  for (const control of item.tuneSpec || []) {
+    if (item.tune[control.id] === undefined || item.tune[control.id] === "") {
+      item.tune[control.id] = control.value ?? "";
+    }
+  }
+  const panel = tunePanel();
+  if (panel) panel.hidden = false;
+  renderTune();
+}
+
+function closeTune() {
+  const panel = tunePanel();
+  if (panel) panel.hidden = true;
+  tuneItemId = "";
+}
+
+function renderTune() {
+  const item = itemById(tuneItemId);
+  const panel = tunePanel();
+  if (!item || !panel) return;
+  const sub = document.getElementById("tuneSub");
+  if (sub) sub.textContent = item.file;
+  const body = document.getElementById("tuneBody");
+  if (!body) return;
+  const spec = item.tuneSpec || [];
+  if (spec.length === 0) {
+    body.replaceChildren(
+      element("p", {
+        class: "tune-empty",
+        text: `${item.file} declares no controls yet. Add a <script type="application/easel-tune"> array of {id,label,type,css} entries bound to its CSS custom properties to tune it here.`,
+      }),
+    );
+  } else {
+    body.replaceChildren(...spec.map((control) => createTuneControl(item, control)));
+  }
+  for (const id of ["tuneSave", "tuneCopy", "tuneReset"]) {
+    const button = /** @type {any} */ (document.getElementById(id));
+    if (button) button.disabled = spec.length === 0;
+  }
+  renderVersions(item);
+}
+
+function createTuneControl(item, control) {
+  const wrapper = element("div", { class: "tune-control" });
+  const valueLabel = element("span", { class: "tune-control-value", text: String(item.tune[control.id] ?? "") });
+  const label = element("label", { class: "tune-control-label" });
+  label.append(element("span", { text: control.label }), valueLabel);
+  wrapper.append(label);
+  const apply = (raw) => {
+    // The five-second refresh replaces item objects, so a panel opened a moment ago
+    // holds a stale one. Always write through the live item, never the captured copy.
+    const live = itemById(item.id) || item;
+    live.tune[control.id] = raw;
+    item.tune = live.tune;
+    valueLabel.textContent = String(raw);
+    postToItem(item.id, { type: "tune", values: tuneCss(live) });
+    persistTune(item.id);
+  };
+  if (control.type === "color") {
+    const input = element("input", { type: "color" });
+    input.value = item.tune[control.id] || "#000000";
+    input.addEventListener("input", () => apply(input.value));
+    wrapper.append(input);
+  } else if (control.type === "select") {
+    const select = element("select", {});
+    for (const option of control.options || []) {
+      const node = element("option", { value: option.value, text: option.label });
+      select.append(node);
+    }
+    select.value = String(item.tune[control.id] ?? "");
+    select.addEventListener("change", () => apply(select.value));
+    wrapper.append(select);
+  } else {
+    const input = element("input", {
+      type: "range",
+      min: String(control.min ?? 0),
+      max: String(control.max ?? 100),
+      step: String(control.step ?? 1),
+    });
+    input.value = String(item.tune[control.id] ?? control.value ?? 0);
+    input.addEventListener("input", () => apply(input.value));
+    wrapper.append(input);
+  }
+  return wrapper;
+}
+
+function flushTune(item) {
+  if (!item || state.ended) return Promise.resolve(false);
+  return fetch(`/api/boards/${encodeURIComponent(key)}/tune`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ item: item.id, values: item.tune }),
+  })
+    .then((response) => response.ok)
+    .catch(() => false);
+}
+
+function persistTune(itemId) {
+  clearTimeout(tuneSaveTimer);
+  tuneSaveTimer = setTimeout(() => flushTune(itemById(itemId)), 350);
+}
+
+function renderVersions(item) {
+  const container = document.getElementById("tuneVersions");
+  if (!container) return;
+  const versions = item.versions || [];
+  container.replaceChildren(
+    ...versions.map((version) => {
+      const button = element("button", { class: "version", type: "button" });
+      const thumb = element("div", { class: "version-thumb" });
+      const frame = element("iframe", { sandbox: "allow-scripts allow-forms", loading: "lazy", title: version.label });
+      frame.src = itemUrl(item);
+      frame.addEventListener("load", () => {
+        frame.contentWindow?.postMessage(
+          { channel: "easel", item: item.id, type: "tune", values: tuneCss(item, version.values) },
+          "*",
+        );
+      });
+      thumb.append(frame);
+      button.append(thumb, element("span", { class: "version-label", text: version.label }));
+      const current = JSON.stringify(version.values) === JSON.stringify(item.tune);
+      button.setAttribute("aria-current", String(current));
+      button.addEventListener("click", () => {
+        const live = itemById(item.id) || item;
+        live.tune = { ...version.values };
+        item.tune = live.tune;
+        postToItem(item.id, { type: "tune", values: tuneCss(live) });
+        persistTune(item.id);
+        renderTune();
+      });
+      return button;
+    }),
+  );
+}
+
+async function saveTuneVersion() {
+  const item = itemById(tuneItemId);
+  if (!item) return;
+  clearTimeout(tuneSaveTimer);
+  await flushTune(item);
+  const response = await fetch(`/api/boards/${encodeURIComponent(key)}/versions`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ item: item.id }),
+  }).catch(() => null);
+  if (!response || !response.ok) return;
+  const payload = await response.json().catch(() => null);
+  if (payload?.versions) item.versions = payload.versions;
+  renderVersions(item);
+}
+
+function resetTune() {
+  const item = itemById(tuneItemId);
+  if (!item) return;
+  for (const control of item.tuneSpec || []) item.tune[control.id] = control.value ?? "";
+  postToItem(item.id, { type: "tune", values: tuneCss(item) });
+  persistTune(item.id);
+  renderTune();
+}
+
+function copyTune() {
+  const item = itemById(tuneItemId);
+  if (!item) return;
+  const text = item.tuneInstruction || `${item.label}: no tune values set.`;
+  const done = () => {
+    const sub = document.getElementById("tuneSub");
+    if (!sub) return;
+    sub.textContent = "Copied for the agent";
+    setTimeout(() => {
+      if (sub.textContent === "Copied for the agent") sub.textContent = item.file;
+    }, 1800);
+  };
+  if (navigator.clipboard?.writeText) navigator.clipboard.writeText(text).then(done, done);
+  else done();
 }
 
 window.addEventListener("message", onItemMessage);
@@ -778,6 +981,10 @@ window.addEventListener("keydown", (event) => {
   if (event.key === "-") zoomBy(1 / 1.2);
 });
 
+document.getElementById("tuneClose")?.addEventListener("click", closeTune);
+document.getElementById("tuneSave")?.addEventListener("click", saveTuneVersion);
+document.getElementById("tuneCopy")?.addEventListener("click", copyTune);
+document.getElementById("tuneReset")?.addEventListener("click", resetTune);
 document.getElementById("zoomIn")?.addEventListener("click", () => zoomBy(1.2));
 document.getElementById("zoomOut")?.addEventListener("click", () => zoomBy(1 / 1.2));
 document.getElementById("fit")?.addEventListener("click", () => fitTab());

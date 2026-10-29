@@ -653,7 +653,33 @@ button:disabled {
 
 .tune-control input[type="range"] {
   width: 100%;
-  accent-color: var(--accent);
+  height: 4px;
+  margin: 8px 0;
+  border-radius: 999px;
+  background: var(--steel-600);
+  appearance: none;
+  -webkit-appearance: none;
+  outline: none;
+}
+
+.tune-control input[type="range"]::-webkit-slider-thumb {
+  width: 14px;
+  height: 14px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--accent);
+  appearance: none;
+  -webkit-appearance: none;
+  cursor: grab;
+}
+
+.tune-control input[type="range"]::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: grab;
 }
 
 .tune-control input[type="color"] {

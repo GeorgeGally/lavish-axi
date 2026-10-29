@@ -69,6 +69,7 @@ import {
   readBoard,
   readOrCreateBoard,
   tuneCssValues,
+  tuneInstruction,
   writeBoard,
 } from "./board.js";
 import { createBoardHtml } from "./board-page.js";
@@ -894,7 +895,10 @@ export async function serve({
   function publicBoard(board, specs = {}) {
     return {
       ...board,
-      items: board.items.map((item) => ({ ...item, tuneSpec: specs[item.id] || [] })),
+      items: board.items.map((item) => {
+        const spec = specs[item.id] || [];
+        return { ...item, tuneSpec: spec, tuneInstruction: spec.length > 0 ? tuneInstruction(item, spec) : "" };
+      }),
     };
   }
 

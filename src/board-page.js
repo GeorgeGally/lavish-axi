@@ -73,7 +73,7 @@ export function createBoardHtml(session, board, { tuneSpecs = {}, chat = [], end
   <div id="tuneBody"></div>
   <div class="tune-actions">
     <button class="tune-action" id="tuneSave" type="button">Save version</button>
-    <button class="tune-action" id="tuneCopy" type="button">Copy for agent</button>
+    <button class="tune-action" id="tuneCopy" type="button">Copy</button>
     <button class="tune-action" id="tuneReset" type="button">Reset</button>
   </div>
   <div class="versions" id="tuneVersions"></div>

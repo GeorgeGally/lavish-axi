@@ -90,6 +90,7 @@ test("a board registers as a session and renders one page for its items", async 
   const state = await fetch(`${base}/api/boards/${registered.key}`).then((response) => response.json());
   assert.equal(state.name, path.basename(dir) === "hero" ? "hero" : state.name);
   assert.equal(state.items[0].tuneSpec[0].css, "--radius");
+  assert.match(state.items[0].tuneInstruction, /v1\.html/);
   assert.equal(state.ended, false);
 });
 
@@ -190,6 +191,10 @@ test("notes, tune values and versions persist through the board routes", async (
   assert.equal(versions.versions.length, 1);
   assert.equal(versions.versions[0].label, "Wide");
   assert.equal(versions.versions[0].values.radius, "20");
+
+  const instructed = await fetch(`${base}/api/boards/${registered.key}`).then((response) => response.json());
+  assert.match(instructed.items[0].tuneInstruction, /--radius/);
+  assert.match(instructed.items[0].tuneInstruction, /20px/);
 
   const reread = await readBoard(boardDirectory);
   assert.equal(reread.items[0].notes.length, 1);
