@@ -9,7 +9,7 @@
   const itemId = url.searchParams.get("item") || "";
   const deviceId = url.searchParams.get("device") || "desktop";
   const channel = "easel";
-  const state = { pins: [], tuning: {}, annotate: false };
+  const state = { pins: [], tuning: {} };
 
   function parentWindow() {
     return parent && parent !== window ? parent : null;
@@ -126,15 +126,24 @@
       element.title = pin.text || "";
       element.dataset.state = pin.state || "draft";
       const colors = {
-        draft: "#f4c95d",
         queued: "#b9c0cf",
         seen: "#6fa8ff",
         working: "#f4c95d",
         done: "#8fe39e",
+        sent: "#f4c95d",
       };
-      element.style.background = colors[pin.state] || colors.draft;
-      if (pin.state === "draft") element.style.borderStyle = "dashed";
-      else element.style.borderStyle = "solid";
+      if (pin.state === "draft") {
+        // A pin that has not been sent is an outline; a sent one is filled, so the
+        // artboard itself shows what the agent has already received.
+        element.style.background = "rgba(15,17,21,.55)";
+        element.style.color = "#f4c95d";
+        element.style.border = "2px solid #f4c95d";
+      } else {
+        const color = colors[pin.state] || colors.sent;
+        element.style.background = color;
+        element.style.color = "#17130a";
+        element.style.border = "1px solid rgba(0,0,0,.35)";
+      }
       const anchor = resolution(pin);
       if (!anchor.visible) {
         element.style.display = "none";
@@ -217,12 +226,6 @@
     layer.style.top = `${rect.top + window.scrollY}px`;
     layer.style.width = `${rect.width}px`;
     layer.style.height = `${rect.height}px`;
-  }
-
-  function setAnnotate(value) {
-    state.annotate = value;
-    document.documentElement.style.cursor = value ? "crosshair" : "";
-    if (!value) drawHover(null);
   }
 
   function plainLabel(name) {
@@ -338,41 +341,6 @@
     }
   }
 
-  document.addEventListener(
-    "mousemove",
-    (event) => {
-      if (!state.annotate) return;
-      if (!(event.target instanceof Element)) return;
-      drawHover(event.target.closest("[data-easel-ui]") ? null : event.target);
-    },
-    true,
-  );
-
-  document.addEventListener(
-    "click",
-    (event) => {
-      if (!state.annotate) return;
-      if (!(event.target instanceof Element)) return;
-      const element = event.target;
-      if (element.closest("[data-easel-ui]")) return;
-      if (element === document.body || element === document.documentElement) return;
-      const selected = window.getSelection();
-      if (selected && String(selected).trim().length > 0) return;
-      const selector = selectorFor(element);
-      if (!selector) return;
-      event.preventDefault();
-      event.stopPropagation();
-      post({
-        type: "select",
-        selector,
-        tag: element.tagName.toLowerCase(),
-        text: snippet(element),
-        ...anchorOf(element),
-      });
-    },
-    true,
-  );
-
   window.addEventListener(
     "message",
     (event) => {
@@ -397,8 +365,29 @@
         post({ type: "tune-spec", controls: collectTuneControls() });
         return;
       }
-      if (data.type === "mode") {
-        setAnnotate(Boolean(data.annotate));
+      // The board covers each artboard with a transparent shield while annotating and
+      // asks the document what sits under that point, so a page's own click handlers,
+      // links or overlays can never swallow the annotation.
+      if (data.type === "hit") {
+        const x = Number(data.x);
+        const y = Number(data.y);
+        if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+        const target = document.elementFromPoint(x, y);
+        if (data.hover) {
+          drawHover(target instanceof Element && !target.closest("[data-easel-ui]") ? target : null);
+          return;
+        }
+        if (!(target instanceof Element) || target.closest("[data-easel-ui]")) return;
+        if (target === document.body || target === document.documentElement) return;
+        const selector = selectorFor(target);
+        if (!selector) return;
+        post({
+          type: "select",
+          selector,
+          tag: target.tagName.toLowerCase(),
+          text: snippet(target),
+          ...anchorOf(target),
+        });
       }
     },
     false,

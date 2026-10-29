@@ -1125,12 +1125,17 @@ export async function serve({
       // hand an attacker a clickjacking surface over the composer.
       res.setHeader("x-frame-options", "DENY");
       res.setHeader("content-security-policy", "frame-ancestors 'none'");
+      // The board page and its two assets carry behaviour, not content, so a cached
+      // copy must never survive a server update: that is exactly how an old client
+      // can sit behind a fresh page and make the buttons look dead.
+      res.setHeader("cache-control", "no-store");
       res.type("html").send(
         createBoardHtml(resolved.session, resolved.board, {
           tuneSpecs: specs,
           chat: serializeChat(resolved.session.chat || []),
           ended: resolved.session.status === "ended",
           endedBy: resolved.session.ended_by || null,
+          assetVersion: version,
         }),
       );
     } catch (error) {
@@ -1151,7 +1156,7 @@ export async function serve({
       const device = ["desktop", "ipad", "phone"].includes(String(req.query.device || ""))
         ? String(req.query.device)
         : "desktop";
-      const src = `/board-sdk.js?key=${encodeURIComponent(resolved.session.key)}&item=${encodeURIComponent(item.id)}&device=${device}`;
+      const src = `/board-sdk.js?key=${encodeURIComponent(resolved.session.key)}&item=${encodeURIComponent(item.id)}&device=${device}&v=${encodeURIComponent(version)}`;
       res.setHeader("content-security-policy", ARTIFACT_CONTENT_SECURITY_POLICY);
       res.setHeader("cache-control", "no-store");
       res.type("html").send(injectBoardSdk(await readFile(file, "utf8"), src));
@@ -1942,6 +1947,7 @@ export async function serve({
 
   app.get("/board-client.js", async (req, res, next) => {
     try {
+      res.setHeader("cache-control", "no-store");
       res.type("application/javascript").send(await readFile(boardClientUrl, "utf8"));
     } catch (error) {
       next(error);
@@ -1959,6 +1965,7 @@ export async function serve({
 
   app.get("/board.css", async (req, res, next) => {
     try {
+      res.setHeader("cache-control", "no-store");
       res.type("text/css").send(await readFile(boardCssUrl, "utf8"));
     } catch (error) {
       next(error);

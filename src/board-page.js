@@ -20,9 +20,13 @@ function jsonScript(value) {
 /**
  * @param {{ key: string, file: string }} session
  * @param {import("./board.js").Board} board
- * @param {{ tuneSpecs?: Record<string, import("./board.js").TuneControl[]>, chat?: unknown[], ended?: boolean, endedBy?: string | null }} [options]
+ * @param {{ tuneSpecs?: Record<string, import("./board.js").TuneControl[]>, chat?: unknown[], ended?: boolean, endedBy?: string | null, assetVersion?: string }} [options]
  */
-export function createBoardHtml(session, board, { tuneSpecs = {}, chat = [], ended = false, endedBy = null } = {}) {
+export function createBoardHtml(
+  session,
+  board,
+  { tuneSpecs = {}, chat = [], ended = false, endedBy = null, assetVersion = "" } = {},
+) {
   const items = board.items.map((item) => ({ ...item, tuneSpec: tuneSpecs[item.id] || [] }));
   const bootstrap = jsonScript({
     key: session.key,
@@ -41,7 +45,7 @@ export function createBoardHtml(session, board, { tuneSpecs = {}, chat = [], end
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>${escapeHtml(board.name)} · ${PRODUCT_NAME}</title>
-<link rel="stylesheet" href="/board.css">
+<link rel="stylesheet" href="/board.css?v=${encodeURIComponent(assetVersion)}">
 </head>
 <body>
 <header class="bar">
@@ -49,14 +53,13 @@ export function createBoardHtml(session, board, { tuneSpecs = {}, chat = [], end
   <div class="board-name" id="boardName">${escapeHtml(board.name)}</div>
   <nav class="tabs" id="tabs" role="tablist" aria-label="Board tabs"></nav>
   <div class="bar-spacer"></div>
-  <button class="annotate" id="annotate" type="button" aria-pressed="false" title="Annotate (A)">Annotate</button>
   <div class="devices" id="devices" role="group" aria-label="Device width"></div>
-  <div class="presence" id="presence" data-state="waiting" role="status" aria-live="polite"></div>
   <div class="zoom">
     <button id="zoomOut" type="button" title="Zoom out (-)" aria-label="Zoom out">&minus;</button>
     <span class="zoom-label" id="zoomLabel">100%</span>
     <button id="zoomIn" type="button" title="Zoom in (+)" aria-label="Zoom in">+</button>
     <button id="fit" type="button" title="Fit the board (0)" aria-label="Fit the board">fit</button>
+    <button id="actual" type="button" title="Actual size, 1:1 (1)" aria-label="Actual size">100%</button>
   </div>
 </header>
 <main class="plane" id="plane">
@@ -80,17 +83,24 @@ export function createBoardHtml(session, board, { tuneSpecs = {}, chat = [], end
   </div>
   <div class="versions" id="tuneVersions"></div>
 </aside>
-<footer class="dock" id="dock">
-  <div class="chips" id="chips"></div>
-  <div class="composer-row">
-    <textarea id="composerInput" rows="1" placeholder="Write for the agent..."></textarea>
+<aside class="chat" id="chat" aria-label="Conversation">
+  <header class="chat-head">
+    <h2 class="chat-title">Conversation</h2>
+    <span class="presence" id="presence" data-state="waiting" role="status" aria-live="polite"></span>
+    <button class="chat-collapse" id="chatToggle" type="button" aria-expanded="true" title="Hide conversation">Hide</button>
+  </header>
+  <div class="chat-log" id="chatLog"></div>
+  <div class="chat-drafts" id="chatDrafts"></div>
+  <div class="chat-compose">
+    <textarea id="composerInput" rows="2" placeholder="Write for the agent..."></textarea>
     <button class="send" id="send" type="button">Send</button>
   </div>
-  <div class="dock-status" id="dockStatus"></div>
-</footer>
+  <div class="chat-status" id="dockStatus"></div>
+</aside>
+<button class="chat-open" id="chatOpen" type="button" hidden title="Show conversation">Notes</button>
 <div class="ended" id="ended" hidden>Session ended. Run <code>easel board open</code> when you want it reopened.</div>
 <script id="easel-board" type="application/json">${bootstrap}</script>
-<script src="/board-client.js"></script>
+<script src="/board-client.js?v=${encodeURIComponent(assetVersion)}"></script>
 </body>
 </html>`;
 }

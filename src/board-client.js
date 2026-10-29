@@ -25,7 +25,6 @@ const state = {
   ended: Boolean(bootstrap.ended),
   activeTab: "",
   deviceMode: loadDeviceMode(),
-  annotate: false,
   camera: { x: 0, y: 0, zoom: 1 },
   entries: new Map(),
   mounted: new Set(),
@@ -48,8 +47,6 @@ const sendButton = document.getElementById("send");
 const dockStatus = document.getElementById("dockStatus");
 /** @type {any} */
 const endedBanner = document.getElementById("ended");
-/** @type {any} */
-const annotateButton = document.getElementById("annotate");
 const deviceBar = document.getElementById("devices");
 
 /**
@@ -145,6 +142,12 @@ function saveCamera() {
   }
 }
 
+function panelWidth() {
+  const chat = document.getElementById("chat");
+  if (!chat || chat.classList.contains("collapsed")) return 0;
+  return Math.min(380, Math.max(300, Math.round(window.innerWidth * 0.26)));
+}
+
 function applyCamera() {
   canvas.style.transform = `translate(${state.camera.x}px, ${state.camera.y}px) scale(${state.camera.zoom})`;
   zoomLabel.textContent = `${Math.round(state.camera.zoom * 100)}%`;
@@ -231,18 +234,16 @@ function renderTabs() {
   );
 }
 
-function zoomToArtboard(itemId, deviceId) {
-  const item = itemById(itemId);
+function zoomToActualSize(itemId = "", deviceId = "") {
+  const preferred = itemId ? { itemId, deviceId } : activeArtboard.itemId ? activeArtboard : null;
+  const item = preferred ? itemById(preferred.itemId) : activeItems()[0];
   if (!item) return;
-  const board = artboardsFor(item).find((entry) => entry.device.id === deviceId);
-  if (!board) return;
-  const padding = 40;
-  const zoom = clamp((window.innerWidth - padding * 2) / board.width, 0.05, 1);
-  state.camera = {
-    zoom,
-    x: padding - board.x * zoom,
-    y: 56 + 18 - board.y * zoom,
-  };
+  const boards = artboardsFor(item);
+  if (boards.length === 0) return;
+  const board = (preferred && boards.find((entry) => entry.device.id === preferred.deviceId)) || boards[0];
+  const available = window.innerWidth - panelWidth() - 80;
+  const x = board.width > available ? 40 - board.x : (window.innerWidth - panelWidth() - board.width) / 2 - board.x;
+  state.camera = { zoom: 1, x: Math.round(x), y: Math.round(74 - board.y) };
   canvas.style.transition = "transform 300ms cubic-bezier(.2,.8,.2,1)";
   applyCamera();
   saveCamera();
@@ -325,12 +326,13 @@ function createArtboard(item, device) {
   iframe.dataset.src = itemUrl(item, device.id);
   iframe.addEventListener("load", () => {
     if (state.mounted.has(id)) {
-      postToArtboard(item.id, device.id, { type: "mode", annotate: state.annotate });
       postPins(item.id, device.id);
       postTune(item.id, device.id);
     }
   });
   frame.append(iframe);
+  const shield = element("div", { class: "annotate-shield", "aria-hidden": "true" });
+  frame.append(shield);
   article.append(bar, frame);
   if (device.id === visibleDevices()[visibleDevices().length - 1]?.id) {
     const resize = element("div", { class: "item-resize", title: "Resize row" });
@@ -339,11 +341,15 @@ function createArtboard(item, device) {
   }
   canvas.append(article);
   mountObserver.observe(article);
-  const record = { element: article, iframe, bar, label, meta, pageHeight: 0, device };
+  const record = { element: article, iframe, bar, label, meta, shield, pageHeight: 0, device };
   state.entries.set(id, record);
+  bindAnnotateShield(record);
   applyArtboardLayout(item, device.id);
+  bar.addEventListener("pointerdown", () => {
+    activeArtboard = { itemId: item.id, deviceId: device.id };
+  });
   bindDrag(article, bar, item.id);
-  bar.addEventListener("dblclick", () => zoomToArtboard(item.id, device.id));
+  bar.addEventListener("dblclick", () => toggleZoom100(item.id, device.id));
   return record;
 }
 
@@ -596,7 +602,7 @@ function bindPlane() {
     if (!panning || !start) return;
     state.camera.x = start.cameraX + (event.clientX - start.x);
     state.camera.y = start.cameraY + (event.clientY - start.y);
-    applyCamera();
+    scheduleApplyCamera();
   });
   const end = () => {
     if (!panning) return;
@@ -607,22 +613,7 @@ function bindPlane() {
   };
   plane.addEventListener("pointerup", end);
   plane.addEventListener("pointercancel", end);
-  plane.addEventListener(
-    "wheel",
-    (event) => {
-      event.preventDefault();
-      userAdjustedCamera = true;
-      if (event.ctrlKey || event.metaKey) {
-        zoomAt(event.clientX, event.clientY, Math.exp(-event.deltaY * 0.0016));
-        return;
-      }
-      state.camera.x -= event.deltaX;
-      state.camera.y -= event.deltaY;
-      applyCamera();
-      scheduleCameraSave();
-    },
-    { passive: false },
-  );
+  plane.addEventListener("wheel", handleBoardWheel, { passive: false });
 }
 
 /** @type {ReturnType<typeof setTimeout> | undefined} */
@@ -644,47 +635,219 @@ function scheduleCameraSave() {
   cameraSaveTimer = setTimeout(saveCamera, 350);
 }
 
+/** @type {number} */
+let cameraFrame = 0;
+
+function scheduleApplyCamera() {
+  if (cameraFrame) return;
+  cameraFrame = window.requestAnimationFrame(() => {
+    cameraFrame = 0;
+    applyCamera();
+  });
+}
+
+// Trackpad pinch arrives as ctrl+wheel; Chrome scales deltaY with deltaMode, so a
+// line-based wheel would otherwise zoom ~16x slower than a pixel one.
+function normalizedWheelDelta(event) {
+  const scale = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? window.innerHeight : 1;
+  return event.deltaY * scale;
+}
+
+function handleBoardWheel(event) {
+  event.preventDefault();
+  userAdjustedCamera = true;
+  // A gesture must not fight an easing transition left over from a fit or a zoom click.
+  canvas.style.transition = "";
+  if (event.ctrlKey || event.metaKey) {
+    const worldX = (event.clientX - state.camera.x) / state.camera.zoom;
+    const worldY = (event.clientY - state.camera.y) / state.camera.zoom;
+    state.camera.zoom = clamp(state.camera.zoom * Math.exp(-normalizedWheelDelta(event) * 0.012), MIN_ZOOM, MAX_ZOOM);
+    state.camera.x = event.clientX - worldX * state.camera.zoom;
+    state.camera.y = event.clientY - worldY * state.camera.zoom;
+    scheduleApplyCamera();
+    scheduleCameraSave();
+    return;
+  }
+  const scale = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? window.innerHeight : 1;
+  state.camera.x -= event.deltaX * scale;
+  state.camera.y -= event.deltaY * scale;
+  scheduleApplyCamera();
+  scheduleCameraSave();
+}
+
 function zoomAt(clientX, clientY, factor) {
   const worldX = (clientX - state.camera.x) / state.camera.zoom;
   const worldY = (clientY - state.camera.y) / state.camera.zoom;
   state.camera.zoom = clamp(state.camera.zoom * factor, MIN_ZOOM, MAX_ZOOM);
   state.camera.x = clientX - worldX * state.camera.zoom;
   state.camera.y = clientY - worldY * state.camera.zoom;
-  applyCamera();
+  scheduleApplyCamera();
   scheduleCameraSave();
 }
 
 function zoomBy(factor) {
   userAdjustedCamera = true;
-  zoomAt(window.innerWidth / 2, window.innerHeight / 2, factor);
+  zoomAt((window.innerWidth - panelWidth()) / 2, window.innerHeight / 2, factor);
 }
 
-function setAnnotate(value) {
-  state.annotate = value;
-  document.body.dataset.annotate = String(value);
-  if (annotateButton) annotateButton.setAttribute("aria-pressed", String(value));
-  postToItemArtboardsAll({ type: "mode", annotate: value });
-  if (!value) closeNoteWindow();
+let activeArtboard = { itemId: "", deviceId: "" };
+/** @type {ReturnType<typeof setTimeout> | undefined} */
+let clickTimer;
+let lastZoom = { key: "" };
+let metaHeld = false;
+let spaceHeld = false;
+
+function panModeActive() {
+  return metaHeld || spaceHeld;
 }
 
-function postToItemArtboardsAll(message) {
-  for (const [id] of state.entries) {
-    const separator = id.lastIndexOf("::");
-    postToArtboard(id.slice(0, separator), id.slice(separator + 2), message);
+function updatePanMode() {
+  const active = panModeActive();
+  document.body.dataset.pan = String(active);
+  for (const [, record] of state.entries) record.element.dataset.pan = String(active);
+  if (active) {
+    for (const [, record] of state.entries) postHit(record, {}, true);
   }
 }
 
+function isTextTarget(target) {
+  return (
+    target instanceof HTMLElement &&
+    (target.tagName === "INPUT" ||
+      target.tagName === "TEXTAREA" ||
+      target.tagName === "SELECT" ||
+      target.isContentEditable)
+  );
+}
+
+function clearHover() {
+  for (const [, record] of state.entries) postHit(record, {}, true);
+}
+
+function removeRecentDraft() {
+  const entries = boardNotes();
+  const latest = entries[entries.length - 1];
+  if (!latest) return;
+  const age = Date.now() - new Date(latest.note.at || 0).getTime();
+  if (age > 900 || latest.note.prompt_id || String(latest.note.text || "").trim()) return;
+  latest.item.notes = (latest.item.notes || []).filter((note) => note.id !== latest.note.id);
+  persistNotes(latest.item.id, { immediate: true });
+  renderChips();
+  postPins(latest.item.id, noteDevice(latest.note));
+}
+
+function toggleZoom100(itemId, deviceId) {
+  const boardKey = artboardKey(itemId, deviceId);
+  if (lastZoom.key === boardKey && Math.abs(state.camera.zoom - 1) < 0.02) {
+    lastZoom = { key: "" };
+    fitTab();
+    return;
+  }
+  lastZoom = { key: boardKey };
+  zoomToActualSize(itemId, deviceId);
+}
+
+function annotatePoint(record, event) {
+  const rect = record.iframe.getBoundingClientRect();
+  const item = itemById(record.element.dataset.id || "");
+  const scale = item ? scaleFor(item) : 1;
+  return {
+    x: Math.round((event.clientX - rect.left) / scale),
+    y: Math.round((event.clientY - rect.top) / scale),
+  };
+}
+
+function postHit(record, point, clear = false) {
+  const itemId = record.element.dataset.id || "";
+  const deviceId = record.element.dataset.device || "";
+  if (clear) {
+    postToArtboard(itemId, deviceId, { type: "hit", hover: true, x: -1, y: -1 });
+    return;
+  }
+  postToArtboard(itemId, deviceId, { type: "hit", ...point });
+}
+
+function bindAnnotateShield(record) {
+  const shield = record.shield;
+  if (!shield) return;
+  let frame = 0;
+  let panning = false;
+  let start = null;
+  shield.addEventListener("pointerdown", (event) => {
+    if (!panModeActive() || event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    panning = true;
+    start = { x: event.clientX, y: event.clientY, cameraX: state.camera.x, cameraY: state.camera.y };
+    userAdjustedCamera = true;
+    document.body.dataset.grabbing = "true";
+    shield.setPointerCapture(event.pointerId);
+    postHit(record, {}, true);
+  });
+  shield.addEventListener("pointermove", (event) => {
+    activeArtboard = {
+      itemId: record.element.dataset.id || "",
+      deviceId: record.element.dataset.device || "",
+    };
+    if (panning && start) {
+      state.camera.x = start.cameraX + (event.clientX - start.x);
+      state.camera.y = start.cameraY + (event.clientY - start.y);
+      scheduleApplyCamera();
+      return;
+    }
+    if (panModeActive() || frame) return;
+    frame = window.requestAnimationFrame(() => {
+      frame = 0;
+      postHit(record, { ...annotatePoint(record, event), hover: true });
+    });
+  });
+  const endPan = () => {
+    if (!panning) return;
+    panning = false;
+    start = null;
+    document.body.dataset.grabbing = "false";
+    saveCamera();
+  };
+  shield.addEventListener("pointerup", endPan);
+  shield.addEventListener("pointercancel", endPan);
+  shield.addEventListener("pointerleave", () => postHit(record, {}, true));
+  shield.addEventListener("click", (event) => {
+    const itemId = record.element.dataset.id || "";
+    const deviceId = record.element.dataset.device || "";
+    activeArtboard = { itemId, deviceId };
+    if (panModeActive()) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const point = annotatePoint(record, event);
+    // A double-click means "zoom", not two pins: hold the pin for the double-click
+    // window and drop it if the second click arrives.
+    clearTimeout(clickTimer);
+    clickTimer = setTimeout(() => postHit(record, point), 280);
+  });
+  shield.addEventListener("dblclick", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    clearTimeout(clickTimer);
+    removeRecentDraft();
+    toggleZoom100(record.element.dataset.id || "", record.element.dataset.device || "");
+  });
+  shield.addEventListener("wheel", handleBoardWheel, { passive: false });
+}
+
 function setPresence(value) {
-  const label = value === "listening" ? "agent listening" : value === "working" ? "agent working" : "agent idle";
-  presence.dataset.state = value || "waiting";
+  const next = value || "waiting";
+  const label = next === "listening" ? "agent listening" : next === "working" ? "agent working" : "nobody listening";
+  const changed = next !== agentPresence;
+  agentPresence = next;
+  presence.dataset.state = next;
   presence.textContent = label;
+  if (changed) renderChatPanel();
 }
 
 function showReply(entry) {
   if (!entry) return;
-  const reply = element("div", { class: "reply" });
-  reply.textContent = String(entry.text || "");
-  dockStatus.replaceChildren(reply);
+  renderChatPanel();
+  dockStatus.textContent = "";
 }
 
 function markEnded() {
@@ -693,6 +856,33 @@ function markEnded() {
   composerInput.disabled = true;
   sendButton.disabled = true;
   composerInput.placeholder = "Session ended";
+}
+
+const panelStorageKey = `easel:panel:${key}`;
+
+function setChatCollapsed(collapsed) {
+  const chat = document.getElementById("chat");
+  const open = document.getElementById("chatOpen");
+  if (!chat) return;
+  chat.classList.toggle("collapsed", collapsed);
+  if (open) open.hidden = !collapsed;
+  const toggle = document.getElementById("chatToggle");
+  if (toggle) toggle.setAttribute("aria-expanded", String(!collapsed));
+  try {
+    localStorage.setItem(panelStorageKey, collapsed ? "closed" : "open");
+  } catch {
+    // Storage is optional; the panel still toggles this session.
+  }
+  applyCamera();
+  if (!collapsed) renderChatPanel();
+}
+
+function loadChatCollapsed() {
+  try {
+    return localStorage.getItem(panelStorageKey) === "closed";
+  } catch {
+    return false;
+  }
 }
 
 function randomId() {
@@ -708,8 +898,12 @@ function boardNotes() {
   return entries.sort((left, right) => left.note.number - right.note.number);
 }
 
+let nextNumber = 0;
+
 function nextNoteNumber() {
-  return boardNotes().reduce((highest, entry) => Math.max(highest, entry.note.number || 0), 0) + 1;
+  const highest = boardNotes().reduce((value, entry) => Math.max(value, entry.note.number || 0), 0);
+  nextNumber = Math.max(nextNumber, highest) + 1;
+  return nextNumber;
 }
 
 /** @type {Map<string, ReturnType<typeof setTimeout>>} */
@@ -734,48 +928,179 @@ function persistNotes(itemId, { immediate = false } = {}) {
 
 function anchorLabel(note) {
   const excerpt = String(note.label || "").slice(0, 44);
-  const width = deviceById(noteDevice(note)).width;
-  const anchor = excerpt ? `${note.tag || "element"} "${excerpt}"` : note.tag || "element";
-  return `${anchor} · ${width}`;
+  return excerpt ? `${note.tag || "element"} "${excerpt}"` : note.tag || "element";
 }
 
-function createChip(item, note) {
-  const chip = element("div", { class: "chip", "data-state": receiptFor(note), "data-note": note.id });
-  chip.append(element("span", { class: "chip-number", text: String(note.number) }));
-  const anchor = element("button", { class: "chip-anchor", type: "button", text: anchorLabel(note) });
-  anchor.title = `Show pin ${note.number} on ${item.label} at ${deviceById(noteDevice(note)).width}`;
-  anchor.addEventListener("click", () => focusNote(note.id));
-  const input = element("input", { class: "chip-input", type: "text", placeholder: "What should change?" });
-  input.value = note.text || "";
-  input.addEventListener("input", () => {
-    note.text = input.value;
-    persistNotes(item.id);
+function messageState(entry, note) {
+  if (!note || !note.prompt_id) return entry?.prompt_id ? "sent" : "sent";
+  if (entry?.done_at) return "replied";
+  if (entry?.delivered_at) return "received";
+  return "sent";
+}
+
+let agentPresence = "waiting";
+
+function stateLabel(value) {
+  if (value === "replied") return "Replied";
+  if (value === "received") return "Received by agent";
+  if (value === "sent" && agentPresence === "waiting") return "Nobody is listening";
+  return "Sent";
+}
+
+function formatTime(value) {
+  const date = new Date(String(value || ""));
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+function liveNote(noteId) {
+  for (const item of state.items) {
+    const note = (item.notes || []).find((entry) => entry.id === noteId);
+    if (note) return { item, note };
+  }
+  return null;
+}
+
+function noteByPromptId(promptId) {
+  if (!promptId) return null;
+  return boardNotes().find(({ note }) => note.prompt_id === promptId) || null;
+}
+
+function messageHead(itemLabel, note, time, state) {
+  const head = element("div", { class: "message-head" });
+  if (note) {
+    head.append(element("span", { class: "pin-chip", text: String(note.number), "data-state": state }));
+    head.append(
+      element("span", {
+        class: "message-context",
+        text: `${itemLabel || ""} · ${deviceById(noteDevice(note)).width}`,
+      }),
+    );
+  } else {
+    head.append(element("span", { class: "message-context", text: "Message" }));
+  }
+  head.append(element("span", { class: "message-time", text: formatTime(time) }));
+  const waiting = state === "sent" && agentPresence === "waiting";
+  head.append(
+    element("span", { class: "message-state", "data-state": waiting ? "waiting" : state, text: stateLabel(state) }),
+  );
+  return head;
+}
+
+/** @param {any} entry */
+function agentRow(entry) {
+  const row = element("article", { class: "message message-agent" });
+  row.append(messageHead("", null, entry.at, "replied"));
+  row.append(element("div", { class: "message-text", text: String(entry.text || "") }));
+  return row;
+}
+
+/** @param {any} entry @param {any} matched */
+function userRow(entry, matched) {
+  const { item, note } = matched || {};
+  const state = messageState(entry, note);
+  const row = element("article", {
+    class: "message",
+    "data-note": note ? note.id : "",
+    "data-state": state,
   });
-  input.addEventListener("keydown", (event) => {
-    if (event.key === "Enter" && !event.shiftKey) {
-      event.preventDefault();
-      send();
+  row.append(messageHead(item?.label || "", note, entry.at, state));
+  row.append(element("div", { class: "message-text", text: String(entry.text || "") }));
+  if (note) {
+    const anchor = element("button", { class: "message-anchor", type: "button", text: anchorLabel(note) });
+    anchor.title = "Show this pin on the board";
+    anchor.addEventListener("click", () => focusPinOnBoard(item, note));
+    row.append(anchor);
+  }
+  return row;
+}
+
+// Renumber notes as one board-wide sequence. Older notes can carry duplicates (two
+// pins both numbered 1), which makes "the pin in the panel" ambiguous.
+function ensureUniqueNumbers() {
+  const entries = boardNotes();
+  const seen = new Set();
+  let needsFix = false;
+  for (const { note } of entries) {
+    const number = Number(note.number) || 0;
+    if (seen.has(number) || number < 1) needsFix = true;
+    seen.add(number);
+  }
+  if (!needsFix) return;
+  const touched = new Set();
+  entries.forEach(({ item, note }, index) => {
+    if (note.number !== index + 1) {
+      note.number = index + 1;
+      touched.add(item.id);
     }
   });
-  const close = element("button", { class: "chip-close", type: "button", text: "×" });
-  close.title = note.prompt_id ? "Sent notes stay on the board" : "Remove this note";
-  close.disabled = Boolean(note.prompt_id);
-  if (!note.prompt_id) {
-    close.addEventListener("click", () => {
-      item.notes = (item.notes || []).filter((entry) => entry.id !== note.id);
-      persistNotes(item.id, { immediate: true });
-      renderChips();
-      postPins(item.id, noteDevice(note));
-    });
+  for (const itemId of touched) persistNotes(itemId, { immediate: true });
+  nextNumber = entries.length;
+}
+
+function renderChatPanel() {
+  const log = document.getElementById("chatLog");
+  if (!log) return;
+  const rows = [];
+  for (const entry of state.chat) {
+    if (!entry) continue;
+    if (entry.role === "agent") {
+      rows.push(agentRow(entry));
+      continue;
+    }
+    rows.push(userRow(entry, noteByPromptId(entry.prompt_id)));
   }
-  chip.append(anchor, input, close);
-  return chip;
+  log.replaceChildren(...rows);
+  log.scrollTop = log.scrollHeight;
+  renderDrafts();
+}
+
+function renderDrafts() {
+  const container = document.getElementById("chatDrafts");
+  if (!container) return;
+  const drafts = boardNotes().filter(({ note }) => !note.prompt_id);
+  container.replaceChildren(
+    ...drafts.map(({ item, note }) => {
+      const card = element("article", { class: "draft", "data-note": note.id });
+      const head = element("div", { class: "message-head" });
+      head.append(element("span", { class: "pin-chip", "data-state": "draft", text: String(note.number) }));
+      head.append(
+        element("span", { class: "message-context", text: `${item.label} · ${deviceById(noteDevice(note)).width}` }),
+      );
+      head.append(element("span", { class: "message-state", "data-state": "draft", text: "Draft" }));
+      const anchor = element("button", { class: "message-anchor", type: "button", text: anchorLabel(note) });
+      anchor.title = "Show this pin on the board";
+      anchor.addEventListener("click", () => focusPinOnBoard(item, note));
+      const input = element("textarea", { class: "draft-input", rows: "2", placeholder: "What should change?" });
+      input.value = note.text || "";
+      input.addEventListener("input", () => {
+        const live = liveNote(note.id);
+        if (live) live.note.text = input.value;
+        persistNotes(item.id);
+      });
+      input.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" && !event.shiftKey) {
+          event.preventDefault();
+          send();
+        }
+      });
+      const actions = element("div", { class: "draft-actions" });
+      const remove = element("button", { class: "draft-remove", type: "button", text: "Remove" });
+      remove.addEventListener("click", () => {
+        item.notes = (item.notes || []).filter((entry) => entry.id !== note.id);
+        persistNotes(item.id, { immediate: true });
+        renderChatPanel();
+        postPins(item.id, noteDevice(note));
+      });
+      actions.append(remove);
+      card.append(head, anchor, input, actions);
+      return card;
+    }),
+  );
 }
 
 function renderChips() {
-  const chips = document.getElementById("chips");
-  if (!chips) return;
-  chips.replaceChildren(...boardNotes().map(({ item, note }) => createChip(item, note)));
+  renderChatPanel();
 }
 
 /** @type {ReturnType<typeof setTimeout> | undefined} */
@@ -785,19 +1110,33 @@ function focusNote(noteId) {
   if (!found) return;
   const { item, note } = found;
   if (item.tab !== state.activeTab) setTab(item.tab);
-  const deviceId = noteDevice(note);
-  postToArtboard(item.id, deviceId, { type: "focus", id: noteId });
-  showNoteWindow(item, note);
+  postToArtboard(item.id, noteDevice(note), { type: "focus", id: noteId });
   /** @type {any} */
-  const chip = document.getElementById("chips")?.querySelector(`[data-note="${CSS.escape(noteId)}"]`);
-  if (chip) {
-    chip.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" });
-    chip.dataset.flash = "true";
+  const row = document.getElementById("chatLog")?.querySelector(`[data-note="${CSS.escape(noteId)}"]`);
+  if (row) {
+    row.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    row.dataset.flash = "true";
     clearTimeout(flashTimer);
     flashTimer = setTimeout(() => {
-      delete chip.dataset.flash;
-    }, 1100);
+      delete row.dataset.flash;
+    }, 1400);
   }
+  if (!note.prompt_id) showNoteWindow(item, note);
+}
+
+function focusPinOnBoard(item, note) {
+  if (!item || !note) return;
+  if (item.tab !== state.activeTab) setTab(item.tab);
+  const deviceId = noteDevice(note);
+  zoomToActualSize(item.id, deviceId);
+  const board = artboardsFor(item).find((entry) => entry.device.id === deviceId);
+  if (!board) return;
+  const scale = scaleFor(item);
+  state.camera.x = Math.round((window.innerWidth - panelWidth()) / 2 - (board.x + note.x * scale));
+  state.camera.y = Math.round(56 + (window.innerHeight - 56) / 2 - (board.y + note.y * scale));
+  applyCamera();
+  saveCamera();
+  postToArtboard(item.id, deviceId, { type: "focus", id: note.id });
 }
 
 /** @type {any} */
@@ -830,7 +1169,12 @@ function showNoteWindow(item, note) {
   const textarea = element("textarea", { class: "note-window-input", rows: "2", placeholder: "What should change?" });
   textarea.value = note.text || "";
   textarea.addEventListener("input", () => {
-    note.text = textarea.value;
+    const live = liveNote(note.id);
+    if (live) live.note.text = textarea.value;
+    const draft = /** @type {any} */ (
+      document.getElementById("chatDrafts")?.querySelector(`[data-note="${CSS.escape(note.id)}"] textarea`)
+    );
+    if (draft) draft.value = textarea.value;
     persistNotes(item.id);
   });
   textarea.addEventListener("keydown", (event) => {
@@ -840,9 +1184,7 @@ function showNoteWindow(item, note) {
     }
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
-      const chip = document.getElementById("chips")?.querySelector(`[data-note="${CSS.escape(note.id)}"]`);
-      const chipInput = chip?.querySelector("input");
-      if (chipInput) chipInput.value = textarea.value;
+      renderDrafts();
       closeNoteWindow();
     }
   });
@@ -859,7 +1201,7 @@ function showNoteWindow(item, note) {
     remove.addEventListener("click", () => {
       item.notes = (item.notes || []).filter((entry) => entry.id !== note.id);
       persistNotes(item.id, { immediate: true });
-      renderChips();
+      renderChatPanel();
       postPins(item.id, noteDevice(note));
       closeNoteWindow();
     });
@@ -872,6 +1214,7 @@ function showNoteWindow(item, note) {
 
 /** @param {any} item @param {any} payload @param {string} deviceId */
 function addNote(item, payload, deviceId) {
+  const live = itemById(item.id) || item;
   const note = {
     id: `n${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`,
     number: nextNoteNumber(),
@@ -884,10 +1227,10 @@ function addNote(item, payload, deviceId) {
     y: Math.round(Number(payload.y) || 0),
     at: new Date().toISOString(),
   };
-  item.notes = [...(item.notes || []), note];
-  persistNotes(item.id, { immediate: true });
+  live.notes = [...(live.notes || []), note];
+  persistNotes(live.id, { immediate: true });
   renderChips();
-  postPins(item.id, deviceId);
+  postPins(live.id, deviceId);
   focusNote(note.id);
 }
 
@@ -1215,6 +1558,7 @@ function refreshBoard() {
       if (!state.tabs.some((tab) => tab.id === state.activeTab)) state.activeTab = state.tabs[0]?.id || "";
       if (state.tabs.map((tab) => tab.id).join(",") !== previousTabs) renderTabs();
       syncItems();
+      ensureUniqueNumbers();
       renderNotes();
       if (payload.ended) markEnded();
     })
@@ -1230,14 +1574,13 @@ function onArtboardMessage(event) {
   const record = state.entries.get(artboardKey(itemId, deviceId));
   if (!record || event.source !== record.iframe.contentWindow) return;
   if (data.type === "ready") {
-    postToArtboard(itemId, deviceId, { type: "mode", annotate: state.annotate });
     postPins(itemId, deviceId);
     postTune(itemId, deviceId);
     return;
   }
   if (data.type === "select") {
     const item = itemById(itemId);
-    if (item && !state.ended && state.annotate) addNote(item, data, deviceId);
+    if (item && !state.ended) addNote(item, data, deviceId);
     return;
   }
   if (data.type === "pin") {
@@ -1281,7 +1624,7 @@ function onArtboardMessage(event) {
 }
 
 function renderNotes() {
-  renderChips();
+  renderChatPanel();
   for (const [id] of state.entries) {
     const separator = id.lastIndexOf("::");
     postPins(id.slice(0, separator), id.slice(separator + 2));
@@ -1291,6 +1634,29 @@ function renderNotes() {
 
 window.addEventListener("message", onArtboardMessage);
 window.addEventListener("keydown", (event) => {
+  if (event.key === "Meta") {
+    if (!metaHeld) {
+      metaHeld = true;
+      updatePanMode();
+    }
+    return;
+  }
+  if (event.code === "Space" && !isTextTarget(event.target)) {
+    event.preventDefault();
+    if (!spaceHeld) {
+      spaceHeld = true;
+      updatePanMode();
+    }
+    return;
+  }
+  if ((event.metaKey || event.ctrlKey) && ["+", "=", "-", "0"].includes(event.key)) {
+    event.preventDefault();
+    userAdjustedCamera = true;
+    if (event.key === "0") fitTab();
+    else if (event.key === "-") zoomBy(1 / 1.2);
+    else zoomBy(1.2);
+    return;
+  }
   if (event.metaKey || event.ctrlKey || event.altKey) return;
   const target = event.target;
   if (
@@ -1302,10 +1668,13 @@ window.addEventListener("keydown", (event) => {
   ) {
     return;
   }
-  if (event.key === "a" || event.key === "A") setAnnotate(!state.annotate);
   if (event.key === "0") {
     userAdjustedCamera = true;
     fitTab();
+  }
+  if (event.key === "1") {
+    userAdjustedCamera = true;
+    zoomToActualSize();
   }
   if (event.key === "+" || event.key === "=") zoomBy(1.2);
   if (event.key === "-") zoomBy(1 / 1.2);
@@ -1313,6 +1682,24 @@ window.addEventListener("keydown", (event) => {
     closeNoteWindow();
     closeTune();
   }
+});
+
+window.addEventListener("keyup", (event) => {
+  if (event.key === "Meta") {
+    metaHeld = false;
+    updatePanMode();
+  }
+  if (event.code === "Space" && (spaceHeld || !isTextTarget(event.target))) {
+    spaceHeld = false;
+    updatePanMode();
+  }
+});
+
+window.addEventListener("blur", () => {
+  if (!metaHeld && !spaceHeld) return;
+  metaHeld = false;
+  spaceHeld = false;
+  updatePanMode();
 });
 
 document.getElementById("tuneClose")?.addEventListener("click", closeTune);
@@ -1325,8 +1712,13 @@ document.getElementById("fit")?.addEventListener("click", () => {
   userAdjustedCamera = true;
   fitTab();
 });
-annotateButton?.addEventListener("click", () => setAnnotate(!state.annotate));
+document.getElementById("actual")?.addEventListener("click", () => {
+  userAdjustedCamera = true;
+  zoomToActualSize();
+});
 sendButton?.addEventListener("click", send);
+document.getElementById("chatToggle")?.addEventListener("click", () => setChatCollapsed(true));
+document.getElementById("chatOpen")?.addEventListener("click", () => setChatCollapsed(false));
 composerInput?.addEventListener("input", autosize);
 composerInput?.addEventListener("keydown", (event) => {
   if (event.key === "Enter" && !event.shiftKey) {
@@ -1340,9 +1732,11 @@ renderTabs();
 renderDevices();
 applyCamera();
 syncItems();
+ensureUniqueNumbers();
 renderNotes();
+setChatCollapsed(loadChatCollapsed());
 bindPlane();
-setAnnotate(false);
+clearHover();
 if (state.chat.length > 0) {
   const lastAgent = [...state.chat].reverse().find((entry) => entry.role === "agent");
   if (lastAgent) showReply(lastAgent);

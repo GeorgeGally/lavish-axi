@@ -104,7 +104,7 @@ test("a board item is served with its own SDK and its sibling assets", async (t)
   const item = await fetch(`${base}/board/${registered.key}/item/v1/index.html`);
   assert.equal(item.status, 200);
   const html = await item.text();
-  assert.match(html, /<script src="\/board-sdk\.js\?key=[0-9a-f]+&item=v1&device=desktop"><\/script><\/body>/);
+  assert.match(html, /<script src="\/board-sdk\.js\?key=[0-9a-f]+&item=v1&device=desktop&v=[^"]*"><\/script><\/body>/);
   assert.match(html, /The whole fleet/);
   assert.doesNotMatch(html, /\/sdk\.js/);
 
