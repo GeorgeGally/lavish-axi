@@ -67,11 +67,25 @@ export function cropBox(value, deviceWidth) {
 export function cropFrameHtml({ src, deviceWidth, deviceHeight, box }) {
   const frameHeight = Math.max(deviceHeight, box.y + box.height);
   const escaped = src.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+  // Like the board, this page reads the item's linked stylesheets for it (only under the
+  // item's own path), so the picture has the same pinned viewport units.
+  const itemBase = JSON.stringify(src.split("?")[0].replace(/[^/]*$/, "")).replace(/</g, "\\u003c");
   return `<!doctype html>
 <html><head><meta charset="utf-8"><style>
 html, body { margin: 0; overflow: hidden; background: #ffffff; }
 iframe { position: absolute; left: ${-box.x}px; top: ${-box.y}px; width: ${deviceWidth}px; height: ${frameHeight}px; border: 0; }
-</style></head><body><iframe sandbox="allow-scripts" src="${escaped}"></iframe></body></html>`;
+</style></head><body><iframe sandbox="allow-scripts" src="${escaped}"></iframe><script>
+addEventListener("message", (event) => {
+  const frame = document.querySelector("iframe");
+  const data = event.data;
+  if (!frame || event.source !== frame.contentWindow || !data || data.channel !== "easel" || data.type !== "stylesheet") return;
+  const reply = (text) => frame.contentWindow.postMessage({ channel: "easel", type: "stylesheet", href: data.href, text }, "*");
+  let url;
+  try { url = new URL(String(data.href || ""), location.href); } catch { reply(null); return; }
+  if (url.origin !== location.origin || !url.pathname.startsWith(${itemBase})) { reply(null); return; }
+  fetch(url.pathname + url.search).then((response) => (response.ok ? response.text() : null)).then(reply, () => reply(null));
+});
+</script></body></html>`;
 }
 
 /**

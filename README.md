@@ -137,9 +137,9 @@ pnpm link
 ## Board mode
 
 A board is a folder your agent fills, not a design tool: `board.json` plus one HTML file per item.
-Every item renders as three whole-page artboards - desktop 1440, iPad 834, phone 390 - at those real viewport widths, each as tall as the page's own content.
+Every item renders as whole-page artboards - desktop 1440, iPad 834, phone 390, and an ultrawide 3440 (a 3440x1440 monitor) - at those real viewport widths, each as tall as the page's own content.
 Name files `NN-name-today.html` and `NN-name-proposed.html` (more proposals as `-proposed-b`, `-proposed-c`) and the board shows them side by side under a short explanation taken from each file's `<meta name="easel-caption">` (or `easel-explain`, plus an optional `easel-title`).
-The All view shows one design per row; **Desktop**, **iPad** and **Phone** show that device only, in a device frame, packed in rows, and scrolling over a device scrolls its page.
+The All view shows one design per row, without the ultrawide until **Show ultrawide** (beside the device switch) adds it; **Ultrawide**, **Desktop**, **iPad** and **Phone** show that device only, in a device frame, packed in rows, and scrolling over a device scrolls its page. A note records the width it was made at, so a note on the ultrawide reaches the agent with viewport 3440.
 Beside each version's name, **Accept** (or **Keep today**) tells the agent at once which one you chose and at which size, marks it with a check, and **Take back** withdraws it.
 A new version grown from an existing one sits in a row directly under it: name its parent with `<meta name="easel-parent" content="02-why-card-today">`, or the board picks the version with the same `NN-` prefix whose name it shares most.
 `<meta name="easel-changed" content="...">` adds a **What changed** line under the explanation.

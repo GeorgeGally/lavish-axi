@@ -241,6 +241,34 @@ textarea:focus-visible {
   font-size: 16px;
 }
 
+/* All view only: whether the 3440 ultrawide joins the row. */
+.bar-toggle {
+  height: 34px;
+  padding: 0 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  background: transparent;
+  color: var(--ink-3);
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.bar-toggle:hover {
+  color: var(--ink);
+  border-color: var(--ink-4);
+}
+
+.bar-toggle[aria-pressed="true"] {
+  border-color: var(--ink);
+  background: var(--ink);
+  color: #ffffff;
+}
+
+.bar-toggle[hidden] {
+  display: none;
+}
+
 .zoom .zoom-text {
   padding: 0 10px;
   font-size: 13px;
@@ -576,8 +604,22 @@ body[data-pan="true"] .shield {
     var(--shadow-float);
 }
 
-.artboard[data-framed="true"][data-device="desktop"] {
+.artboard[data-framed="true"][data-device="desktop"],
+.artboard[data-framed="true"][data-device="ultrawide"] {
   border-radius: 18px 18px 6px 6px;
+}
+
+/* The ultrawide stand is wider and set lower, like a 34-inch monitor's. */
+.artboard[data-framed="true"][data-device="ultrawide"]::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 100%;
+  width: 360px;
+  height: 80px;
+  transform: translateX(-50%);
+  background: linear-gradient(#cfd0cc, #b9bab5);
+  clip-path: polygon(30% 0, 70% 0, 100% 100%, 0 100%);
 }
 
 .artboard[data-framed="true"][data-device="desktop"]::after {

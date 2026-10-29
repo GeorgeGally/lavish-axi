@@ -1192,7 +1192,7 @@ export async function serve({
         res.status(404).type("text").send("Item not found");
         return;
       }
-      const device = ["desktop", "ipad", "phone"].includes(String(req.query.device || ""))
+      const device = ["ultrawide", "desktop", "ipad", "phone"].includes(String(req.query.device || ""))
         ? String(req.query.device)
         : "desktop";
       const src = `/board-sdk.js?key=${encodeURIComponent(resolved.session.key)}&item=${encodeURIComponent(item.id)}&device=${device}&v=${encodeURIComponent(version)}`;
@@ -1227,6 +1227,7 @@ export async function serve({
 
   // Device sizes the board previews at; a pin's picture is taken at the same width.
   const BOARD_DEVICE_SIZES = {
+    ultrawide: { width: 3440, height: 1440 },
     desktop: { width: 1440, height: 900 },
     ipad: { width: 834, height: 1194 },
     phone: { width: 390, height: 844 },

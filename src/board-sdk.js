@@ -13,7 +13,7 @@
   // the window must stay one screen of the device, as its vh units do: a script that
   // sizes a canvas or a section from `innerHeight` would otherwise read the grown frame,
   // grow the page, and grow the frame again. The SDK keeps the real reading for itself.
-  const DEVICE_SCREEN = { desktop: 900, ipad: 1194, phone: 844 }[deviceId] || 0;
+  const DEVICE_SCREEN = { ultrawide: 1440, desktop: 900, ipad: 1194, phone: 844 }[deviceId] || 0;
   const innerHeightOf = (() => {
     const own = Object.getOwnPropertyDescriptor(window, "innerHeight");
     const getter = own?.get || Object.getOwnPropertyDescriptor(Object.getPrototypeOf(window), "innerHeight")?.get;
@@ -595,7 +595,7 @@
     // The board may open the frame at any height; a design's 100vh (and svh, dvh, lvh)
     // always means one screen of the device it is shown on, whether the artboard is
     // grown to the whole page or scrolls inside a device frame.
-    const deviceHeights = { desktop: 900, ipad: 1194, phone: 844 };
+    const deviceHeights = { ultrawide: 1440, desktop: 900, ipad: 1194, phone: 844 };
     const viewport = deviceHeights[deviceId] || Math.round(window.innerHeight);
     if (!viewport) return;
     pinnedVh = viewport;

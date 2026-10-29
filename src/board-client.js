@@ -16,6 +16,7 @@ const LABEL_PX = 13;
 // Every artboard renders at a real device viewport, in real CSS pixels: the camera is
 // the only scale on the board, so a point on screen maps into a page by one division.
 const DEVICES = [
+  { id: "ultrawide", label: "Ultrawide", width: 3440, height: 1440 },
   { id: "desktop", label: "Desktop", width: 1440, height: 900 },
   { id: "ipad", label: "iPad", width: 834, height: 1194 },
   { id: "phone", label: "Phone", width: 390, height: 844 },
@@ -23,13 +24,17 @@ const DEVICES = [
 // Bezel thickness of the CSS device frames, in board pixels. `below` is room for the
 // desktop stand, which hangs under the frame.
 const FRAME = {
+  ultrawide: { top: 24, side: 24, bottom: 48, below: 80 },
   desktop: { top: 20, side: 20, bottom: 44, below: 70 },
   ipad: { top: 26, side: 26, bottom: 26, below: 0 },
   // A phone page starts below the status bar, so the island sits in the bezel.
   phone: { top: 54, side: 14, bottom: 14, below: 0 },
 };
 const DEVICE_GAP = 56;
-const MEMBER_GAP = { all: 200, desktop: 140, ipad: 100, phone: 72 };
+const MEMBER_GAP = { all: 200, ultrawide: 200, desktop: 140, ipad: 100, phone: 72 };
+// An ultrawide artboard is as wide as the other three together, so the All view leaves
+// it out until it is switched on.
+const ultrawideStorageKey = `easel:ultrawide:${key}`;
 
 const state = {
   tabs: Array.isArray(bootstrap.tabs) ? bootstrap.tabs : [],
@@ -38,6 +43,7 @@ const state = {
   ended: Boolean(bootstrap.ended),
   activeTab: "",
   deviceMode: loadDeviceMode(),
+  ultrawideInAll: readStorage(ultrawideStorageKey) === "on",
   camera: { x: 0, y: 0, zoom: 1 },
   /** @type {Map<string, any>} */
   artboards: new Map(),
@@ -148,11 +154,12 @@ function saveHeights() {
 }
 
 function visibleDevices() {
-  return state.deviceMode === "all" ? DEVICES : DEVICES.filter((device) => device.id === state.deviceMode);
+  if (state.deviceMode !== "all") return DEVICES.filter((device) => device.id === state.deviceMode);
+  return state.ultrawideInAll ? DEVICES : DEVICES.filter((device) => device.id !== "ultrawide");
 }
 
 function deviceById(id) {
-  return DEVICES.find((device) => device.id === id) || DEVICES[0];
+  return DEVICES.find((device) => device.id === id) || DEVICES.find((device) => device.id === "desktop") || DEVICES[0];
 }
 
 function noteDevice(note) {
@@ -1434,7 +1441,29 @@ function setTab(id) {
   else fit(false);
 }
 
+function renderUltrawideToggle() {
+  let toggle = document.getElementById("ultrawideToggle");
+  if (!toggle && deviceBar) {
+    toggle = element("button", { class: "bar-toggle", id: "ultrawideToggle", type: "button" });
+    toggle.addEventListener("click", () => {
+      state.ultrawideInAll = !state.ultrawideInAll;
+      writeStorage(ultrawideStorageKey, state.ultrawideInAll ? "on" : "off");
+      renderUltrawideToggle();
+      relayout();
+      userAdjustedCamera = false;
+      fit(false);
+    });
+    deviceBar.after(toggle);
+  }
+  if (!toggle) return;
+  toggle.hidden = state.deviceMode !== "all";
+  toggle.setAttribute("aria-pressed", String(state.ultrawideInAll));
+  toggle.textContent = state.ultrawideInAll ? "Ultrawide shown" : "Show ultrawide";
+  toggle.title = state.ultrawideInAll ? "Leave the 3440 ultrawide out of All" : "Add the 3440 ultrawide to All";
+}
+
 function renderDevices() {
+  renderUltrawideToggle();
   if (!deviceBar) return;
   const options = [{ id: "all", label: "All" }, ...DEVICES];
   deviceBar.replaceChildren(
@@ -1658,6 +1687,8 @@ window.addEventListener("drop", refuseStrayFileDrop);
 let pendingClick = null;
 /** @type {Set<string>} */
 const sendingPrompts = new Set();
+/** @type {Set<string>} note ids whose send is waiting on an upload or picture */
+const preparingNotes = new Set();
 
 function randomId() {
   if (window.crypto && typeof window.crypto.randomUUID === "function") return window.crypto.randomUUID();
@@ -1825,9 +1856,13 @@ function sendPrompts(noteIds, message = "", images = [], context = {}) {
   const owners = fromComposer ? [...noteIds, "composer"] : noteIds;
   const uploading = owners.some((owner) => (uploads.get(owner)?.size || 0) > 0);
   if (uploading) dockStatus.textContent = "Adding images…";
-  return Promise.all([uploading ? pendingUploads(owners) : null, pendingCrops(noteIds)]).then(() =>
-    sendPromptsNow(noteIds, message, fromComposer ? composerImages : images, context),
-  );
+  // The note shows as sending at once, while its images and picture finish.
+  for (const id of noteIds) preparingNotes.add(id);
+  renderChatPanel();
+  return Promise.all([uploading ? pendingUploads(owners) : null, pendingCrops(noteIds)]).then(() => {
+    for (const id of noteIds) preparingNotes.delete(id);
+    return sendPromptsNow(noteIds, message, fromComposer ? composerImages : images, context);
+  });
 }
 
 function sendPromptsNow(noteIds, message, images, context = {}) {
@@ -2208,6 +2243,11 @@ function renderChatPanel() {
     }
   }
   // A note in flight shows before the server has written it into the transcript.
+  for (const noteId of preparingNotes) {
+    const live = liveNote(noteId);
+    if (!live || live.note.prompt_id) continue;
+    add(noteId, { role: "user", text: live.note.text, at: new Date().toISOString(), preparing: true });
+  }
   for (const promptId of sendingPrompts) {
     if (state.chat.some((entry) => entry && entry.prompt_id === promptId)) continue;
     const matched = noteByPromptId(promptId);
@@ -2291,7 +2331,7 @@ function userBubble(entry) {
     strip.classList.add("entry-thumbs");
     bubble.append(strip);
   }
-  if (entry.prompt_id && sendingPrompts.has(entry.prompt_id)) {
+  if (entry.preparing || (entry.prompt_id && sendingPrompts.has(entry.prompt_id))) {
     bubble.append(element("div", { class: "entry-state", text: "Sending" }));
   }
   return bubble;
