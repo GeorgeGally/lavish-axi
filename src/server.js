@@ -63,8 +63,11 @@ import {
   BoardError,
   boardDirPath,
   boardFilePath,
+  captionFromHtml,
   extractTuneSpec,
   injectBoardSdk,
+  pairInfo,
+  scanBoardFiles,
   placeItem,
   readBoard,
   readOrCreateBoard,
@@ -892,12 +895,18 @@ export async function serve({
     return { session, dir, board };
   }
 
-  function publicBoard(board, specs = {}) {
+  function publicBoard(board, specs = {}, captions = {}) {
     return {
       ...board,
       items: board.items.map((item) => {
         const spec = specs[item.id] || [];
-        return { ...item, tuneSpec: spec, tuneInstruction: spec.length > 0 ? tuneInstruction(item, spec) : "" };
+        return {
+          ...item,
+          tuneSpec: spec,
+          tuneInstruction: spec.length > 0 ? tuneInstruction(item, spec) : "",
+          caption: captions[item.id] || "",
+          pair: pairInfo(item.file),
+        };
       }),
     };
   }
@@ -923,15 +932,24 @@ export async function serve({
   }
 
   async function boardTuneSpecs(dir, board) {
+    const meta = await boardItemMeta(dir, board);
+    return meta.specs;
+  }
+
+  async function boardItemMeta(dir, board) {
     /** @type {Record<string, import("./board.js").TuneControl[]>} */
     const specs = {};
+    /** @type {Record<string, string>} */
+    const captions = {};
     for (const item of board.items) {
       const file = await itemFileFor(dir, item).catch(() => null);
       if (!file) continue;
       const html = await readFile(file, "utf8").catch(() => "");
       specs[item.id] = extractTuneSpec(html);
+      const caption = captionFromHtml(html);
+      if (caption) captions[item.id] = caption;
     }
-    return specs;
+    return { specs, captions };
   }
 
   /**
@@ -990,7 +1008,8 @@ export async function serve({
         return;
       }
       const name = String(req.body?.name || "").trim();
-      const board = await readOrCreateBoard(dirInput, { name });
+      const opened = await readOrCreateBoard(dirInput, { name });
+      const board = await scanBoardFiles(dirInput, opened);
       const dir = await realpath(boardDirPath(dirInput)).catch(() => boardDirPath(dirInput));
       const file = await canonicalFile(boardFilePath(dir));
       const boardKey = sessionKey(file);
@@ -1018,9 +1037,10 @@ export async function serve({
         res.status(404).json({ status: "error", error: "board not found" });
         return;
       }
-      const specs = await boardTuneSpecs(resolved.dir, resolved.board);
+      const board = await scanBoardFiles(resolved.dir, resolved.board);
+      const { specs, captions } = await boardItemMeta(resolved.dir, board);
       res.json({
-        ...publicBoard(resolved.board, specs),
+        ...publicBoard(board, specs, captions),
         chat: serializeChat(resolved.session.chat || []),
         ended: resolved.session.status === "ended",
         endedBy: resolved.session.ended_by || null,
@@ -1120,7 +1140,8 @@ export async function serve({
         res.status(404).type("text").send("Board not found");
         return;
       }
-      const specs = await boardTuneSpecs(resolved.dir, resolved.board);
+      const board = await scanBoardFiles(resolved.dir, resolved.board);
+      const { specs, captions } = await boardItemMeta(resolved.dir, board);
       // Nothing frames the board itself: it is a top-level page, and framing it would
       // hand an attacker a clickjacking surface over the composer.
       res.setHeader("x-frame-options", "DENY");
@@ -1130,8 +1151,9 @@ export async function serve({
       // can sit behind a fresh page and make the buttons look dead.
       res.setHeader("cache-control", "no-store");
       res.type("html").send(
-        createBoardHtml(resolved.session, resolved.board, {
+        createBoardHtml(resolved.session, board, {
           tuneSpecs: specs,
+          captions,
           chat: serializeChat(resolved.session.chat || []),
           ended: resolved.session.status === "ended",
           endedBy: resolved.session.ended_by || null,

@@ -16,6 +16,11 @@ const DEVICES = [
   { id: "phone", label: "Phone", width: 390, height: 844 },
 ];
 const DESKTOP_WIDTH = 1440;
+const FRAME_PADDING = {
+  desktop: { top: 10, bottom: 34, side: 12 },
+  ipad: { top: 16, bottom: 16, side: 16 },
+  phone: { top: 12, bottom: 18, side: 9 },
+};
 
 const state = {
   tabs: Array.isArray(bootstrap.tabs) ? bootstrap.tabs : [],
@@ -157,20 +162,109 @@ function activeItems() {
   return state.items.filter((item) => item.tab === state.activeTab);
 }
 
-function artboardsFor(item) {
+function framedView() {
+  return state.deviceMode !== "all";
+}
+
+function buildUnits() {
+  const units = [];
+  const seen = new Set();
+  for (const item of activeItems()) {
+    const pair = item.pair;
+    if (!pair) {
+      units.push({ key: item.id, items: [item], caption: item.caption || "", origin: { x: 0, y: 0 } });
+      continue;
+    }
+    const key = pair.key;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const members = activeItems().filter((entry) => entry.pair && entry.pair.key === key);
+    members.sort((left, right) => (left.pair.role === "today" ? -1 : 1) - (right.pair.role === "today" ? -1 : 1));
+    const caption = members.map((entry) => entry.caption).find(Boolean) || "";
+    units.push({ key, items: members, caption, origin: { x: 0, y: 0 } });
+  }
+  return units;
+}
+
+function displayLabel(item) {
+  if (item.pair) return item.pair.role === "today" ? "Today" : "Proposed";
+  return item.label;
+}
+
+function unitPositions() {
+  const positions = new Map();
+  const units = buildUnits();
+  const framed = framedView();
+  const gap = framed ? 80 : 120;
+  let cursorX = 0;
+  let cursorY = 0;
+  let rowHeight = 0;
+  for (const unit of units) {
+    const first = unit.items[0];
+    let x = framed ? cursorX : first.x;
+    let y = framed ? cursorY : first.y;
+    const originX = x;
+    const originY = y;
+    for (const item of unit.items) {
+      if (!framed && item !== first) y = first.y;
+      positions.set(item.id, { x, y });
+      const boards = artboardBoxes(item, 0, 0);
+      const rowWidth =
+        boards.reduce((total, board) => total + board.width, 0) +
+        Math.max(0, boards.length - 1) * Math.round(48 * scaleFor(item));
+      const rowHeightForItem = boards.reduce((tallest, board) => Math.max(tallest, board.height), 0);
+      x += rowWidth + gap;
+      rowHeight = Math.max(rowHeight, rowHeightForItem);
+    }
+    unit.origin = { x: originX, y: originY };
+    if (framed) {
+      cursorX = x;
+      if (cursorX > 4600) {
+        cursorX = 0;
+        cursorY += rowHeight + gap;
+        rowHeight = 0;
+      }
+    }
+  }
+  return { positions, units };
+}
+
+function artboardBoxes(item, originX, originY) {
   const scale = scaleFor(item);
   const gap = Math.round(48 * scale);
-  let x = item.x;
+  const framed = framedView();
+  let x = originX;
   const boards = [];
   for (const device of visibleDevices()) {
     const record = state.entries.get(artboardKey(item.id, device.id));
-    const pageHeight = record?.pageHeight || device.height;
-    const width = Math.round(device.width * scale);
-    const height = Math.round(pageHeight * scale) + BAR_HEIGHT;
-    boards.push({ device, record, x, y: item.y, width, height, scale });
+    const screenWidth = Math.round(device.width * scale);
+    const pad = framed ? FRAME_PADDING[device.id] : { top: 0, bottom: 0, side: 0 };
+    const screenHeight = framed
+      ? Math.round(device.height * scale)
+      : Math.round((record?.pageHeight || device.height) * scale);
+    const width = screenWidth + pad.side * 2;
+    const height = screenHeight + pad.top + pad.bottom + BAR_HEIGHT;
+    boards.push({
+      device,
+      record,
+      x,
+      y: originY,
+      width,
+      height,
+      scale,
+      screenWidth,
+      screenHeight,
+      pad,
+      framed,
+    });
     x += width + gap;
   }
   return boards;
+}
+
+function artboardsFor(item) {
+  const placed = unitPositions().positions.get(item.id) || { x: item.x, y: item.y };
+  return artboardBoxes(item, placed.x, placed.y);
 }
 
 function boundsOf(items) {
@@ -330,9 +424,11 @@ function createArtboard(item, device) {
       postTune(item.id, device.id);
     }
   });
-  frame.append(iframe);
+  const screen = element("div", { class: "device-screen" });
+  screen.append(iframe);
   const shield = element("div", { class: "annotate-shield", "aria-hidden": "true" });
-  frame.append(shield);
+  screen.append(shield);
+  frame.append(screen);
   article.append(bar, frame);
   if (device.id === visibleDevices()[visibleDevices().length - 1]?.id) {
     const resize = element("div", { class: "item-resize", title: "Resize row" });
@@ -361,15 +457,32 @@ function applyArtboardLayout(item, deviceId) {
   if (!board) return;
   const device = board.device;
   const scale = board.scale;
-  const pageHeight = record.pageHeight || device.height;
+  const pageHeight = board.framed ? device.height : record.pageHeight || device.height;
   record.element.style.left = `${board.x}px`;
   record.element.style.top = `${board.y}px`;
   record.element.style.width = `${board.width}px`;
-  record.element.style.height = `${BAR_HEIGHT + Math.round(pageHeight * scale)}px`;
+  record.element.style.height = `${board.height}px`;
+  record.element.dataset.framed = String(board.framed);
+  const frame = record.element.querySelector(".item-frame");
+  if (frame) {
+    frame.style.padding = board.framed ? `${board.pad.top}px ${board.pad.side}px ${board.pad.bottom}px` : "0";
+  }
+  const screen = record.element.querySelector(".device-screen");
+  if (screen) {
+    screen.style.width = `${board.screenWidth}px`;
+    screen.style.height = `${board.screenHeight}px`;
+    screen.style.borderRadius = board.framed
+      ? device.id === "phone"
+        ? "18px"
+        : device.id === "ipad"
+          ? "12px"
+          : "3px"
+      : "0";
+  }
   record.iframe.style.width = `${device.width}px`;
   record.iframe.style.height = `${pageHeight}px`;
   record.iframe.style.transform = `scale(${scale})`;
-  record.label.textContent = `${item.label} · ${device.width}`;
+  record.label.textContent = `${displayLabel(item)} · ${device.width}`;
   record.meta.textContent = [
     record.pageHeight ? `page ${record.pageHeight}` : "",
     state.overflow.has(artboardKey(item.id, deviceId)) ? "overflows" : "",
@@ -831,7 +944,27 @@ function bindAnnotateShield(record) {
     removeRecentDraft();
     toggleZoom100(record.element.dataset.id || "", record.element.dataset.device || "");
   });
-  shield.addEventListener("wheel", handleBoardWheel, { passive: false });
+  shield.addEventListener(
+    "wheel",
+    (event) => {
+      // In a device view the screen scrolls the page; in the flat All view the wheel
+      // belongs to the plane. Pinch always zooms the board.
+      // The shield sits inside the plane, so every branch must stop the event or the
+      // plane's own handler pans (or double-zooms) on top of it.
+      event.stopPropagation();
+      if (!event.ctrlKey && !event.metaKey && framedView()) {
+        event.preventDefault();
+        postToArtboard(record.element.dataset.id || "", record.element.dataset.device || "", {
+          type: "scroll",
+          dx: event.deltaX,
+          dy: event.deltaY,
+        });
+        return;
+      }
+      handleBoardWheel(event);
+    },
+    { passive: false },
+  );
 }
 
 function setPresence(value) {
@@ -926,13 +1059,10 @@ function persistNotes(itemId, { immediate = false } = {}) {
   else noteTimers.set(itemId, setTimeout(write, 450));
 }
 
-function anchorLabel(note) {
-  const excerpt = String(note.label || "").slice(0, 44);
-  return excerpt ? `${note.tag || "element"} "${excerpt}"` : note.tag || "element";
-}
-
 function messageState(entry, note) {
-  if (!note || !note.prompt_id) return entry?.prompt_id ? "sent" : "sent";
+  if (entry?.prompt_id && sendingPrompts.has(entry.prompt_id)) return "sending";
+  if (note?.prompt_id && sendingPrompts.has(note.prompt_id)) return "sending";
+  if (!note) return "sent";
   if (entry?.done_at) return "replied";
   if (entry?.delivered_at) return "received";
   return "sent";
@@ -940,17 +1070,10 @@ function messageState(entry, note) {
 
 let agentPresence = "waiting";
 
-function stateLabel(value) {
-  if (value === "replied") return "Replied";
-  if (value === "received") return "Received by agent";
-  if (value === "sent" && agentPresence === "waiting") return "Nobody is listening";
-  return "Sent";
-}
-
 function formatTime(value) {
   const date = new Date(String(value || ""));
   if (Number.isNaN(date.getTime())) return "";
-  return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return date.toLocaleString([], { hour: "2-digit", minute: "2-digit", day: "numeric", month: "short" });
 }
 
 function liveNote(noteId) {
@@ -966,32 +1089,16 @@ function noteByPromptId(promptId) {
   return boardNotes().find(({ note }) => note.prompt_id === promptId) || null;
 }
 
-function messageHead(itemLabel, note, time, state) {
-  const head = element("div", { class: "message-head" });
-  if (note) {
-    head.append(element("span", { class: "pin-chip", text: String(note.number), "data-state": state }));
-    head.append(
-      element("span", {
-        class: "message-context",
-        text: `${itemLabel || ""} · ${deviceById(noteDevice(note)).width}`,
-      }),
-    );
-  } else {
-    head.append(element("span", { class: "message-context", text: "Message" }));
-  }
-  head.append(element("span", { class: "message-time", text: formatTime(time) }));
-  const waiting = state === "sent" && agentPresence === "waiting";
-  head.append(
-    element("span", { class: "message-state", "data-state": waiting ? "waiting" : state, text: stateLabel(state) }),
-  );
-  return head;
+function designHeading(item, note) {
+  const width = note ? deviceById(noteDevice(note)).width : 0;
+  return width && width !== 1440 ? `${item.label} · ${width}` : item.label;
 }
 
 /** @param {any} entry */
 function agentRow(entry) {
-  const row = element("article", { class: "message message-agent" });
-  row.append(messageHead("", null, entry.at, "replied"));
-  row.append(element("div", { class: "message-text", text: String(entry.text || "") }));
+  const row = element("article", { class: "entry entry-agent" });
+  row.title = formatTime(entry.at);
+  row.append(element("div", { class: "entry-text", text: String(entry.text || "") }));
   return row;
 }
 
@@ -999,33 +1106,22 @@ function agentRow(entry) {
 function userRow(entry, matched) {
   const { item, note } = matched || {};
   const state = messageState(entry, note);
-  const row = element("article", {
-    class: "message",
-    "data-note": note ? note.id : "",
-    "data-state": state,
-  });
-  row.append(messageHead(item?.label || "", note, entry.at, state));
-  row.append(element("div", { class: "message-text", text: String(entry.text || "") }));
-  if (note) {
-    const anchor = element("button", { class: "message-anchor", type: "button", text: anchorLabel(note) });
-    anchor.title = "Show this pin on the board";
-    anchor.addEventListener("click", () => focusPinOnBoard(item, note));
-    row.append(anchor);
-  }
+  const row = element("article", { class: "entry", "data-note": note ? note.id : "", "data-state": state });
+  row.title = formatTime(entry.at);
+  if (note) row.append(element("span", { class: "entry-number", text: String(note.number) }));
+  row.append(element("div", { class: "entry-text", text: String(entry.text || "") }));
+  const quiet = state === "sending" ? "Sending" : state === "sent" && agentPresence === "waiting" ? "Not read yet" : "";
+  if (quiet) row.append(element("span", { class: "entry-state", text: quiet }));
+  if (note) row.addEventListener("click", () => focusPinOnBoard(item, note));
   return row;
 }
 
-// Renumber notes as one board-wide sequence. Older notes can carry duplicates (two
-// pins both numbered 1), which makes "the pin in the panel" ambiguous.
+// Renumber notes as one board-wide sequence; older boards can carry duplicates, which
+// makes "pin 3" ambiguous between two artboards.
 function ensureUniqueNumbers() {
   const entries = boardNotes();
-  const seen = new Set();
-  let needsFix = false;
-  for (const { note } of entries) {
-    const number = Number(note.number) || 0;
-    if (seen.has(number) || number < 1) needsFix = true;
-    seen.add(number);
-  }
+  if (entries.length === 0) return;
+  const needsFix = entries.some(({ note }, index) => (Number(note.number) || 0) !== index + 1);
   if (!needsFix) return;
   const touched = new Set();
   entries.forEach(({ item, note }, index) => {
@@ -1042,14 +1138,24 @@ function renderChatPanel() {
   const log = document.getElementById("chatLog");
   if (!log) return;
   const rows = [];
+  let lastDesign = "";
   for (const entry of state.chat) {
     if (!entry) continue;
     if (entry.role === "agent") {
       rows.push(agentRow(entry));
       continue;
     }
-    rows.push(userRow(entry, noteByPromptId(entry.prompt_id)));
+    const matched = noteByPromptId(entry.prompt_id);
+    if (matched) {
+      const heading = designHeading(matched.item, matched.note);
+      if (heading !== lastDesign) {
+        rows.push(element("h3", { class: "chat-group", text: heading }));
+        lastDesign = heading;
+      }
+    }
+    rows.push(userRow(entry, matched));
   }
+  if (rows.length === 0) rows.push(element("p", { class: "chat-empty", text: "No notes yet." }));
   log.replaceChildren(...rows);
   log.scrollTop = log.scrollHeight;
   renderDrafts();
@@ -1062,15 +1168,7 @@ function renderDrafts() {
   container.replaceChildren(
     ...drafts.map(({ item, note }) => {
       const card = element("article", { class: "draft", "data-note": note.id });
-      const head = element("div", { class: "message-head" });
-      head.append(element("span", { class: "pin-chip", "data-state": "draft", text: String(note.number) }));
-      head.append(
-        element("span", { class: "message-context", text: `${item.label} · ${deviceById(noteDevice(note)).width}` }),
-      );
-      head.append(element("span", { class: "message-state", "data-state": "draft", text: "Draft" }));
-      const anchor = element("button", { class: "message-anchor", type: "button", text: anchorLabel(note) });
-      anchor.title = "Show this pin on the board";
-      anchor.addEventListener("click", () => focusPinOnBoard(item, note));
+      card.append(element("div", { class: "draft-name", text: designHeading(item, note) }));
       const input = element("textarea", { class: "draft-input", rows: "2", placeholder: "What should change?" });
       input.value = note.text || "";
       input.addEventListener("input", () => {
@@ -1081,19 +1179,22 @@ function renderDrafts() {
       input.addEventListener("keydown", (event) => {
         if (event.key === "Enter" && !event.shiftKey) {
           event.preventDefault();
-          send();
+          sendNoteNow(note.id);
         }
       });
-      const actions = element("div", { class: "draft-actions" });
-      const remove = element("button", { class: "draft-remove", type: "button", text: "Remove" });
+      const tools = element("div", { class: "draft-tools" });
+      const remove = element("button", { class: "draft-remove", type: "button", text: "×", "aria-label": "Remove" });
       remove.addEventListener("click", () => {
         item.notes = (item.notes || []).filter((entry) => entry.id !== note.id);
         persistNotes(item.id, { immediate: true });
         renderChatPanel();
         postPins(item.id, noteDevice(note));
       });
-      actions.append(remove);
-      card.append(head, anchor, input, actions);
+      const sendOne = element("button", { class: "draft-send", type: "button", text: "Send" });
+      sendOne.textContent = "Send";
+      sendOne.addEventListener("click", () => sendNoteNow(note.id));
+      tools.append(remove, sendOne);
+      card.append(input, tools);
       return card;
     }),
   );
@@ -1105,10 +1206,14 @@ function renderChips() {
 
 /** @type {ReturnType<typeof setTimeout> | undefined} */
 let flashTimer;
-function focusNote(noteId) {
+function focusNote(noteId, anchor = null) {
   const found = boardNotes().find((candidate) => candidate.note.id === noteId);
   if (!found) return;
   const { item, note } = found;
+  if (anchor) {
+    note.vx = Math.round(Number(anchor.vx) || 0);
+    note.vy = Math.round(Number(anchor.vy) || 0);
+  }
   if (item.tab !== state.activeTab) setTab(item.tab);
   postToArtboard(item.id, noteDevice(note), { type: "focus", id: noteId });
   /** @type {any} */
@@ -1142,11 +1247,61 @@ function focusPinOnBoard(item, note) {
 /** @type {any} */
 let noteWindow = null;
 
-function closeNoteWindow() {
-  if (noteWindow) {
-    noteWindow.remove();
-    noteWindow = null;
-  }
+function closeNoteWindow(keep = false) {
+  if (!noteWindow) return;
+  const noteId = noteWindow.dataset.note || "";
+  noteWindow.remove();
+  noteWindow = null;
+  if (!keep && noteId) discardEmptyNote(noteId);
+}
+
+function discardEmptyNote(noteId) {
+  const live = liveNote(noteId);
+  if (!live || live.note.prompt_id || String(live.note.text || "").trim()) return;
+  live.item.notes = (live.item.notes || []).filter((entry) => entry.id !== noteId);
+  persistNotes(live.item.id, { immediate: true });
+  renderChatPanel();
+  postPins(live.item.id, noteDevice(live.note));
+}
+
+function sendNoteNow(noteId) {
+  const live = liveNote(noteId);
+  if (!live || state.ended) return;
+  const { item, note } = live;
+  const text = String(note.text || "").trim();
+  if (!text) return;
+  const promptId = randomId();
+  note.prompt_id = promptId;
+  sendingPrompts.add(promptId);
+  const prompt = {
+    uid: randomId(),
+    prompt_id: promptId,
+    prompt: text,
+    selector: note.selector,
+    text: note.label,
+    tag: "pin",
+    item: { id: item.id, label: item.label },
+    pin: { id: note.id, number: note.number, viewport: deviceById(noteDevice(note)).width },
+  };
+  fetch(`/api/${encodeURIComponent(key)}/prompts`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ prompts: [prompt], domSnapshot: "" }),
+  })
+    .then((response) => {
+      if (!response.ok) throw new Error("not accepted");
+      sendingPrompts.delete(promptId);
+      persistNotes(item.id, { immediate: true });
+      renderChatPanel();
+      postPins(item.id, noteDevice(note));
+      closeNoteWindow();
+    })
+    .catch(() => {
+      sendingPrompts.delete(promptId);
+      delete note.prompt_id;
+      renderChatPanel();
+      dockStatus.textContent = "Could not reach the agent. Your note is still here.";
+    });
 }
 
 /** @param {any} item @param {any} note */
@@ -1156,9 +1311,20 @@ function showNoteWindow(item, note) {
   if (!record) return;
   const rect = record.iframe.getBoundingClientRect();
   const scale = scaleFor(item);
-  const left = clamp(rect.left + (Number(note.x) || 0) * scale + 18, 16, window.innerWidth - 320);
-  const top = clamp(rect.top + (Number(note.y) || 0) * scale - 6, 70, window.innerHeight - 190);
-  noteWindow = element("div", { class: "note-window" });
+  // Mirror of popoverPosition in src/board-geometry.js (this file is served raw).
+  const vx = note.vx !== undefined ? Number(note.vx) || 0 : Number(note.x) || 0;
+  const vy = note.vy !== undefined ? Number(note.vy) || 0 : Number(note.y) || 0;
+  const anchorLeft = rect.left + vx * scale;
+  const anchorTop = rect.top + vy * scale;
+  const cardWidth = 290;
+  const cardHeight = 190;
+  const margin = 16;
+  const left = Math.min(Math.max(anchorLeft + 18, margin), Math.max(margin, window.innerWidth - cardWidth - margin));
+  const fitsBelow = anchorTop + cardHeight + margin <= window.innerHeight;
+  const top = fitsBelow
+    ? Math.max(70, anchorTop - 6)
+    : Math.min(Math.max(anchorTop - cardHeight - 12, 70), Math.max(70, window.innerHeight - cardHeight - margin));
+  noteWindow = element("div", { class: "note-window", "data-note": note.id });
   noteWindow.style.left = `${left}px`;
   noteWindow.style.top = `${top}px`;
   const head = element("div", { class: "note-window-head" });
@@ -1166,6 +1332,9 @@ function showNoteWindow(item, note) {
     element("span", { class: "chip-number", text: String(note.number) }),
     element("span", { class: "note-window-title", text: `${item.label} · ${deviceById(noteDevice(note)).width}` }),
   );
+  const closeX = element("button", { class: "note-window-x", type: "button", text: "×", "aria-label": "Close" });
+  closeX.addEventListener("click", () => closeNoteWindow());
+  head.append(closeX);
   const textarea = element("textarea", { class: "note-window-input", rows: "2", placeholder: "What should change?" });
   textarea.value = note.text || "";
   textarea.addEventListener("input", () => {
@@ -1184,29 +1353,44 @@ function showNoteWindow(item, note) {
     }
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
-      renderDrafts();
-      closeNoteWindow();
+      sendNoteNow(note.id);
     }
   });
   const actions = element("div", { class: "note-window-actions" });
-  const close = element("button", { class: "note-window-close", type: "button", text: "Close" });
-  close.addEventListener("click", closeNoteWindow);
-  const remove = element("button", {
-    class: "note-window-close",
-    type: "button",
-    text: note.prompt_id ? "Sent" : "Remove",
-  });
-  remove.disabled = Boolean(note.prompt_id);
-  if (!note.prompt_id) {
-    remove.addEventListener("click", () => {
-      item.notes = (item.notes || []).filter((entry) => entry.id !== note.id);
-      persistNotes(item.id, { immediate: true });
+  const existedWithText = Boolean(String(note.text || "").trim());
+  const remove = element("button", { class: "note-window-remove", type: "button", text: "Remove" });
+  remove.hidden = !existedWithText || Boolean(note.prompt_id);
+  remove.addEventListener("click", () => {
+    const live = liveNote(note.id);
+    if (live) {
+      live.item.notes = (live.item.notes || []).filter((entry) => entry.id !== note.id);
+      persistNotes(live.item.id, { immediate: true });
       renderChatPanel();
-      postPins(item.id, noteDevice(note));
-      closeNoteWindow();
-    });
-  }
-  actions.append(remove, close);
+      postPins(live.item.id, noteDevice(live.note));
+    }
+    closeNoteWindow(true);
+  });
+  actions.append(remove);
+  const queue = element("button", { class: "note-window-queue", type: "button", text: "Queue" });
+  queue.addEventListener("click", () => {
+    const live = liveNote(note.id);
+    if (live) live.note.text = textarea.value;
+    persistNotes(item.id, { immediate: true });
+    renderChatPanel();
+    closeNoteWindow(true);
+  });
+  const send = element("button", {
+    class: "note-window-send",
+    type: "button",
+    text: note.prompt_id ? "Sent" : "Send now",
+  });
+  send.disabled = Boolean(note.prompt_id);
+  send.addEventListener("click", () => {
+    const live = liveNote(note.id);
+    if (live) live.note.text = textarea.value;
+    sendNoteNow(note.id);
+  });
+  actions.append(queue, send);
   noteWindow.append(head, textarea, actions);
   document.body.append(noteWindow);
   textarea.focus();
@@ -1225,6 +1409,8 @@ function addNote(item, payload, deviceId) {
     text: "",
     x: Math.round(Number(payload.x) || 0),
     y: Math.round(Number(payload.y) || 0),
+    vx: Math.round(Number(payload.vx) || 0),
+    vy: Math.round(Number(payload.vy) || 0),
     at: new Date().toISOString(),
   };
   live.notes = [...(live.notes || []), note];
@@ -1257,6 +1443,8 @@ function send() {
     };
   });
   if (message) prompts.push({ uid: randomId(), prompt: message, tag: "message" });
+  for (const entry of sent) sendingPrompts.add(entry.promptId);
+  if (sent.length > 0) renderChatPanel();
   sendButton.disabled = true;
   fetch(`/api/${encodeURIComponent(key)}/prompts`, {
     method: "POST",
@@ -1265,6 +1453,7 @@ function send() {
   })
     .then((response) => {
       if (!response.ok) throw new Error("not accepted");
+      for (const entry of sent) sendingPrompts.delete(entry.promptId);
       composerInput.value = "";
       autosize();
       for (const itemId of new Set(sent.map((entry) => entry.item.id))) persistNotes(itemId, { immediate: true });
@@ -1279,7 +1468,10 @@ function send() {
       }, 1800);
     })
     .catch(() => {
-      for (const entry of sent) delete entry.note.prompt_id;
+      for (const entry of sent) {
+        sendingPrompts.delete(entry.promptId);
+        delete entry.note.prompt_id;
+      }
       renderChips();
       dockStatus.textContent = "Could not reach the agent. Your notes are still here.";
     })
@@ -1584,7 +1776,7 @@ function onArtboardMessage(event) {
     return;
   }
   if (data.type === "pin") {
-    focusNote(String(data.id || ""));
+    focusNote(String(data.id || ""), { vx: data.vx, vy: data.vy });
     return;
   }
   if (data.type === "size") {
@@ -1631,6 +1823,12 @@ function renderNotes() {
     layoutItem(id.slice(0, separator));
   }
 }
+
+document.addEventListener("pointerdown", (event) => {
+  if (!noteWindow) return;
+  if (event.target instanceof Element && noteWindow.contains(event.target)) return;
+  closeNoteWindow();
+});
 
 window.addEventListener("message", onArtboardMessage);
 window.addEventListener("keydown", (event) => {

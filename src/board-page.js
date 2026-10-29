@@ -1,4 +1,5 @@
 import { PRODUCT_NAME } from "./brand.js";
+import { pairInfo } from "./board.js";
 
 /** @param {unknown} value */
 function escapeHtml(value) {
@@ -20,14 +21,19 @@ function jsonScript(value) {
 /**
  * @param {{ key: string, file: string }} session
  * @param {import("./board.js").Board} board
- * @param {{ tuneSpecs?: Record<string, import("./board.js").TuneControl[]>, chat?: unknown[], ended?: boolean, endedBy?: string | null, assetVersion?: string }} [options]
+ * @param {{ tuneSpecs?: Record<string, import("./board.js").TuneControl[]>, captions?: Record<string, string>, chat?: unknown[], ended?: boolean, endedBy?: string | null, assetVersion?: string }} [options]
  */
 export function createBoardHtml(
   session,
   board,
-  { tuneSpecs = {}, chat = [], ended = false, endedBy = null, assetVersion = "" } = {},
+  { tuneSpecs = {}, captions = {}, chat = [], ended = false, endedBy = null, assetVersion = "" } = {},
 ) {
-  const items = board.items.map((item) => ({ ...item, tuneSpec: tuneSpecs[item.id] || [] }));
+  const items = board.items.map((item) => ({
+    ...item,
+    tuneSpec: tuneSpecs[item.id] || [],
+    caption: captions[item.id] || "",
+    pair: pairInfo(item.file),
+  }));
   const bootstrap = jsonScript({
     key: session.key,
     file: session.file,

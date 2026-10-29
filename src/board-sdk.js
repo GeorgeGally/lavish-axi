@@ -68,8 +68,13 @@
   function anchorOf(element) {
     const rect = element.getBoundingClientRect();
     return {
+      // Document coordinates keep the pin glued to the content as the page scrolls.
       x: Math.round(rect.left + window.scrollX),
       y: Math.round(rect.top + window.scrollY),
+      // Viewport coordinates are where the element is right now, which is where a
+      // popover opened from this click belongs.
+      vx: Math.round(rect.left),
+      vy: Math.round(rect.top),
       width: Math.round(rect.width),
       height: Math.round(rect.height),
     };
@@ -118,7 +123,8 @@
         element.addEventListener("click", (event) => {
           event.preventDefault();
           event.stopPropagation();
-          post({ type: "pin", id: pin.id });
+          const rect = element.getBoundingClientRect();
+          post({ type: "pin", id: pin.id, vx: Math.round(rect.left), vy: Math.round(rect.top) });
         });
         layer.appendChild(element);
       }
@@ -359,6 +365,13 @@
       }
       if (data.type === "tune") {
         applyTune(data.values);
+        return;
+      }
+      if (data.type === "scroll") {
+        const dx = Number(data.dx) || 0;
+        const dy = Number(data.dy) || 0;
+        window.scrollBy(dx, dy);
+        schedulePins();
         return;
       }
       if (data.type === "tune-spec") {

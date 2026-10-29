@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { readFile, realpath, rename, stat, writeFile } from "node:fs/promises";
+import { readdir, readFile, realpath, rename, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { BOARD_FILE_NAME } from "./brand.js";
@@ -355,6 +355,52 @@ function uniqueId(board, base) {
     suffix += 1;
   }
   return candidate;
+}
+
+/**
+ * A designer's pair file carries its own caption: `<meta name="easel-caption" content="...">`.
+ * @param {string} html
+ * @returns {string}
+ */
+export function captionFromHtml(html) {
+  const tag = /<meta[^>]+name=["']easel-caption["'][^>]*>/i.exec(String(html || ""));
+  if (!tag) return "";
+  const content = /content=["']([^"']*)["']/i.exec(tag[0]);
+  return content ? text(content[1], 240) : "";
+}
+
+/**
+ * `NN-name-today.html` / `NN-name-proposed.html` form one before/after pair.
+ * @param {string} file
+ * @returns {{ key: string, role: "today" | "proposed" } | null}
+ */
+export function pairInfo(file) {
+  const base = path.basename(String(file || ""), path.extname(String(file || "")));
+  const match = /^(\d+)[-_ ]?(.+?)[-_ ](today|proposed)$/i.exec(base);
+  if (!match) return null;
+  const role = match[3].toLowerCase() === "today" ? "today" : "proposed";
+  return { key: `${match[1]}-${match[2].toLowerCase()}`, role };
+}
+
+/**
+ * Add any HTML file that appeared in the board folder since it was created, so a lab
+ * writing new variants never needs the board recreated.
+ * @param {string} dir
+ * @param {Board} board
+ * @returns {Promise<Board>} the board, saved only when it changed
+ */
+export async function scanBoardFiles(dir, board) {
+  const directory = await canonicalDir(dir);
+  const files = (await readdir(directory).catch(() => [])).filter((file) => /\.html?$/i.test(file));
+  const known = new Set(board.items.map((item) => item.file));
+  let changed = false;
+  for (const file of files.sort()) {
+    if (known.has(file)) continue;
+    addItem(board, { file, label: file.replace(/\.html?$/i, "").replace(/[-_]+/g, " ") });
+    changed = true;
+  }
+  if (!changed) return board;
+  return writeBoard(directory, board);
 }
 
 /**
