@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import { EventEmitter } from "node:events";
 import { existsSync } from "node:fs";
-import { readFile, realpath } from "node:fs/promises";
+import { readFile, realpath, stat } from "node:fs/promises";
 import { createServer, get as httpGet } from "node:http";
 import { isIP } from "node:net";
 import { homedir } from "node:os";
@@ -57,8 +57,21 @@ import {
 import { hostRejectedShareWrite, publishedDespiteError, publishToHtmlApp } from "./html-app.js";
 import { serializeChat, serializeChatAckIds, serializeChatSync } from "./chat-messages.js";
 import { formatServerLogLine, serverStdioIsTimestamped } from "./server-log.js";
-import { PRODUCT_NAME, productEnv } from "./brand.js";
+import { BOARD_FILE_NAME, PRODUCT_NAME, productEnv } from "./brand.js";
 import { injectLavishSdk } from "./html-transform.js";
+import {
+  BoardError,
+  boardDirPath,
+  boardFilePath,
+  extractTuneSpec,
+  injectBoardSdk,
+  placeItem,
+  readBoard,
+  readOrCreateBoard,
+  tuneCssValues,
+  writeBoard,
+} from "./board.js";
+import { createBoardHtml } from "./board-page.js";
 import {
   bindHost,
   extraAllowedHosts,
@@ -90,6 +103,9 @@ import {
 
 const chromeClientUrl = new URL("./chrome-client.js", import.meta.url);
 const chromeCssUrl = new URL("./chrome.css", import.meta.url);
+const boardClientUrl = new URL("./board-client.js", import.meta.url);
+const boardSdkUrl = new URL("./board-sdk.js", import.meta.url);
+const boardCssUrl = new URL("./board.css", import.meta.url);
 const designAssetUrls = {
   "daisyui.css": {
     packaged: new URL("./design/daisyui.css", import.meta.url),
@@ -864,6 +880,286 @@ export async function serve({
     }
   });
 
+  // A board is a directory of HTML files with positions. It registers as a session
+  // under its own board.json, so polling, receipts, presence and the agent reply all
+  // work on a board without a second copy of any of that machinery.
+  async function boardForRequest(requestKey) {
+    const session = await store.findByKey(String(requestKey || ""));
+    if (!session || path.basename(session.file) !== BOARD_FILE_NAME) return null;
+    const dir = path.dirname(session.file);
+    const board = await readBoard(dir);
+    return { session, dir, board };
+  }
+
+  function publicBoard(board, specs = {}) {
+    return {
+      ...board,
+      items: board.items.map((item) => ({ ...item, tuneSpec: specs[item.id] || [] })),
+    };
+  }
+
+  function boardWriteGuard(req, res) {
+    if (isSameOriginRequest(req, allowedHostnames, allowAnyHostname)) return true;
+    res.status(403).json({ status: "error", error: "cross-origin board write rejected" });
+    return false;
+  }
+
+  function boardErrorResponse(error, res) {
+    if (!(error instanceof BoardError)) return false;
+    res.status(400).json({ status: "error", error: error.message });
+    return true;
+  }
+
+  async function itemFileFor(dir, item) {
+    if (!isHtmlPath(item.file)) return null;
+    const file = await resolveArtifactAsset(dir, item.file);
+    if (!file) return null;
+    const info = await stat(file).catch(() => null);
+    return info?.isFile() ? file : null;
+  }
+
+  async function boardTuneSpecs(dir, board) {
+    /** @type {Record<string, import("./board.js").TuneControl[]>} */
+    const specs = {};
+    for (const item of board.items) {
+      const file = await itemFileFor(dir, item).catch(() => null);
+      if (!file) continue;
+      const html = await readFile(file, "utf8").catch(() => "");
+      specs[item.id] = extractTuneSpec(html);
+    }
+    return specs;
+  }
+
+  /**
+   * @param {string} dir
+   * @param {import("./board.js").Board} board
+   * @param {string} itemId
+   * @param {(item: import("./board.js").BoardItem, board: import("./board.js").Board) => void} mutate
+   */
+  async function savedBoardItem(dir, board, itemId, mutate) {
+    const next = {
+      ...board,
+      items: board.items.map((item) => ({ ...item, notes: [...item.notes], versions: [...item.versions] })),
+    };
+    const item = next.items.find((entry) => entry.id === itemId);
+    if (!item) throw new BoardError(`Unknown board item: ${itemId}`);
+    mutate(item, next);
+    const saved = await writeBoard(dir, next);
+    return saved.items.find((entry) => entry.id === itemId);
+  }
+
+  app.post("/api/boards", async (req, res, next) => {
+    try {
+      const dirInput = String(req.body?.dir || "").trim();
+      if (!dirInput) {
+        res.status(400).json({ status: "error", error: "A board directory is required" });
+        return;
+      }
+      const name = String(req.body?.name || "").trim();
+      const board = await readOrCreateBoard(dirInput, { name });
+      const dir = await realpath(boardDirPath(dirInput)).catch(() => boardDirPath(dirInput));
+      const file = await canonicalFile(boardFilePath(dir));
+      const boardKey = sessionKey(file);
+      const existing = await store.findByKey(boardKey);
+      const boardUrl = `http://${hostForUrl(resolvedLinkHost)}:${publicPort}/board/${boardKey}`;
+      if (existing?.status === "ended" && existing.ended_by === "user" && !req.body?.reopen) {
+        logEvent?.(`board open blocked (user-ended) key=${boardKey} dir=${dir}`);
+        res.json({ key: boardKey, dir, url: boardUrl, status: "user-ended" });
+        return;
+      }
+      const session = await store.upsertSession(file, boardUrl);
+      logEvent?.(`board opened key=${session.key} dir=${dir}`);
+      const specs = await boardTuneSpecs(dir, board);
+      res.json({ key: session.key, dir, url: boardUrl, status: "opened", board: publicBoard(board, specs) });
+    } catch (error) {
+      if (boardErrorResponse(error, res)) return;
+      next(error);
+    }
+  });
+
+  app.get("/api/boards/:key", async (req, res, next) => {
+    try {
+      const resolved = await boardForRequest(req.params.key);
+      if (!resolved) {
+        res.status(404).json({ status: "error", error: "board not found" });
+        return;
+      }
+      const specs = await boardTuneSpecs(resolved.dir, resolved.board);
+      res.json({
+        ...publicBoard(resolved.board, specs),
+        chat: serializeChat(resolved.session.chat || []),
+        ended: resolved.session.status === "ended",
+        endedBy: resolved.session.ended_by || null,
+        pending_prompts: resolved.session.pending_prompts || 0,
+      });
+    } catch (error) {
+      if (boardErrorResponse(error, res)) return;
+      next(error);
+    }
+  });
+
+  app.post("/api/boards/:key/place", async (req, res, next) => {
+    try {
+      if (!boardWriteGuard(req, res)) return;
+      const resolved = await boardForRequest(req.params.key);
+      if (!resolved) {
+        res.status(404).json({ status: "error", error: "board not found" });
+        return;
+      }
+      const changes = Array.isArray(req.body?.items) ? req.body.items.slice(0, 200) : [];
+      if (changes.length === 0) {
+        res.json({ status: "ok" });
+        return;
+      }
+      const next = { ...resolved.board, items: resolved.board.items.map((item) => ({ ...item })) };
+      for (const change of changes) {
+        if (!change || typeof change !== "object") continue;
+        placeItem(next, String(change.id || ""), change);
+      }
+      const saved = await writeBoard(resolved.dir, next);
+      res.json({ status: "ok", board: publicBoard(saved) });
+    } catch (error) {
+      if (boardErrorResponse(error, res)) return;
+      next(error);
+    }
+  });
+
+  app.post("/api/boards/:key/notes", async (req, res, next) => {
+    try {
+      if (!boardWriteGuard(req, res)) return;
+      const resolved = await boardForRequest(req.params.key);
+      if (!resolved) {
+        res.status(404).json({ status: "error", error: "board not found" });
+        return;
+      }
+      const itemId = String(req.body?.item || "");
+      const notes = Array.isArray(req.body?.notes) ? req.body.notes.slice(0, 300) : [];
+      const item = await savedBoardItem(resolved.dir, resolved.board, itemId, (entry) => {
+        entry.notes = notes;
+      });
+      res.json({ status: "ok", notes: item.notes });
+    } catch (error) {
+      if (boardErrorResponse(error, res)) return;
+      next(error);
+    }
+  });
+
+  app.post("/api/boards/:key/tune", async (req, res, next) => {
+    try {
+      if (!boardWriteGuard(req, res)) return;
+      const resolved = await boardForRequest(req.params.key);
+      if (!resolved) {
+        res.status(404).json({ status: "error", error: "board not found" });
+        return;
+      }
+      const specs = await boardTuneSpecs(resolved.dir, resolved.board);
+      const values = req.body?.values && typeof req.body.values === "object" ? req.body.values : {};
+      const itemId = String(req.body?.item || "");
+      const item = await savedBoardItem(resolved.dir, resolved.board, itemId, (entry) => {
+        entry.tune = values;
+      });
+      res.json({
+        status: "ok",
+        tune: item.tune,
+        css: tuneCssValues(resolved.board, itemId, specs[itemId] || [], item.tune),
+      });
+    } catch (error) {
+      if (boardErrorResponse(error, res)) return;
+      next(error);
+    }
+  });
+
+  app.post("/api/boards/:key/versions", async (req, res, next) => {
+    try {
+      if (!boardWriteGuard(req, res)) return;
+      const resolved = await boardForRequest(req.params.key);
+      if (!resolved) {
+        res.status(404).json({ status: "error", error: "board not found" });
+        return;
+      }
+      const itemId = String(req.body?.item || "");
+      const label = String(req.body?.label || "").trim();
+      const item = await savedBoardItem(resolved.dir, resolved.board, itemId, (entry) => {
+        const number = entry.versions.length + 1;
+        entry.versions.push({
+          id: `v${number}`,
+          label: label || `V${number}`,
+          values: { ...entry.tune },
+          at: new Date().toISOString(),
+        });
+      });
+      res.json({ status: "ok", versions: item.versions });
+    } catch (error) {
+      if (boardErrorResponse(error, res)) return;
+      next(error);
+    }
+  });
+
+  app.get("/board/:key", async (req, res, next) => {
+    try {
+      const resolved = await boardForRequest(req.params.key);
+      if (!resolved) {
+        res.status(404).type("text").send("Board not found");
+        return;
+      }
+      const specs = await boardTuneSpecs(resolved.dir, resolved.board);
+      // Nothing frames the board itself: it is a top-level page, and framing it would
+      // hand an attacker a clickjacking surface over the composer.
+      res.setHeader("x-frame-options", "DENY");
+      res.setHeader("content-security-policy", "frame-ancestors 'none'");
+      res.type("html").send(
+        createBoardHtml(resolved.session, resolved.board, {
+          tuneSpecs: specs,
+          chat: serializeChat(resolved.session.chat || []),
+          ended: resolved.session.status === "ended",
+          endedBy: resolved.session.ended_by || null,
+        }),
+      );
+    } catch (error) {
+      if (boardErrorResponse(error, res)) return;
+      next(error);
+    }
+  });
+
+  app.get(/^\/board\/([^/]+)\/item\/([^/]+)\/index\.html$/, async (req, res, next) => {
+    try {
+      const resolved = await boardForRequest(req.params[0]);
+      const item = resolved?.board.items.find((entry) => entry.id === req.params[1]);
+      const file = resolved && item ? await itemFileFor(resolved.dir, item) : null;
+      if (!file) {
+        res.status(404).type("text").send("Item not found");
+        return;
+      }
+      const src = `/board-sdk.js?key=${encodeURIComponent(resolved.session.key)}&item=${encodeURIComponent(item.id)}`;
+      res.setHeader("content-security-policy", ARTIFACT_CONTENT_SECURITY_POLICY);
+      res.setHeader("cache-control", "no-store");
+      res.type("html").send(injectBoardSdk(await readFile(file, "utf8"), src));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get(/^\/board\/([^/]+)\/item\/([^/]+)\/(.+)$/, async (req, res, next) => {
+    try {
+      const resolved = await boardForRequest(req.params[0]);
+      const item = resolved?.board.items.find((entry) => entry.id === req.params[1]);
+      const file = resolved && item ? await itemFileFor(resolved.dir, item) : null;
+      if (!file) {
+        res.status(404).type("text").send("Item not found");
+        return;
+      }
+      const asset = await resolveArtifactAsset(path.dirname(file), req.params[2]);
+      if (!asset) {
+        res.status(403).send("Forbidden");
+        return;
+      }
+      res.setHeader("content-security-policy", ARTIFACT_CONTENT_SECURITY_POLICY);
+      res.sendFile(asset, { dotfiles: "allow" });
+    } catch (error) {
+      next(error);
+    }
+  });
+
   async function publishAgentReply(key, text, { requireOpen = false } = {}) {
     const session = await store.addAgentReply(key, text, { requireOpen });
     if (!session || (requireOpen && session.status === "ended")) return session;
@@ -1621,6 +1917,31 @@ export async function serve({
       connection: "close",
     });
     res.end(`event: chrome-reload\ndata: ${JSON.stringify({ reason: "server-restarted" })}\n\n`);
+  });
+
+  app.get("/board-client.js", async (req, res, next) => {
+    try {
+      res.type("application/javascript").send(await readFile(boardClientUrl, "utf8"));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/board-sdk.js", async (req, res, next) => {
+    try {
+      res.setHeader("cache-control", "no-store");
+      res.type("application/javascript").send(await readFile(boardSdkUrl, "utf8"));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/board.css", async (req, res, next) => {
+    try {
+      res.type("text/css").send(await readFile(boardCssUrl, "utf8"));
+    } catch (error) {
+      next(error);
+    }
   });
 
   app.get("/chrome-client.js", async (req, res, next) => {

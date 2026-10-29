@@ -9,7 +9,7 @@ import {
   realpathSync,
   writeFileSync,
 } from "node:fs";
-import { access, readFile, writeFile } from "node:fs/promises";
+import { access, copyFile, mkdir, readFile, realpath, writeFile } from "node:fs/promises";
 import { get as httpGet } from "node:http";
 import { isIP } from "node:net";
 import os from "node:os";
@@ -18,7 +18,20 @@ import { fileURLToPath } from "node:url";
 
 import { AxiError, installSessionStartHooks, RESERVED_COMMANDS, runAxiCli } from "axi-sdk-js";
 
-import { productEnv } from "./brand.js";
+import {
+  addItem,
+  BoardError,
+  boardDirPath,
+  boardFilePath,
+  ensureTab,
+  pairItems,
+  placeItem,
+  readBoard,
+  readOrCreateBoard,
+  resolveBoardTarget,
+  writeBoard,
+} from "./board.js";
+import { BOARD_FILE_NAME, CLI_NAME, productEnv } from "./brand.js";
 
 import { createDesignOutput, DESIGN_PRIORITY_RULE, DESIGN_SYSTEM_HINT } from "./design-reference.js";
 import {
@@ -81,6 +94,7 @@ const COMMANDS = new Set([
   "export",
   "share",
   "libraries",
+  "board",
 ]);
 // SDK-reserved built-ins (e.g. `update`) must reach runAxiCli untouched; otherwise
 // the bare-arg normalization below would rewrite them into the hidden `open` command.
@@ -235,6 +249,7 @@ export async function run(argv) {
         export: exportCommand,
         share: shareCommand,
         libraries: librariesCommand,
+        board: boardCommand,
       },
       getCommandHelp: (command) => getCommandHelp(command, { agent }),
     });
@@ -310,6 +325,7 @@ export function createHomeOutput({ bin, sessions, includeSessions = true, agent 
       "Run `lavish-axi export <html-file> [--out <path>]` to write a portable copy of the artifact - one HTML file with its LOCAL assets inlined - so it opens with no Lavish server and no sibling files. Remote CDN/font references are left as links, so it needs network to render those. Users can also export from the browser chrome's overflow menu",
       "Run `lavish-axi share <html-file> [--private | --password <pw>]` to publish the artifact on ht-ml.app (https://ht-ml.app), a third-party hosting service not part of Lavish, and get back a visitable URL. Shares are PUBLIC by default, so anyone with the link can open them. Pass --private to publish a PRIVATE page behind a password Lavish generates and returns - hand the user that password with the URL and say it is a shared secret anyone they give it to can use; --password <pw> uses one you were already given instead. Local assets are inlined; remote refs load over the network. It also returns a secret update_key that can republish or lock the same URL later - run `lavish-axi share --help` before using it. Users can also publish from the browser chrome's overflow menu",
       "A request under a hostname Lavish does not answer to (a reverse-proxy name, a LAN IP) gets 403 `forbidden host`. Set `LAVISH_AXI_ALLOWED_HOSTS` in the environment that starts the server, running `lavish-axi stop` first if one is already up. See README's Allowed hosts section for the rules",
+      `Easel (this fork) also renders a whole directory of variants on one board: \`${CLI_NAME} board open <dir>\` prints the board URL, \`${CLI_NAME} poll <dir>\` waits for its feedback, and \`${CLI_NAME} board add <dir> <file.html>\` drops a new variant on the plane. Use a board instead of opening several artifacts when the user is comparing or tuning versions of the same design`,
       "Run `lavish-axi stop` to shut down the background server (it also self-stops when idle or after the last session ends with nothing connected)",
       `Run \`lavish-axi playbook <playbook_id>\` for focused artifact guidance. ${PLAYBOOK_ROUTER_HELP}`,
       DESIGN_SYSTEM_HINT,
@@ -443,7 +459,7 @@ async function pollCommand(args) {
   }
   const takeover = args.includes("--takeover");
   const agentReply = await resolveAgentReply(args);
-  const absolute = await canonicalFile(file);
+  const absolute = await canonicalFile(await resolveBoardTarget(file));
   const baseUrl = await ensureServer();
   const timeoutMs = flagValue(args, "--timeout-ms");
   const query = new URLSearchParams({ file: absolute });
@@ -530,8 +546,9 @@ async function replyCommand(args) {
       'Pass --agent-reply "<message>" or --agent-reply-file <path> with a non-empty body',
     ]);
   }
-  await assertHtmlFile(file);
-  const absolute = await canonicalFile(file);
+  const target = await resolveBoardTarget(file);
+  if (path.basename(target) !== BOARD_FILE_NAME) await assertHtmlFile(target);
+  const absolute = await canonicalFile(target);
   const baseUrl = await ensureServer();
   await postAgentReply(`${baseUrl}/api/${sessionKey(absolute)}/agent-reply`, text, absolute);
   return createReplyOutput(absolute);
@@ -660,8 +677,13 @@ function createFeedbackNextStep(file, artifactFailures, sessionEnded, endedBy, p
     }
     return `${failureNote}${layoutNote}${whiteboardNote}${attachmentNote}This was the last feedback before the Lavish Editor session ended. Stop polling ${file}. Deliver any remaining updates directly in this conversation, or run \`lavish-axi ${file}\` to open a fresh session if the user needs further visual review.`;
   }
+  const isBoard = path.basename(file) === BOARD_FILE_NAME;
   const prefix =
-    count > 0 ? artifactFailuresPrefix(file, artifactFailures) : `Apply the requested changes to ${file}. `;
+    count > 0
+      ? artifactFailuresPrefix(file, artifactFailures)
+      : isBoard
+        ? `This feedback is about items on the board in ${path.dirname(file)}. Apply each prompt to the HTML file of the item it names (its target carries the item id and label); board.json holds only positions, labels and notes, never an item's content. `
+        : `Apply the requested changes to ${file}. `;
   return `${prefix}${layoutNote}${whiteboardNote}${attachmentNote}Do not respond to the user just yet. If you are continuing to wait for feedback, run \`lavish-axi poll ${file} --agent-reply "<message for the user>"\` without --timeout-ms to reply and keep polling. If instead you are handing back a result without starting another long-poll, run \`lavish-axi reply ${file} --agent-reply "<message for the user>"\` to post it and receive an acceptance receipt. ${POLL_AGENT_REPLY_RULE} ${POLL_AGENT_REPLY_NEXT_POINTER} The poll waits silently until the user sends more feedback, ends the session, or leaves every review window disconnected past the reconnect grace period - never kill it. ${pollExecutionGuidance({ agent })}`;
 }
 
@@ -690,10 +712,279 @@ async function endCommand(args) {
   if (!file) {
     throw new AxiError("HTML file path is required", "VALIDATION_ERROR", ["Run `lavish-axi end <html-file>`"]);
   }
-  const absolute = await canonicalFile(file);
+  const absolute = await canonicalFile(await resolveBoardTarget(file));
   const baseUrl = await ensureServer();
   const response = await postJson(`${baseUrl}/api/end`, { file: absolute });
   return { session: { file: absolute, status: response.status || "ended" } };
+}
+
+const BOARD_VALUE_FLAGS = ["--x", "--y", "--w", "--h", "--tab", "--label", "--status", "--name"];
+
+function boardSummary(board, dir) {
+  return {
+    dir,
+    name: board.name,
+    tabs: board.tabs,
+    items: board.items.map((item) => ({
+      id: item.id,
+      label: item.label,
+      file: item.file,
+      tab: item.tab,
+      x: item.x,
+      y: item.y,
+      w: item.w,
+      h: item.h,
+      status: item.status,
+      notes: item.notes.length,
+      pins: item.notes.map((note) => ({
+        number: note.number,
+        selector: note.selector,
+        prompt_id: note.prompt_id || null,
+      })),
+      tune: Object.keys(item.tune).length > 0 ? item.tune : undefined,
+      versions: item.versions.length,
+    })),
+    pairs: board.pairs,
+  };
+}
+
+export function createBoardHelpOutput() {
+  return {
+    usage: [
+      `${CLI_NAME} board open <dir> [--name "<board name>"] [--reopen] [--no-open]`,
+      `${CLI_NAME} board add <dir> <file.html> [--label "<label>"] [--tab <tab>]`,
+      `${CLI_NAME} board place <dir> <item> [--x <n>] [--y <n>] [--w <n>] [--h <n>] [--tab <tab>] [--label "<label>"] [--status <status>]`,
+      `${CLI_NAME} board pair <dir> <item> <item> [--unlock]`,
+      `${CLI_NAME} board status <dir>`,
+    ],
+    help: [
+      "A board is a directory holding board.json plus one HTML file per item. board.json carries only where each item sits, which tab it is on, and what the reviewer said about it - never markup or a copy of an item's file",
+      `Open a board with \`${CLI_NAME} board open <dir>\`; it prints the board URL. Poll feedback with \`${CLI_NAME} poll <dir>\`, which resolves the directory to its board.json`,
+      `Add a variant with \`${CLI_NAME} board add <dir> <file.html>\`; the open board shows it within a few seconds`,
+      "Every item is rendered in its own sandboxed frame on one pannable plane. Tabs switch boards of variants, and a pair of items can be locked so they move together during a comparison",
+      "Ask the reviewer to annotate by clicking elements: each click drops a numbered pin and lands as a chip in the composer. Each note arrives as a prompt with a target item {id,label} and a pin {number, selector}",
+      "Items may declare tune controls in a `<script type=\"application/easel-tune\">` JSON array of {id,label,type:'number'|'color'|'select',css:'--var',min,max,step,unit,value,options}; the tune panel writes those CSS custom properties live and can save versions",
+    ],
+  };
+}
+
+export function createBoardOpenOutput({
+  dir,
+  url,
+  board,
+  status = "opened",
+  agent = "generic",
+  selfPaintWarning = undefined,
+}) {
+  const file = boardFilePath(dir);
+  return {
+    board: { ...boardSummary(board, dir), url, status },
+    ...(selfPaintWarning ? { self_paint_warning: selfPaintWarning } : {}),
+    next_step: `Do not respond to the user just yet. Now you must run \`${CLI_NAME} poll ${file}\`. This command long-polls until the user sends feedback, ends the session, or leaves every review window disconnected past the reconnect grace period, and it stays silent the whole time - that is normal, never kill it. ${pollExecutionGuidance({ agent })} A note arrives as an ordinary prompt whose target carries the item {id,label} and pin {number, selector}: apply it to that item's HTML file. Use \`${CLI_NAME} board add ${dir} <file.html>\` to drop a new variant on the board and \`${CLI_NAME} board place ${dir} <item> --x 0 --y 0\` to move one; an open board picks either up within a few seconds. After applying feedback, run \`${CLI_NAME} poll ${file} --agent-reply "<message for the user>"\` to answer and keep waiting, or \`${CLI_NAME} reply ${file} --agent-reply "<message for the user>"\` when you are handing back a result. ${POLL_SEND_AND_END_RULE}`,
+  };
+}
+
+export function createBoardAddOutput({ dir, item, board }) {
+  return {
+    item: {
+      id: item.id,
+      label: item.label,
+      file: item.file,
+      tab: item.tab,
+      x: item.x,
+      y: item.y,
+      w: item.w,
+      h: item.h,
+    },
+    board: boardSummary(board, dir),
+    next_step: `The board shows ${item.label} within a few seconds. If your poll is not running yet, run \`${CLI_NAME} poll ${boardFilePath(dir)}\`.`,
+  };
+}
+
+export function createBoardPlaceOutput({ dir, item, board }) {
+  return {
+    item: {
+      id: item.id,
+      label: item.label,
+      file: item.file,
+      tab: item.tab,
+      x: item.x,
+      y: item.y,
+      w: item.w,
+      h: item.h,
+      status: item.status,
+    },
+    board: boardSummary(board, dir),
+  };
+}
+
+export function createBoardStatusOutput({ dir, board }) {
+  return {
+    board: boardSummary(board, dir),
+    help: [
+      `Run \`${CLI_NAME} board open ${dir}\` to open or resume it in the browser`,
+      `Move an item with \`${CLI_NAME} board place ${dir} <item> --x 0 --y 0\`; lock two items so they move together with \`${CLI_NAME} board pair ${dir} <item> <item>\``,
+    ],
+  };
+}
+
+function boardError(error) {
+  if (!(error instanceof BoardError)) return error;
+  return new AxiError(error.message, "VALIDATION_ERROR", [
+    `Run \`${CLI_NAME} board open <dir>\` to create a board, or \`${CLI_NAME} board status <dir>\` to inspect one`,
+  ]);
+}
+
+async function boardCommand(args) {
+  const sub = String(args[0] || "").trim();
+  const rest = args.slice(1);
+  const positionals = positionalArgs(rest, BOARD_VALUE_FLAGS);
+  if (!["open", "add", "place", "pair", "status"].includes(sub) || positionals.length === 0) {
+    return createBoardHelpOutput();
+  }
+  const dir = boardDirPath(positionals[0]);
+  try {
+    if (sub === "open") return await boardOpenCommand(args, dir);
+    if (sub === "add") return await boardAddCommand(positionals, args, dir);
+    if (sub === "place") return await boardPlaceCommand(positionals, args, dir);
+    if (sub === "pair") return await boardPairCommand(positionals, args, dir);
+    return createBoardStatusOutput({ dir, board: await readBoard(dir) });
+  } catch (error) {
+    throw boardError(error);
+  }
+}
+
+async function boardOpenCommand(args, dir) {
+  await mkdir(dir, { recursive: true });
+  const nameFlag = inspectValueFlag(args, "--name");
+  const name = nameFlag.present ? String(nameFlag.value || "").trim() : "";
+  const board = await readOrCreateBoard(dir, { name: name || undefined });
+  const file = await canonicalFile(boardFilePath(dir));
+  const reopen = args.includes("--reopen");
+  const baseUrl = await ensureServer({
+    forceRestart: shouldForceRestartForLocalBuild(process.argv[1] || ""),
+    reloadKey: sessionKey(file),
+  });
+  const response = await postJson(`${baseUrl}/api/boards`, { dir, reopen });
+  if (response.status === "user-ended") {
+    return {
+      board: { ...boardSummary(board, dir), url: response.url, status: "user-ended" },
+      next_step: `The user explicitly ended this board, so \`${CLI_NAME} board open ${dir}\` did not reopen it. Do not reopen unless the user asks for further review; when they do, run \`${CLI_NAME} board open ${dir} --reopen\`.`,
+    };
+  }
+  if (shouldOpenBrowser(args, process.env)) {
+    try {
+      const open = (await import("open")).default;
+      await open(response.url);
+    } catch {
+      // A browser that cannot be launched leaves the printed URL as the way in.
+    }
+  }
+  return createBoardOpenOutput({
+    dir,
+    url: response.url,
+    board,
+    status: response.status || "opened",
+    agent: detectInvokingAgent(process.env),
+  });
+}
+
+async function boardAddCommand(positionals, args, dir) {
+  const input = positionals[1];
+  if (!input) {
+    throw new AxiError("An HTML file is required", "VALIDATION_ERROR", [
+      `Run \`${CLI_NAME} board add ${dir} <file.html>\``,
+    ]);
+  }
+  await assertHtmlFile(input);
+  await mkdir(dir, { recursive: true });
+  const board = await readOrCreateBoard(dir);
+  const source = await realpath(input);
+  const boardReal = await realpath(dir);
+  let fileName = path.basename(source);
+  if (path.dirname(source) !== boardReal) {
+    const extension = path.extname(source);
+    let target = path.join(dir, fileName);
+    let suffix = 2;
+    while (existsSync(target) && (await realpath(target).catch(() => "")) !== source) {
+      fileName = `${path.basename(source, extension)}-${suffix}${extension}`;
+      target = path.join(dir, fileName);
+      suffix += 1;
+    }
+    if (!existsSync(target)) await copyFile(source, target);
+  }
+  const labelFlag = inspectValueFlag(args, "--label");
+  const tabFlag = inspectValueFlag(args, "--tab");
+  const tab = tabFlag.present ? ensureTab(board, String(tabFlag.value || "")) : board.tabs[0].id;
+  const item = addItem(board, {
+    file: fileName,
+    label: labelFlag.present ? String(labelFlag.value || "") : undefined,
+    tab,
+  });
+  await writeBoard(dir, board);
+  return createBoardAddOutput({ dir, item, board });
+}
+
+async function boardPlaceCommand(positionals, args, dir) {
+  const itemId = positionals[1];
+  if (!itemId) {
+    throw new AxiError("A board item id is required", "VALIDATION_ERROR", [
+      `Run \`${CLI_NAME} board status ${dir}\` to list item ids`,
+    ]);
+  }
+  const board = await readBoard(dir);
+  const changes = {};
+  for (const [flag, key] of [
+    ["--x", "x"],
+    ["--y", "y"],
+    ["--w", "w"],
+    ["--h", "h"],
+  ]) {
+    const found = inspectValueFlag(args, flag);
+    if (found.present) changes[key] = Number(found.value);
+  }
+  const tabFlag = inspectValueFlag(args, "--tab");
+  if (tabFlag.present) changes.tab = ensureTab(board, String(tabFlag.value || ""));
+  const labelFlag = inspectValueFlag(args, "--label");
+  if (labelFlag.present) changes.label = String(labelFlag.value || "");
+  const statusFlag = inspectValueFlag(args, "--status");
+  if (statusFlag.present) changes.status = String(statusFlag.value || "");
+  const item = placeItem(board, itemId, changes);
+  await writeBoard(dir, board);
+  return createBoardPlaceOutput({ dir, item, board });
+}
+
+async function boardPairCommand(positionals, args, dir) {
+  const [a, b] = positionals.slice(1);
+  if (!a || !b) {
+    throw new AxiError("Two board item ids are required", "VALIDATION_ERROR", [
+      `Run \`${CLI_NAME} board pair ${dir} <item> <item>\``,
+    ]);
+  }
+  const board = await readBoard(dir);
+  const pair = pairItems(board, a, b, !args.includes("--unlock"));
+  await writeBoard(dir, board);
+  return { pair, board: boardSummary(board, dir) };
+}
+
+function positionalArgs(args, valueFlags = []) {
+  const flags = new Set(valueFlags);
+  const positionals = [];
+  let positionalMode = false;
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i];
+    if (!positionalMode && arg === "--") {
+      positionalMode = true;
+      continue;
+    }
+    if (!positionalMode && isValueFlagToken(arg, flags)) {
+      if (!arg.includes("=")) i += 1;
+      continue;
+    }
+    if (!positionalMode && arg.startsWith("-")) continue;
+    positionals.push(arg);
+  }
+  return positionals;
 }
 
 // Produce a portable copy of an artifact: one HTML file with its LOCAL assets (relative-path
@@ -2644,6 +2935,7 @@ function createCommandHelp({ agent = "generic" } = {}) {
     playbook: `Usage: lavish-axi playbook [playbook_id]\n\nList focused artifact guidance playbooks, or show one playbook by ID. Known IDs: diagram, table, comparison, plan, code, input, explanation, slides.\n\n${PLAYBOOK_ROUTER_HELP}\n\nExamples:\n  lavish-axi playbook\n  lavish-axi playbook diagram\n  lavish-axi playbook input\n`,
     libraries: `Usage: lavish-axi libraries [--search <text>] [--library <id>]\n\nList the Excalidraw libraries (.excalidrawlib files) the user copied into ~/.lavish-axi/excalidraw-libraries, or LAVISH_AXI_STATE_DIR/excalidraw-libraries when set. Their items appear in every whiteboard's library panel. --search lists item refs whose ref contains every search word; --library lists one library's item refs. Lavish only reads this directory and never downloads libraries.\n\nExamples:\n  lavish-axi libraries\n  lavish-axi libraries --search lambda\n  lavish-axi libraries --library aws-architecture-icons\n`,
     design: `Usage: lavish-axi design\n\nShow a copy-pasteable CDN snippet for Tailwind CSS browser runtime v4 + DaisyUI v5 + themes, the whiteboard (Mermaid) opt-in snippet, a content-to-playbook router, an optional layout safety CSS snippet, plus technical reference for DaisyUI components. ${PLAYBOOK_ROUTER_HELP} Lavish artifacts stay portable HTML. This CDN snippet is the design fallback, not the default: inspect the subject project before falling back, and paste the layout safety CSS only when useful for dense nested grid/flex layouts, badges, wide fonts, or local media. ${DESIGN_PRIORITY_RULE}\n`,
+    board: `Usage:\n  ${CLI_NAME} board open <dir> [--name "<board name>"] [--reopen] [--no-open]\n  ${CLI_NAME} board add <dir> <file.html> [--label "<label>"] [--tab <tab>]\n  ${CLI_NAME} board place <dir> <item> [--x <n>] [--y <n>] [--w <n>] [--h <n>] [--tab <tab>] [--label "<label>"] [--status <status>]\n  ${CLI_NAME} board pair <dir> <item> <item> [--unlock]\n  ${CLI_NAME} board status <dir>\n\nA board is a directory holding board.json and one HTML file per item. Every item of the active tab renders as its own sandboxed frame on one pannable, zoomable plane, so versions of the same design can be compared side by side; a locked pair moves together. The reviewer clicks an element to drop a numbered pin and the selection lands as a chip in the single composer at the bottom - several notes, then one send. Each note reaches the agent as an ordinary prompt carrying the item {id,label} and the pin {number, selector}, and the pin turns green when the handler replies. Items can declare tune controls in a \`<script type="application/easel-tune">\` JSON array of {id,label,type:'number'|'color'|'select',css:'--var',min,max,step,unit,value,options}: the tune panel writes those CSS custom properties live and saves versions with thumbnails, and Copy hands the values back to the agent. board.json holds only positions, labels, status, notes and tune values - never markup. Poll the board with \`${CLI_NAME} poll <dir>\`, which resolves the directory to its board.json.\n\nExamples:\n  ${CLI_NAME} board open hero-directions --name "Hero directions"\n  ${CLI_NAME} board add hero-directions v5.html --label "Hero · E"\n  ${CLI_NAME} board place hero-directions v5 --x 640 --y 0\n  ${CLI_NAME} board pair hero-directions v1 v3\n  ${CLI_NAME} poll hero-directions\n`,
     setup: `Usage: lavish-axi setup hooks\n       lavish-axi setup plugin\n\nhooks: install or repair agent SessionStart hooks for lavish-axi ambient context in Claude Code, Codex, OpenCode, and GitHub Copilot CLI. Restart your agent session afterward to receive the context. This is the primary integration - it carries live session state.\n\nplugin: register the installed lavish-axi package as an Agent Plugin (agent-plugins.org) in VS Code, Cursor, and GitHub Copilot CLI. The installed package directory is itself the plugin root, so nothing is downloaded and no marketplace is involved. Reload each client afterward. Codex users should use \`setup hooks\` instead.\n\nBoth actions are explicit opt-in, idempotent, and repair a stale path after a reinstall.\n`,
     server: `Usage: lavish-axi server [--port 4387] [--verbose] [--also-listen <host>...]\n\nRun the local Lavish Editor server. Pass --verbose (or set LAVISH_AXI_DEBUG=1) to log session and watcher events to stderr. Detached server output is appended to ~/.lavish-axi/server.log, or LAVISH_AXI_STATE_DIR/server.log when set, for startup and crash diagnostics.\n\nBy default Lavish binds to 127.0.0.1 and, when Tailscale is running, this machine's Tailscale IPv4. Any explicit LAVISH_AXI_HOST overrides automatic Tailscale binding; wildcard values such as 0.0.0.0 or :: are restricted to loopback. An explicit non-wildcard LAVISH_AXI_HOST sets the bind address, and the server also listens on 127.0.0.1 so every local CLI finds it; --also-listen adds further concrete addresses (the CLI passes it when it replaces a server, to keep every address the old one served). An address that cannot be bound is retried in the background and reported as network_warning. Binding beyond loopback exposes an unauthenticated server that can read and serve arbitrary local files to anything that can reach it, so only do so on a trusted network. With automatic binding enabled, a successfully bound Tailscale listener uses its MagicDNS name in generated session links; otherwise LAVISH_AXI_LINK_HOST can set the link hostname. See README's Allowed hosts section for Host allowlisting and LAVISH_AXI_ALLOWED_HOSTS. LAVISH_AXI_NO_OPEN=1 (or --no-open) suppresses the local browser launch.\n`,
   };

@@ -55,6 +55,8 @@ Each line is the rule. [docs/invariants.md](docs/invariants.md) has the failure 
 - The detached server entrypoint logs `uncaughtException` and exits 1 explicitly. Each listener keeps its `error` handler after `listening`. [Process model](docs/invariants.md#process-model).
 - `/api/:key/prompts`, `/share`, whiteboard writes, and attachment upload/delete are same-origin guarded. The key alone must never queue a prompt or publish. [Request flow](docs/invariants.md#request-flow).
 - Poll control `GET` and `POST` requests reject a present foreign Origin or Referer while header-less CLI requests keep working. [Request flow](docs/invariants.md#request-flow).
+- A board session is keyed by its `board.json`; every board route requires that basename, and an item's assets stay confined to that item's directory by `resolveArtifactAsset`. [Board](docs/invariants.md#board).
+- `board.json` holds positions, labels, status, notes and tune values only - never markup. Board writes normalize and rename atomically, and the board page re-reads instead of watching files. [Board](docs/invariants.md#board).
 - The chrome page (`/session/:key`) answers `X-Frame-Options: DENY` and `frame-ancestors 'none'`. Keep that header off `/artifact/*` and `/whiteboard-frame`, which are framed. [Request flow](docs/invariants.md#request-flow).
 - The artifact route injects only the one SDK `<script>` tag. Served artifact bytes otherwise match the file on disk. [Request flow](docs/invariants.md#request-flow).
 - `/api/sessions` refuses a path that is not a regular `.html`/`.htm` file after `realpath`. [Request flow](docs/invariants.md#request-flow).

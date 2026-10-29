@@ -1,0 +1,628 @@
+/* global document, window, location, IntersectionObserver, Element, HTMLElement */
+
+const bootstrap = JSON.parse(document.getElementById("easel-board")?.textContent || "{}");
+const key = String(bootstrap.key || "");
+const cameraStorageKey = `easel:camera:${key}`;
+const MIN_ZOOM = 0.1;
+const MAX_ZOOM = 4;
+
+const state = {
+  tabs: Array.isArray(bootstrap.tabs) ? bootstrap.tabs : [],
+  items: Array.isArray(bootstrap.items) ? bootstrap.items : [],
+  pairs: Array.isArray(bootstrap.pairs) ? bootstrap.pairs : [],
+  chat: Array.isArray(bootstrap.chat) ? bootstrap.chat : [],
+  ended: Boolean(bootstrap.ended),
+  activeTab: "",
+  camera: { x: 0, y: 0, zoom: 1 },
+  entries: new Map(),
+  mounted: new Set(),
+  overflow: new Set(),
+};
+
+const plane = document.getElementById("plane");
+const canvas = document.getElementById("canvas");
+const tabsElement = document.getElementById("tabs");
+const zoomLabel = document.getElementById("zoomLabel");
+const presence = document.getElementById("presence");
+const emptyElement = document.getElementById("empty");
+/** @type {any} */
+const composerInput = document.getElementById("composerInput");
+/** @type {any} */
+const sendButton = document.getElementById("send");
+const dockStatus = document.getElementById("dockStatus");
+const endedBanner = document.getElementById("ended");
+
+/** @param {string} tag @param {Record<string, string>} [attributes] @param {Array<Node | string>} [children] */
+function element(tag, attributes = {}, children = []) {
+  const node = document.createElement(tag);
+  for (const [name, value] of Object.entries(attributes)) {
+    if (name === "text") node.textContent = value;
+    else if (name === "class") node.className = value;
+    else node.setAttribute(name, value);
+  }
+  for (const child of children) node.append(child);
+  return node;
+}
+
+/** @param {number} value @param {number} min @param {number} max */
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function itemById(id) {
+  return state.items.find((item) => item.id === id) || null;
+}
+
+function loadCamera() {
+  let stored = null;
+  try {
+    stored = JSON.parse(localStorage.getItem(cameraStorageKey) || "null");
+  } catch {
+    stored = null;
+  }
+  const tab = stored?.tab && state.tabs.some((entry) => entry.id === stored.tab) ? stored.tab : state.tabs[0]?.id || "";
+  const perTab = stored?.tabs && typeof stored.tabs === "object" ? stored.tabs : {};
+  const saved = perTab[tab] || {};
+  state.activeTab = tab;
+  state.camera = {
+    x: Number(saved.x) || 0,
+    y: Number(saved.y) || 0,
+    zoom: clamp(Number(saved.zoom) || 1, MIN_ZOOM, MAX_ZOOM),
+  };
+}
+
+function saveCamera() {
+  let stored;
+  try {
+    stored = JSON.parse(localStorage.getItem(cameraStorageKey) || "{}");
+  } catch {
+    stored = {};
+  }
+  const perTab = stored.tabs && typeof stored.tabs === "object" ? stored.tabs : {};
+  perTab[state.activeTab] = { ...state.camera };
+  try {
+    localStorage.setItem(cameraStorageKey, JSON.stringify({ tab: state.activeTab, tabs: perTab }));
+  } catch {
+    // A browser that refuses storage still has a working board this session.
+  }
+}
+
+function applyCamera() {
+  canvas.style.transform = `translate(${state.camera.x}px, ${state.camera.y}px) scale(${state.camera.zoom})`;
+  zoomLabel.textContent = `${Math.round(state.camera.zoom * 100)}%`;
+}
+
+function activeItems() {
+  return state.items.filter((item) => item.tab === state.activeTab);
+}
+
+function boundsOf(items) {
+  if (items.length === 0) return null;
+  const left = Math.min(...items.map((item) => item.x));
+  const top = Math.min(...items.map((item) => item.y));
+  const right = Math.max(...items.map((item) => item.x + item.w));
+  const bottom = Math.max(...items.map((item) => item.y + item.h));
+  return { left, top, width: right - left, height: bottom - top };
+}
+
+function fitTab(animate = true) {
+  const items = activeItems();
+  const bounds = boundsOf(items);
+  if (!bounds) {
+    state.camera = { x: 0, y: 0, zoom: 1 };
+  } else {
+    const padding = 72;
+    const availableWidth = window.innerWidth - padding * 2;
+    const availableHeight = window.innerHeight - 56 - padding - 170;
+    const zoom = clamp(Math.min(1, availableWidth / bounds.width, availableHeight / bounds.height), MIN_ZOOM, MAX_ZOOM);
+    state.camera = {
+      zoom,
+      x: (window.innerWidth - bounds.width * zoom) / 2 - bounds.left * zoom,
+      y: 56 + (availableHeight - bounds.height * zoom) / 2 - bounds.top * zoom,
+    };
+  }
+  if (animate) canvas.style.transition = "transform 320ms cubic-bezier(.2,.8,.2,1)";
+  applyCamera();
+  saveCamera();
+  if (animate) {
+    setTimeout(() => {
+      canvas.style.transition = "";
+    }, 340);
+  }
+}
+
+function setTab(id) {
+  if (!state.tabs.some((tab) => tab.id === id)) return;
+  state.activeTab = id;
+  for (const [itemId, entry] of state.entries) {
+    entry.element.dataset.active = String(itemById(itemId)?.tab === id);
+  }
+  renderTabs();
+  applyCamera();
+  const stored = storedCameraFor(id);
+  if (stored) {
+    state.camera = stored;
+    applyCamera();
+  } else {
+    fitTab(false);
+  }
+  saveCamera();
+}
+
+function storedCameraFor(tabId) {
+  try {
+    const stored = JSON.parse(localStorage.getItem(cameraStorageKey) || "{}");
+    const perTab = stored?.tabs?.[tabId];
+    if (!perTab) return null;
+    return {
+      x: Number(perTab.x) || 0,
+      y: Number(perTab.y) || 0,
+      zoom: clamp(Number(perTab.zoom) || 1, MIN_ZOOM, MAX_ZOOM),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function renderTabs() {
+  tabsElement.replaceChildren(
+    ...state.tabs.map((tab) => {
+      const button = element("button", {
+        class: "tab",
+        type: "button",
+        role: "tab",
+        "aria-selected": String(tab.id === state.activeTab),
+        text: tab.label,
+      });
+      button.addEventListener("click", () => setTab(tab.id));
+      return button;
+    }),
+  );
+}
+
+function itemUrl(item) {
+  return `/board/${encodeURIComponent(key)}/item/${encodeURIComponent(item.id)}/index.html`;
+}
+
+function pairFor(id) {
+  return state.pairs.find((pair) => pair.locked && (pair.a === id || pair.b === id)) || null;
+}
+
+/** @param {any} item */
+function createItem(item) {
+  const article = element("article", { class: "item", "data-id": item.id, "data-active": "true" });
+  const bar = element("header", { class: "item-bar" });
+  const dot = element("span", { class: "dot", "aria-hidden": "true" });
+  const label = element("span", { class: "item-label", text: item.label });
+  const meta = element("span", { class: "item-meta", text: `${item.w}×${item.h}` });
+  bar.append(dot, label, meta);
+  const pair = pairFor(item.id);
+  if (pair) bar.append(element("span", { class: "pair-badge", text: "locked pair" }));
+  if (Array.isArray(item.tuneSpec) && item.tuneSpec.length > 0) {
+    const tuneButton = element("button", { class: "tune-toggle", type: "button", text: "tune" });
+    tuneButton.addEventListener("click", (event) => {
+      event.stopPropagation();
+      openTune(item.id);
+    });
+    bar.append(tuneButton);
+  }
+  const frame = element("div", { class: "item-frame" });
+  const iframe = element("iframe", {
+    title: item.label,
+    sandbox: "allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads",
+  });
+  iframe.dataset.src = itemUrl(item);
+  iframe.addEventListener("load", () => {
+    if (state.mounted.has(item.id)) postPins(item.id);
+  });
+  frame.append(iframe);
+  const resize = element("div", { class: "item-resize", title: "Resize" });
+  article.append(bar, frame, resize);
+  positionItem(article, item);
+  article.dataset.pair = String(Boolean(pair));
+  bindDrag(article, bar, item.id);
+  bindResize(resize, item.id);
+  return { element: article, iframe, bar, label, meta };
+}
+
+function positionItem(article, item) {
+  article.style.left = `${item.x}px`;
+  article.style.top = `${item.y}px`;
+  article.style.width = `${item.w}px`;
+  article.style.height = `${item.h}px`;
+}
+
+function refreshItemChrome(id) {
+  const item = itemById(id);
+  const entry = state.entries.get(id);
+  if (!item || !entry) return;
+  positionItem(entry.element, item);
+  entry.label.textContent = item.label;
+  entry.meta.textContent = item.w + "×" + item.h + (state.overflow.has(id) ? " · overflows" : "");
+  entry.element.dataset.pair = String(Boolean(pairFor(id)));
+}
+
+function syncItems() {
+  const seen = new Set();
+  for (const item of state.items) {
+    seen.add(item.id);
+    const entry = state.entries.get(item.id);
+    if (entry) {
+      entry.element.dataset.active = String(item.tab === state.activeTab);
+      refreshItemChrome(item.id);
+      continue;
+    }
+    const created = createItem(item);
+    state.entries.set(item.id, created);
+    canvas.append(created.element);
+    mountObserver.observe(created.element);
+  }
+  for (const [id, entry] of state.entries) {
+    if (seen.has(id)) continue;
+    mountObserver.unobserve(entry.element);
+    entry.element.remove();
+    state.entries.delete(id);
+  }
+  emptyElement.hidden = activeItems().length > 0;
+}
+
+const mountObserver = new IntersectionObserver(
+  (entries) => {
+    for (const entry of entries) {
+      if (!entry.isIntersecting) continue;
+      /** @type {any} */
+      const article = entry.target;
+      const id = article.dataset.id || "";
+      const item = itemById(id);
+      const record = state.entries.get(id);
+      if (!item || !record) continue;
+      if (!record.iframe.getAttribute("src")) record.iframe.setAttribute("src", record.iframe.dataset.src || "");
+      state.mounted.add(id);
+    }
+  },
+  { root: plane, rootMargin: "900px" },
+);
+
+function postToItem(id, message) {
+  const entry = state.entries.get(id);
+  if (!entry || !entry.iframe.contentWindow) return;
+  entry.iframe.contentWindow.postMessage({ channel: "easel", item: id, ...message }, "*");
+}
+
+function postPins(id) {
+  const item = itemById(id);
+  if (!item) return;
+  postToItem(id, { type: "pins", pins: pinsFor(item) });
+}
+
+function pinsFor(item) {
+  return (item.notes || []).map((note) => ({
+    id: note.id,
+    number: note.number,
+    selector: note.selector,
+    x: note.x,
+    y: note.y,
+    text: note.text,
+    state: "draft",
+  }));
+}
+
+function persist(items) {
+  if (state.ended) return;
+  fetch(`/api/boards/${encodeURIComponent(key)}/place`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ items }),
+  }).catch(() => {});
+}
+
+function bindDrag(article, handle, id) {
+  handle.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0) return;
+    if (event.target instanceof Element && event.target.closest("button")) return;
+    event.preventDefault();
+    const item = itemById(id);
+    if (!item) return;
+    const startX = event.clientX;
+    const startY = event.clientY;
+    const origin = { x: item.x, y: item.y };
+    const partnerPair = pairFor(id);
+    const partnerId = partnerPair ? (partnerPair.a === id ? partnerPair.b : partnerPair.a) : null;
+    const partner = partnerId ? itemById(partnerId) : null;
+    const partnerOrigin = partner ? { x: partner.x, y: partner.y } : null;
+    handle.setPointerCapture(event.pointerId);
+    const move = (moveEvent) => {
+      const dx = (moveEvent.clientX - startX) / state.camera.zoom;
+      const dy = (moveEvent.clientY - startY) / state.camera.zoom;
+      item.x = Math.round(origin.x + dx);
+      item.y = Math.round(origin.y + dy);
+      refreshItemChrome(id);
+      if (partner && partnerOrigin) {
+        partner.x = Math.round(partnerOrigin.x + dx);
+        partner.y = Math.round(partnerOrigin.y + dy);
+        refreshItemChrome(partner.id);
+      }
+    };
+    const up = () => {
+      handle.removeEventListener("pointermove", move);
+      handle.removeEventListener("pointerup", up);
+      handle.removeEventListener("pointercancel", up);
+      const changes = [{ id, x: item.x, y: item.y }];
+      if (partner) changes.push({ id: partner.id, x: partner.x, y: partner.y });
+      persist(changes);
+    };
+    handle.addEventListener("pointermove", move);
+    handle.addEventListener("pointerup", up);
+    handle.addEventListener("pointercancel", up);
+  });
+}
+
+function bindResize(handle, id) {
+  handle.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const item = itemById(id);
+    if (!item) return;
+    const startX = event.clientX;
+    const startY = event.clientY;
+    const origin = { w: item.w, h: item.h };
+    handle.setPointerCapture(event.pointerId);
+    const move = (moveEvent) => {
+      item.w = Math.round(Math.max(160, origin.w + (moveEvent.clientX - startX) / state.camera.zoom));
+      item.h = Math.round(Math.max(120, origin.h + (moveEvent.clientY - startY) / state.camera.zoom));
+      refreshItemChrome(id);
+    };
+    const up = () => {
+      handle.removeEventListener("pointermove", move);
+      handle.removeEventListener("pointerup", up);
+      handle.removeEventListener("pointercancel", up);
+      persist([{ id, w: item.w, h: item.h }]);
+    };
+    handle.addEventListener("pointermove", move);
+    handle.addEventListener("pointerup", up);
+    handle.addEventListener("pointercancel", up);
+  });
+}
+
+function bindPlane() {
+  let panning = false;
+  let start = null;
+  plane.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0 && event.button !== 1) return;
+    if (event.target instanceof Element && event.target.closest(".item")) return;
+    panning = true;
+    start = { x: event.clientX, y: event.clientY, cameraX: state.camera.x, cameraY: state.camera.y };
+    plane.dataset.panning = "true";
+    plane.setPointerCapture(event.pointerId);
+  });
+  plane.addEventListener("pointermove", (event) => {
+    if (!panning || !start) return;
+    state.camera.x = start.cameraX + (event.clientX - start.x);
+    state.camera.y = start.cameraY + (event.clientY - start.y);
+    applyCamera();
+  });
+  const end = () => {
+    if (!panning) return;
+    panning = false;
+    start = null;
+    plane.dataset.panning = "false";
+    saveCamera();
+  };
+  plane.addEventListener("pointerup", end);
+  plane.addEventListener("pointercancel", end);
+  plane.addEventListener(
+    "wheel",
+    (event) => {
+      event.preventDefault();
+      if (event.ctrlKey || event.metaKey) {
+        const factor = Math.exp(-event.deltaY * 0.0016);
+        zoomAt(event.clientX, event.clientY, factor);
+        return;
+      }
+      state.camera.x -= event.deltaX;
+      state.camera.y -= event.deltaY;
+      applyCamera();
+      scheduleCameraSave();
+    },
+    { passive: false },
+  );
+}
+
+/** @type {ReturnType<typeof setTimeout> | undefined} */
+let cameraSaveTimer;
+function scheduleCameraSave() {
+  clearTimeout(cameraSaveTimer);
+  cameraSaveTimer = setTimeout(saveCamera, 350);
+}
+
+function zoomAt(clientX, clientY, factor) {
+  const worldX = (clientX - state.camera.x) / state.camera.zoom;
+  const worldY = (clientY - state.camera.y) / state.camera.zoom;
+  state.camera.zoom = clamp(state.camera.zoom * factor, MIN_ZOOM, MAX_ZOOM);
+  state.camera.x = clientX - worldX * state.camera.zoom;
+  state.camera.y = clientY - worldY * state.camera.zoom;
+  applyCamera();
+  scheduleCameraSave();
+}
+
+function zoomBy(factor) {
+  zoomAt(window.innerWidth / 2, window.innerHeight / 2, factor);
+}
+
+function setPresence(value) {
+  const label = value === "listening" ? "agent listening" : value === "working" ? "agent working" : "agent idle";
+  presence.dataset.state = value || "waiting";
+  presence.textContent = label;
+}
+
+function showReply(entry) {
+  if (!entry) return;
+  const reply = element("div", { class: "reply" });
+  reply.textContent = String(entry.text || "");
+  dockStatus.replaceChildren(reply);
+  dockStatus.scrollTop = 0;
+}
+
+function markEnded() {
+  state.ended = true;
+  endedBanner.hidden = false;
+  composerInput.disabled = true;
+  sendButton.disabled = true;
+  composerInput.placeholder = "Session ended";
+}
+
+function randomId() {
+  if (crypto && typeof crypto.randomUUID === "function") return crypto.randomUUID();
+  return Math.random().toString(36).slice(2) + Date.now().toString(36);
+}
+
+async function send() {
+  if (state.ended) return;
+  const text = composerInput.value.trim();
+  if (!text) return;
+  sendButton.disabled = true;
+  try {
+    const response = await fetch(`/api/${encodeURIComponent(key)}/prompts`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ prompts: [{ uid: randomId(), prompt: text, tag: "message" }], domSnapshot: "" }),
+    });
+    if (!response.ok) {
+      dockStatus.textContent = "Could not reach the agent. Your text is still here.";
+      return;
+    }
+    composerInput.value = "";
+    autosize();
+    dockStatus.textContent = "Sent.";
+    setTimeout(() => {
+      if (dockStatus.textContent === "Sent.") dockStatus.textContent = "";
+    }, 1800);
+  } catch {
+    dockStatus.textContent = "Could not reach the agent. Your text is still here.";
+  } finally {
+    sendButton.disabled = state.ended;
+  }
+}
+
+function autosize() {
+  composerInput.style.height = "auto";
+  composerInput.style.height = `${Math.min(200, composerInput.scrollHeight + 2)}px`;
+}
+
+function connectLiveEvents() {
+  const protocol = location.protocol === "https:" ? "wss:" : "ws:";
+  let delay = 500;
+  const connect = () => {
+    const socket = new WebSocket(`${protocol}//${location.host}/events/${encodeURIComponent(key)}`);
+    socket.addEventListener("open", () => {
+      delay = 500;
+    });
+    socket.addEventListener("message", (message) => {
+      let payload;
+      try {
+        payload = JSON.parse(message.data);
+      } catch {
+        return;
+      }
+      if (payload?.type === "agent-presence") setPresence(payload.data?.state);
+      if (payload?.type === "agent-reply") showReply(payload.data);
+      if (payload?.type === "chat-sync") {
+        state.chat = Array.isArray(payload.data?.chat) ? payload.data.chat : state.chat;
+        renderNotes();
+      }
+      if (payload?.type === "ended") markEnded();
+    });
+    socket.addEventListener("close", () => {
+      setTimeout(connect, delay);
+      delay = Math.min(delay * 2, 5000);
+    });
+  };
+  connect();
+}
+
+async function refreshBoard() {
+  try {
+    const response = await fetch(`/api/boards/${encodeURIComponent(key)}`, { cache: "no-store" });
+    if (!response.ok) return;
+    const payload = await response.json();
+    if (Array.isArray(payload.items)) {
+      const previousTabs = state.tabs.map((tab) => tab.id).join(",");
+      state.items = payload.items;
+      state.tabs = payload.tabs || state.tabs;
+      state.pairs = payload.pairs || state.pairs;
+      state.chat = Array.isArray(payload.chat) ? payload.chat : state.chat;
+      if (!state.tabs.some((tab) => tab.id === state.activeTab)) state.activeTab = state.tabs[0]?.id || "";
+      if (state.tabs.map((tab) => tab.id).join(",") !== previousTabs) renderTabs();
+      syncItems();
+      renderNotes();
+    }
+    if (payload.ended) markEnded();
+  } catch {
+    // A board that cannot refresh keeps showing the items it has.
+  }
+}
+
+/** @param {MessageEvent} event */
+function onItemMessage(event) {
+  const data = event.data;
+  if (!data || data.channel !== "easel") return;
+  const id = String(data.item || "");
+  const entry = state.entries.get(id);
+  if (!entry || event.source !== entry.iframe.contentWindow) return;
+  if (data.type === "ready") postPins(id);
+  if (data.type === "layout") {
+    if (data.overflow) state.overflow.add(id);
+    else state.overflow.delete(id);
+    refreshItemChrome(id);
+  }
+}
+
+function renderNotes() {
+  // Milestone 3 fills the composer chips from notes and chat receipts.
+}
+
+function openTune(_id) {
+  // Milestone 4 fills the tune panel.
+}
+
+window.addEventListener("message", onItemMessage);
+window.addEventListener("keydown", (event) => {
+  if (event.metaKey || event.ctrlKey || event.altKey) return;
+  const target = event.target;
+  if (
+    target instanceof HTMLElement &&
+    (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)
+  )
+    return;
+  if (event.key === "0") fitTab();
+  if (event.key === "+" || event.key === "=") zoomBy(1.2);
+  if (event.key === "-") zoomBy(1 / 1.2);
+});
+
+document.getElementById("zoomIn")?.addEventListener("click", () => zoomBy(1.2));
+document.getElementById("zoomOut")?.addEventListener("click", () => zoomBy(1 / 1.2));
+document.getElementById("fit")?.addEventListener("click", () => fitTab());
+sendButton?.addEventListener("click", send);
+composerInput?.addEventListener("input", autosize);
+composerInput?.addEventListener("keydown", (event) => {
+  if (event.key === "Enter" && !event.shiftKey) {
+    event.preventDefault();
+    send();
+  }
+});
+
+loadCamera();
+renderTabs();
+applyCamera();
+syncItems();
+renderNotes();
+bindPlane();
+if (state.chat.length > 0) {
+  const lastAgent = [...state.chat].reverse().find((entry) => entry.role === "agent");
+  if (lastAgent) showReply(lastAgent);
+}
+if (state.ended) markEnded();
+if (!storedCameraFor(state.activeTab)) fitTab(false);
+connectLiveEvents();
+setInterval(refreshBoard, 5000);

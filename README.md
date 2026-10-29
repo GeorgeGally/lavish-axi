@@ -37,6 +37,7 @@ Lavish Editor opens agent-generated HTML files in a local browser, lets you pinp
 
 - **Local-first** - Review local HTML artifacts with a local CLI and no cloud dependency in the core feedback loop; hosted sharing through third-party ht-ml.app is explicit and opt-in.
 - **Human-AI collaboration** - Annotate elements and selected text ranges, edit Mermaid whiteboard diagrams, and send messages to the agent without leaving Lavish Editor.
+- **Board mode** - A directory of HTML variants renders on one pannable plane with tabs, numbered pins, one composer and a live tune panel, so versions of the same design are compared, annotated and tuned in one place. Run `easel board --help`.
 - **Battery included** - Lavish Editor teaches your agent good visualization for common use cases such as product or technical plans, design explorations and more out of the box.
 
 Lavish Editor is an [AXI](https://axi.md), which means -
@@ -132,6 +133,66 @@ pnpm install --frozen-lockfile
 pnpm run build
 pnpm link
 ```
+
+## Board mode
+
+A board is a folder your agent fills, not a design tool: `board.json` plus one HTML file per item.
+Every item of the active tab renders as its own sandboxed frame on one pannable, zoomable plane, and the camera is remembered per tab in the browser.
+
+```sh
+easel board open hero-directions --name "Hero directions"
+easel board add hero-directions v5.html --label "Hero · E"
+easel board place hero-directions v5 --x 640 --y 0
+easel board pair hero-directions v1 v3     # locked: they move together
+easel poll hero-directions                 # the agent waits here
+```
+
+`board.json` carries only where an item sits, which tab it is on, what you said about it, and its tune values - never markup or a copy of an item's file:
+
+```json
+{
+  "format": 1,
+  "name": "hero directions",
+  "tabs": [{ "id": "hero", "label": "Hero" }],
+  "items": [
+    {
+      "id": "v1",
+      "label": "Hero · A, dense",
+      "file": "v1.html",
+      "tab": "hero",
+      "x": 0,
+      "y": 0,
+      "w": 420,
+      "h": 320,
+      "status": "open",
+      "notes": [],
+      "tune": { "radius": "12" },
+      "versions": []
+    }
+  ],
+  "pairs": [{ "a": "v1", "b": "v3", "locked": true }]
+}
+```
+
+Clicking an element on an item drops a numbered pin on it and puts the selection in the composer as a chip; several chips then go to the agent in one send.
+Each note reaches the agent with the item and pin it belongs to, and the pin turns green once the agent has replied.
+
+### Tuning
+
+An item declares its own controls in a `application/easel-tune` JSON array, binding each control to a CSS custom property the page already uses:
+
+```html
+<script type="application/easel-tune">
+  [
+    { "id": "radius", "label": "Card radius", "type": "number", "css": "--radius", "min": 0, "max": 24, "step": 1, "value": 6, "unit": "px" },
+    { "id": "accent", "label": "Accent", "type": "color", "css": "--accent", "value": "#b7872f" },
+    { "id": "density", "label": "Density", "type": "select", "css": "--density", "options": ["cozy", "compact"], "value": "cozy" }
+  ]
+</script>
+```
+
+The tune panel writes those properties live, saves named versions with thumbnails, and **Copy for agent** produces the values plus the instruction that bakes them into the item's file.
+An item with no declaration gets no panel.
 
 ## How It Works
 
