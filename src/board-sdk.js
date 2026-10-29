@@ -510,37 +510,40 @@
   // the full document height without the page reflowing.
   let pinnedVh = 0;
   function pinViewportUnits() {
-    // The board may open the frame at any height; a design's 100vh always means one
-    // screen of the device it is shown on.
-    const deviceHeights = { desktop: 900, ipad: 1112, phone: 844 };
+    // The board may open the frame at any height; a design's 100vh (and svh, dvh, lvh)
+    // always means one screen of the device it is shown on, whether the artboard is
+    // grown to the whole page or scrolls inside a device frame.
+    const deviceHeights = { desktop: 900, ipad: 1194, phone: 844 };
     const viewport = deviceHeights[deviceId] || Math.round(window.innerHeight);
     if (!viewport) return;
     pinnedVh = viewport;
+    const pattern = /(-?\d*\.?\d+)(dvh|svh|lvh|vh)\b/g;
     const replace = (value) =>
-      value.replace(/(\d*\.?\d+)(dvh|svh|lvh|vh)\b/g, (_match, amount, unit) => {
-        if (unit !== "vh") return `${amount}${unit}`;
-        return `${((Number(amount) * viewport) / 100).toFixed(2)}px`;
-      });
+      value.replace(pattern, (_match, amount) => `${((Number(amount) * viewport) / 100).toFixed(2)}px`);
+    /** @param {CSSStyleDeclaration} style */
+    const pinStyle = (style) => {
+      for (const property of Array.from(style)) {
+        const value = style.getPropertyValue(property);
+        if (!/\d(dvh|svh|lvh|vh)\b/.test(value)) continue;
+        const next = replace(value);
+        if (next !== value) style.setProperty(property, next, style.getPropertyPriority(property));
+      }
+    };
     const walk = (rules) => {
       for (const rule of rules) {
         if (rule.cssRules) walk(rule.cssRules);
-        const style = rule.style;
-        if (!style) continue;
-        for (const property of Array.from(style)) {
-          const value = style.getPropertyValue(property);
-          if (!/\d(dvh|svh|lvh|vh)\b/.test(value)) continue;
-          const next = replace(value);
-          if (next !== value) style.setProperty(property, next);
-        }
+        if (rule.style) pinStyle(rule.style);
       }
     };
-    try {
-      for (const sheet of Array.from(document.styleSheets)) {
-        if (!sheet.cssRules) continue;
-        walk(sheet.cssRules);
+    for (const sheet of Array.from(document.styleSheets)) {
+      try {
+        if (sheet.cssRules) walk(sheet.cssRules);
+      } catch {
+        // A stylesheet that cannot be read is left alone; the others are still pinned.
       }
-    } catch {
-      // A stylesheet that cannot be read is left alone; the page still renders.
+    }
+    for (const element of Array.from(document.querySelectorAll("[style]"))) {
+      if (element instanceof HTMLElement) pinStyle(element.style);
     }
   }
 

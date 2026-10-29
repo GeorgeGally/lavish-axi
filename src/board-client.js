@@ -17,7 +17,7 @@ const LABEL_PX = 13;
 // the only scale on the board, so a point on screen maps into a page by one division.
 const DEVICES = [
   { id: "desktop", label: "Desktop", width: 1440, height: 900 },
-  { id: "ipad", label: "iPad", width: 834, height: 1112 },
+  { id: "ipad", label: "iPad", width: 834, height: 1194 },
   { id: "phone", label: "Phone", width: 390, height: 844 },
 ];
 // Bezel thickness of the CSS device frames, in board pixels. `below` is room for the
