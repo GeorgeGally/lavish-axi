@@ -273,6 +273,8 @@ test("a pin prompt keeps the item and pin it belongs to, and earns its receipts"
           tag: "pin",
           item: { id: "v1", label: "Hero · A" },
           pin: { id: "n1", number: 3, viewport: 834, excerpt: "  The whole\n fleet ", heading: "Fleet" },
+          thread: "n1",
+          followup: "edit",
         },
       ],
       domSnapshot: "",
@@ -294,6 +296,8 @@ test("a pin prompt keeps the item and pin it belongs to, and earns its receipts"
     heading: "Fleet",
   });
   assert.equal(polled.prompts[0].prompt_id, undefined);
+  assert.equal(polled.prompts[0].thread, "n1");
+  assert.equal(polled.prompts[0].followup, "edit");
 
   const seen = await fetch(`${base}/api/boards/${registered.key}`).then((response) => response.json());
   assert.ok(seen.chat.at(-1).delivered_at, "the note reads Seen once a poll takes it");

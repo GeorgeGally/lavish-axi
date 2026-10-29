@@ -21,12 +21,20 @@ function jsonScript(value) {
 /**
  * @param {{ key: string, file: string }} session
  * @param {import("./board.js").Board} board
- * @param {{ tuneSpecs?: Record<string, import("./board.js").TuneControl[]>, captions?: Record<string, { title: string, explain: string, changed?: string, parent?: string, mtime?: number, created?: number }>, chat?: unknown[], ended?: boolean, endedBy?: string | null, assetVersion?: string }} [options]
+ * @param {{ tuneSpecs?: Record<string, import("./board.js").TuneControl[]>, captions?: Record<string, { title: string, explain: string, changed?: string, parent?: string, mtime?: number, created?: number }>, chat?: unknown[], ended?: boolean, endedBy?: string | null, assetVersion?: string, agentName?: string }} [options]
  */
 export function createBoardHtml(
   session,
   board,
-  { tuneSpecs = {}, captions = {}, chat = [], ended = false, endedBy = null, assetVersion = "" } = {},
+  {
+    tuneSpecs = {},
+    captions = {},
+    chat = [],
+    ended = false,
+    endedBy = null,
+    assetVersion = "",
+    agentName = "Agent",
+  } = {},
 ) {
   const items = board.items.map((item) => ({
     ...item,
@@ -49,6 +57,7 @@ export function createBoardHtml(
     chat,
     ended,
     endedBy,
+    agentName,
   });
   return `<!doctype html>
 <html lang="en">

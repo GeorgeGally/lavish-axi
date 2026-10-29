@@ -1173,6 +1173,8 @@ export async function serve({
           ended: resolved.session.status === "ended",
           endedBy: resolved.session.ended_by || null,
           assetVersion: version,
+          // Who answers on this board, for "<name> is replying…" (EASEL_AGENT_NAME).
+          agentName: String(productEnv("AGENT_NAME", env) || "Agent").slice(0, 40),
         }),
       );
     } catch (error) {

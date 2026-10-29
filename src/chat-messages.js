@@ -19,21 +19,40 @@ const PROMPT_ID_RE = /^[A-Za-z0-9_-]+$/;
 // call it off (`[[pending-cancel: <item>]]`). The markers drive the board's
 // placeholders and never show as text.
 const PENDING_MARKER = /\[\[\s*pending(-cancel)?\s*:\s*([^\]\s]{1,160})\s*\]\]/gi;
+// `[[thread: <id>]]` files a reply under one board conversation thread.
+const THREAD_MARKER = /\[\[\s*thread\s*:\s*([A-Za-z0-9:._-]{1,80})\s*\]\]/gi;
+export const FOLLOWUP_KINDS = ["reply", "edit", "deleted"];
+const THREAD_ID_RE = /^[A-Za-z0-9:._-]{1,80}$/;
+
+/** @param {unknown} value */
+export function normalizeThreadId(value) {
+  const id = typeof value === "string" ? value.trim() : "";
+  return THREAD_ID_RE.test(id) ? id : "";
+}
 
 /**
  * @param {string} text
- * @returns {{ text: string, pending: string[], cancel: string[] }}
+ * @returns {{ text: string, pending: string[], cancel: string[], threads: string[] }}
  */
 export function extractPendingMarkers(text) {
   /** @type {string[]} */
   const pending = [];
   /** @type {string[]} */
   const cancel = [];
-  const stripped = String(text || "").replace(PENDING_MARKER, (_match, cancelled, id) => {
-    (cancelled ? cancel : pending).push(id);
-    return "";
-  });
-  if (pending.length === 0 && cancel.length === 0) return { text: String(text || ""), pending, cancel };
+  /** @type {string[]} */
+  const threads = [];
+  const stripped = String(text || "")
+    .replace(PENDING_MARKER, (_match, cancelled, id) => {
+      (cancelled ? cancel : pending).push(id);
+      return "";
+    })
+    .replace(THREAD_MARKER, (_match, id) => {
+      if (!threads.includes(id)) threads.push(id);
+      return "";
+    });
+  if (pending.length === 0 && cancel.length === 0 && threads.length === 0) {
+    return { text: String(text || ""), pending, cancel, threads };
+  }
   return {
     text: stripped
       .replace(/[ \t]+\n/g, "\n")
@@ -41,6 +60,7 @@ export function extractPendingMarkers(text) {
       .trim(),
     pending,
     cancel,
+    threads,
   };
 }
 export const MAX_CHAT_STORED_BYTES = 5_242_880;
@@ -499,6 +519,11 @@ export function chatEntryForPrompt(prompt, at) {
   if (promptId) entry.prompt_id = promptId;
   if (anchor) entry.anchor = anchor;
   if (attachments.length) entry.attachments = attachments;
+  // A board conversation: which thread the words belong to, and whether they answer,
+  // correct or withdraw an earlier note.
+  const thread = normalizeThreadId(prompt.thread);
+  if (thread) entry.thread = thread;
+  if (FOLLOWUP_KINDS.includes(prompt.followup)) entry.followup = prompt.followup;
   return entry;
 }
 
@@ -515,6 +540,7 @@ export function serializeChat(chat) {
       const entry = { ...item, role: "agent", text: markers.text, html: renderChatMarkdown(markers.text) };
       if (markers.pending.length > 0) entry.pending = markers.pending;
       if (markers.cancel.length > 0) entry.pending_cancel = markers.cancel;
+      if (markers.threads.length > 0) entry.threads = markers.threads;
       serialized.push(entry);
       continue;
     }

@@ -21,6 +21,8 @@ import {
   collectChatAckIds,
   markPreReceipt,
   normalizePromptId,
+  normalizeThreadId,
+  FOLLOWUP_KINDS,
   stampDelivered,
   stampDone,
   stampWorking,
@@ -862,6 +864,11 @@ function normalizePrompt(prompt) {
   if (pin) normalized.pin = pin;
   const target = normalizeTarget(prompt.target);
   if (target) normalized.target = target;
+  // Board threads: every note is a conversation the reviewer and the agent can both
+  // answer into, and a follow-up says whether it replies to, edits or withdraws a note.
+  const thread = normalizeThreadId(prompt.thread);
+  if (thread) normalized.thread = thread;
+  if (FOLLOWUP_KINDS.includes(prompt.followup)) normalized.followup = prompt.followup;
   const { refs, malformed } = normalizeAttachmentRefs(prompt.attachments);
   if (refs.length > 0) normalized.attachments = refs;
   return { prompt: normalized, malformed };

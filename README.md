@@ -140,7 +140,7 @@ A board is a folder your agent fills, not a design tool: `board.json` plus one H
 Every item renders as three whole-page artboards - desktop 1440, iPad 834, phone 390 - at those real viewport widths, each as tall as the page's own content.
 Name files `NN-name-today.html` and `NN-name-proposed.html` (more proposals as `-proposed-b`, `-proposed-c`) and the board shows them side by side under a short explanation taken from each file's `<meta name="easel-caption">` (or `easel-explain`, plus an optional `easel-title`).
 The All view shows one design per row; **Desktop**, **iPad** and **Phone** show that device only, in a device frame, packed in rows, and scrolling over a device scrolls its page.
-Beside each version's name, **Accept** (or **Keep today**) tells the agent at once which one you chose and at which size, marks it with a check, and **Undo** takes it back.
+Beside each version's name, **Accept** (or **Keep today**) tells the agent at once which one you chose and at which size, marks it with a check, and **Take back** withdraws it.
 A new version grown from an existing one sits in a row directly under it: name its parent with `<meta name="easel-parent" content="02-why-card-today">`, or the board picks the version with the same `NN-` prefix whose name it shares most.
 `<meta name="easel-changed" content="...">` adds a **What changed** line under the explanation.
 
@@ -148,6 +148,8 @@ The board follows the folder while you look at it: when a file changes, only tha
 An agent that is about to make a new version can say so with `easel reply <board> --agent-reply "On it." --pending <item-id>` (or a `[[pending: <item-id>]]` line in the reply, which never shows): a holder with a loader and your note appears under that item until a file with that parent appears, and `[[pending-cancel: <item-id>]]` removes it.
 
 A pin note tells the agent what it points at: the element's visible text, the heading of its section, and a picture of that spot (the element plus a 40px margin, at the device's width) delivered as an image attachment path. The picture needs a local Chrome (found in the usual places, or set `EASEL_CHROME`); without one, notes go out without it.
+
+The notes panel is a conversation. Each note is a thread headed by its pin number, design and a small picture of the spot; the agent's answers sit under the note they answer, a "replying" line shows until one arrives, and replies appear without a reload (with a count on **Notes** while the panel is closed). In a thread, **Reply** adds to the note, **Edit note** corrects it and **Delete note** withdraws it after one confirmation; each reaches the agent as a prompt carrying the thread id and `followup: reply | edit | deleted`, and the same actions open from a sent note's pin. Accept and Keep today form a thread per design. An agent reply joins the threads of the notes it settles; to answer one thread, `easel reply <board> --agent-reply "..." --thread <thread>` (also on `poll`). Set `EASEL_AGENT_NAME` to name the agent in the panel.
 
 To hear about board feedback without keeping a poll open, start the server with `EASEL_NOTIFY_CMD` set to a command. Each submission on a board (a note sent, the queue sent, Accept or Keep today) runs it once, after the feedback is queued, with the board name, the `board.json` path and a submission id as its three arguments and as `EASEL_BOARD`, `EASEL_BOARD_JSON` and `EASEL_SUBMISSION_ID`. The board never waits for it, a failure only reaches `server.log`, and `easel poll` still collects the feedback.
 

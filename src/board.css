@@ -110,6 +110,23 @@ textarea:focus-visible {
   color: var(--danger);
 }
 
+.button-danger {
+  border-color: var(--danger);
+  background: var(--danger);
+  color: #ffffff;
+}
+
+.button-danger:hover:not(:disabled) {
+  background: #a3360a;
+  border-color: #a3360a;
+}
+
+.button-small {
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 8px;
+}
+
 .icon-button {
   display: inline-grid;
   place-items: center;
@@ -707,6 +724,12 @@ body[data-pan="true"] .shield {
   font-size: 13px;
 }
 
+.note-ask {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink);
+}
+
 /* Images pasted or dropped into a note or the composer */
 .thumbs {
   display: flex;
@@ -1000,6 +1023,232 @@ body[data-pan="true"] .shield {
 
 .chat-open[hidden] {
   display: none;
+}
+
+/* New replies while the panel is closed: a quiet count, not an alarm. */
+.chat-open .unread {
+  display: inline-grid;
+  place-items: center;
+  min-width: 18px;
+  height: 18px;
+  margin-left: 8px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--select);
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Conversation: one thread per note or design. The reviewer's words sit on the right,
+   the agent's answers on the left, and the thread ends with what can be done next. */
+.thread {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 18px 0 20px;
+  border-bottom: 1px solid var(--line);
+}
+
+.thread:last-child {
+  border-bottom: 0;
+}
+
+.thread-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin-bottom: 4px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.thread-head:disabled {
+  cursor: default;
+}
+
+.thread-thumb {
+  flex: none;
+  width: 40px;
+  height: 26px;
+  border-radius: 5px;
+  object-fit: cover;
+  box-shadow: inset 0 0 0 1px rgba(22, 24, 29, 0.08);
+  background: #ffffff;
+}
+
+.thread-number {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  border-radius: 10px;
+  background: var(--ink);
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.thread-title {
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.thread-head:hover:not(:disabled) .thread-title {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.bubble {
+  max-width: 88%;
+  padding: 9px 12px;
+  border-radius: 14px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.bubble-user {
+  align-self: flex-end;
+  border-bottom-right-radius: 4px;
+  background: var(--ink);
+  color: #ffffff;
+}
+
+.bubble-agent {
+  align-self: flex-start;
+  border-bottom-left-radius: 4px;
+  background: var(--surface-strong);
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--ink);
+}
+
+.bubble[data-flash="true"] {
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.35);
+}
+
+.bubble .entry-text {
+  white-space: pre-wrap;
+}
+
+.bubble-agent .entry-text {
+  white-space: normal;
+}
+
+.bubble-label {
+  display: block;
+  margin-bottom: 2px;
+  font-size: 12px;
+  opacity: 0.7;
+}
+
+.bubble-user .entry-state {
+  margin-top: 4px;
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 12px;
+}
+
+.bubble .entry-thumbs {
+  margin-top: 8px;
+}
+
+.replying {
+  align-self: flex-start;
+  color: var(--ink-3);
+  font-size: 12.5px;
+}
+
+.replying-dots::after {
+  content: "…";
+  display: inline-block;
+  animation: replying 1.4s ease-in-out infinite;
+}
+
+@keyframes replying {
+  0%,
+  100% {
+    opacity: 0.25;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.thread-foot {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 6px;
+}
+
+.thread-action {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--ink-3);
+  cursor: pointer;
+}
+
+.thread-action:hover {
+  color: var(--ink);
+}
+
+.thread-action.danger {
+  color: var(--danger);
+}
+
+.thread-ask {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--ink);
+}
+
+.thread-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.thread-input {
+  width: 100%;
+  min-height: 60px;
+  padding: 9px 11px;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  background: var(--surface-strong);
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--ink);
+  resize: vertical;
+}
+
+.thread-input:focus {
+  outline: none;
+  border-color: var(--ink-3);
+}
+
+.thread-editor-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 16px;
 }
 
 /* Tune */

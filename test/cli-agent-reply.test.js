@@ -336,3 +336,14 @@ test("resolveAgentReply adds a pending marker for --pending", async () => {
     (error) => error instanceof AxiError && /--pending needs a reply/.test(error.message),
   );
 });
+
+test("resolveAgentReply files a reply under a thread for --thread", async () => {
+  assert.equal(
+    await resolveAgentReply(["board.json", "--agent-reply", "Done.", "--thread", "nmvt97vc0r58v"]),
+    "Done.\n\n[[thread: nmvt97vc0r58v]]",
+  );
+  await assert.rejects(
+    () => resolveAgentReply(["board.json", "--agent-reply", "Done.", "--thread", "a b"]),
+    (error) => error instanceof AxiError && /--thread/.test(error.message),
+  );
+});

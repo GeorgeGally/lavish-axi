@@ -470,16 +470,23 @@ test("pre-receipt entries are marked once and excluded from every stamp", () => 
 });
 
 test("extractPendingMarkers pulls coming-version markers out of a reply", () => {
-  assert.deepEqual(extractPendingMarkers("Plain reply."), { text: "Plain reply.", pending: [], cancel: [] });
+  assert.deepEqual(extractPendingMarkers("Plain reply."), {
+    text: "Plain reply.",
+    pending: [],
+    cancel: [],
+    threads: [],
+  });
   assert.deepEqual(extractPendingMarkers("On it.\n\n[[pending: 02-why-card-today]]"), {
     text: "On it.",
     pending: ["02-why-card-today"],
     cancel: [],
+    threads: [],
   });
   assert.deepEqual(extractPendingMarkers("Dropped. [[ pending-cancel : hero ]]"), {
     text: "Dropped.",
     pending: [],
     cancel: ["hero"],
+    threads: [],
   });
 });
 
@@ -495,4 +502,21 @@ test("serializeChat strips pending markers and lists them on the agent entry", (
   // A reviewer's own words are never read as markers.
   assert.equal(user.text, "[[pending: v1]]");
   assert.equal("pending" in user, false);
+});
+
+test("a reply's thread markers file it under those threads", () => {
+  const [agent] = serializeChat([
+    { role: "agent", text: "Smaller too. [[thread: n1abc]] [[thread: item:v1]]", at: "t" },
+  ]);
+  assert.equal(agent.text, "Smaller too.");
+  assert.deepEqual(agent.threads, ["n1abc", "item:v1"]);
+});
+
+test("chatEntryForPrompt keeps a board prompt's thread and follow-up kind", () => {
+  const entry = chatEntryForPrompt({ prompt: "Also smaller", tag: "pin", thread: "n1abc", followup: "reply" }, "t");
+  assert.equal(entry?.thread, "n1abc");
+  assert.equal(entry?.followup, "reply");
+  const odd = chatEntryForPrompt({ prompt: "x", tag: "message", thread: "../bad id", followup: "explode" }, "t");
+  assert.equal("thread" in (odd || {}), false);
+  assert.equal("followup" in (odd || {}), false);
 });

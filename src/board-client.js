@@ -995,7 +995,7 @@ function renderChoice(container, group, member) {
   container.dataset.chosen = String(chosen);
   if (chosen) {
     const mark = element("span", { class: "choice-mark", text: today ? "✓ Kept" : "✓ Accepted" });
-    const undo = element("button", { class: "button button-quiet choice-undo", type: "button", text: "Undo" });
+    const undo = element("button", { class: "button button-quiet choice-undo", type: "button", text: "Take back" });
     undo.addEventListener("click", () => choose(group, member, false));
     container.replaceChildren(mark, undo);
     return;
@@ -1036,7 +1036,7 @@ function choose(group, member, accept) {
       ? `Keep today: ${group.title} (${scope})`
       : `Accepted: ${group.title} - ${member.label} (${scope})`
     : `Changed my mind: ${group.title} - ${member.label} is no longer ${today ? "kept" : "accepted"}`;
-  sendPrompts([], message);
+  sendPrompts([], message, [], { thread: `item:${item.id}`, item });
   render();
 }
 
@@ -1813,18 +1813,24 @@ function pendingCrops(noteIds) {
  * @param {string} [message]
  * @returns {Promise<boolean>}
  */
-function sendPrompts(noteIds, message = "", images = []) {
+/**
+ * @param {string[]} noteIds
+ * @param {string} [message]
+ * @param {Array<{ id: string, name?: string }>} [images]
+ * @param {{ thread?: string, item?: any }} [context] the thread a message belongs to
+ */
+function sendPrompts(noteIds, message = "", images = [], context = {}) {
   if (state.ended) return Promise.resolve(false);
   const fromComposer = images === composerImages;
   const owners = fromComposer ? [...noteIds, "composer"] : noteIds;
   const uploading = owners.some((owner) => (uploads.get(owner)?.size || 0) > 0);
   if (uploading) dockStatus.textContent = "Adding images…";
   return Promise.all([uploading ? pendingUploads(owners) : null, pendingCrops(noteIds)]).then(() =>
-    sendPromptsNow(noteIds, message, fromComposer ? composerImages : images),
+    sendPromptsNow(noteIds, message, fromComposer ? composerImages : images, context),
   );
 }
 
-function sendPromptsNow(noteIds, message, images) {
+function sendPromptsNow(noteIds, message, images, context = {}) {
   const sent = [];
   /** @type {any[]} */
   const prompts = [];
@@ -1848,6 +1854,8 @@ function sendPromptsNow(noteIds, message, images) {
       selector: live.note.selector,
       text: live.note.label,
       tag: "pin",
+      // Each note is a conversation thread; replies and edits name it too.
+      thread: live.note.id,
       item: { id: live.item.id, label: live.item.label },
       pin: {
         id: live.note.id,
@@ -1864,6 +1872,8 @@ function sendPromptsNow(noteIds, message, images) {
       uid: randomId(),
       prompt: message,
       tag: "message",
+      ...(context.thread ? { thread: context.thread } : {}),
+      ...(context.item ? { item: { id: context.item.id, label: context.item.label } } : {}),
       ...(images.length > 0 ? { attachments: images } : {}),
     });
   }
@@ -1981,17 +1991,40 @@ function showNoteWindow(item, note, { fresh = false } = {}) {
   });
   const actions = element("div", { class: "note-pop-actions" });
   if (saved) {
-    const remove = element("button", { class: "button button-quiet", type: "button", text: "Remove" });
+    // Deleting asks once, in place: a sent note is also withdrawn from the agent.
+    const remove = element("button", { class: "button button-quiet", type: "button", text: "Delete note" });
     remove.addEventListener("click", () => {
-      pop.remove();
-      noteWindow = null;
-      removeNote(note.id);
+      const sure = element("button", { class: "button button-danger", type: "button", text: "Delete" });
+      sure.addEventListener("click", () => {
+        closeNoteWindow();
+        deleteNote(note.id);
+      });
+      const keep = element("button", { class: "button button-quiet", type: "button", text: "Keep it" });
+      keep.addEventListener("click", () => showNoteWindow(item, note));
+      actions.replaceChildren(
+        element("span", { class: "note-ask", text: `Delete note ${note.number}?` }),
+        element("span", { class: "spacer" }),
+        keep,
+        sure,
+      );
     });
     actions.append(remove);
   }
   actions.append(element("span", { class: "spacer" }));
   if (sent) {
+    // A sent note is changed or added to in its thread, where the agent's answer sits.
     actions.append(element("span", { class: "note-state", text: sentState(note) }));
+    const more = element("button", { class: "button", type: "button", text: "Add more" });
+    more.addEventListener("click", () => {
+      closeNoteWindow();
+      openThreadComposer(note.id, "reply");
+    });
+    const edit = element("button", { class: "button", type: "button", text: "Edit note" });
+    edit.addEventListener("click", () => {
+      closeNoteWindow();
+      openThreadComposer(note.id, "edit");
+    });
+    actions.append(more, edit);
   } else {
     const queue = element("button", { class: "button", type: "button", text: "Queue" });
     queue.addEventListener("click", () => {
@@ -2051,12 +2084,6 @@ function showNoteWindow(item, note, { fresh = false } = {}) {
 
 /* ------------------------------------------------------------ notes panel */
 
-function entryStateText(entry) {
-  if (entry.prompt_id && sendingPrompts.has(entry.prompt_id)) return "Sending";
-  if (!entry.delivered_at && entry.receipt !== "none") return "Not read yet";
-  return "";
-}
-
 function formatTime(value) {
   const date = new Date(String(value || ""));
   if (Number.isNaN(date.getTime())) return "";
@@ -2064,6 +2091,88 @@ function formatTime(value) {
 }
 
 let laidOutPending = "";
+
+// The panel is a conversation, one thread per note (and per design for Accept / Keep
+// today), with everything else in a general thread. A reviewer's entry names its thread;
+// an agent reply joins the threads it names (`--thread`) or else those of the notes it
+// settled, which carry its own time as `done_at`.
+const AGENT_NAME = String(bootstrap.agentName || "Agent");
+const readStorageKey = `easel:read:${key}`;
+/** @type {{ id: string, mode: "reply" | "edit", field: HTMLTextAreaElement } | null} */
+let threadComposer = null;
+let confirmingDelete = "";
+/** @type {Map<string, string>} */
+const threadTitles = new Map();
+
+function threadOfEntry(entry) {
+  if (entry.thread) return String(entry.thread);
+  const matched = noteByPromptId(entry.prompt_id);
+  return matched ? matched.note.id : "";
+}
+
+function threadsOfReply(entry) {
+  const named = Array.isArray(entry.threads) ? entry.threads.map(String) : [];
+  if (named.length > 0) return named;
+  const settled = new Set();
+  for (const other of state.chat) {
+    if (other && other.role !== "agent" && other.done_at && other.done_at === entry.at)
+      settled.add(threadOfEntry(other));
+  }
+  return settled.size > 0 ? [...settled] : [""];
+}
+
+/** What a thread is about: a note, a design, or a note since deleted. */
+function threadSubject(id) {
+  if (!id) return null;
+  const live = liveNote(id);
+  if (live) return { kind: "note", item: live.item, note: live.note };
+  if (id.startsWith("item:")) {
+    const item = itemById(id.slice(5));
+    if (item) return { kind: "item", item };
+  }
+  return { kind: "gone" };
+}
+
+/** Versions a reply names, by file name or by the name the board shows. */
+function mentionedItems(text) {
+  const plain = String(text || "")
+    .toLowerCase()
+    .replace(/[·\-_]+/g, " ")
+    .replace(/\s+/g, " ");
+  const found = [];
+  for (const item of activeItems()) {
+    const names = [fileStem(item), item.id, designName(item, "")].map((name) =>
+      String(name || "")
+        .toLowerCase()
+        .replace(/[·\-_]+/g, " ")
+        .replace(/\s+/g, " ")
+        .trim(),
+    );
+    if (names.some((name) => name.length >= 4 && plain.includes(name))) found.push(item.id);
+  }
+  return found;
+}
+
+function agentEntries() {
+  return state.chat.filter((entry) => entry && entry.role === "agent");
+}
+
+function unreadCount() {
+  const seen = Number(readStorage(readStorageKey) || 0);
+  return Math.max(0, agentEntries().length - seen);
+}
+
+function renderUnread() {
+  const open = document.getElementById("chatOpen");
+  if (!open) return;
+  const collapsed = document.getElementById("chat")?.classList.contains("collapsed");
+  if (!collapsed) writeStorage(readStorageKey, String(agentEntries().length));
+  const count = collapsed ? unreadCount() : 0;
+  open.replaceChildren(document.createTextNode("Notes"));
+  if (count > 0) open.append(element("span", { class: "unread", text: String(count) }));
+  open.setAttribute("aria-label", count > 0 ? `Notes, ${count} new` : "Notes");
+}
+
 function renderChatPanel() {
   // A reply that announces or cancels a coming version moves the holders on the board.
   const pending = pendingSignature(state.chat);
@@ -2071,84 +2180,314 @@ function renderChatPanel() {
     laidOutPending = pending;
     if (state.layout) scheduleLayout();
   }
+  renderUnread();
   const log = document.getElementById("chatLog");
   if (!log) return;
-  const rows = [];
-  let lastHeading = "";
-  let previousAgentAt = "";
+  /** @type {Map<string, { id: string, entries: any[], last: string }>} */
+  const threads = new Map();
+  const add = (id, entry) => {
+    let thread = threads.get(id);
+    if (!thread) {
+      thread = { id, entries: [], last: "" };
+      threads.set(id, thread);
+    }
+    thread.entries.push(entry);
+    thread.last = String(entry.at || thread.last);
+  };
+  /** @type {Map<any, string>} */
+  const previousReply = new Map();
+  let lastReplyAt = "";
   for (const entry of state.chat) {
     if (!entry) continue;
     if (entry.role === "agent") {
-      const row = element("div", { class: "entry entry-agent", title: formatTime(entry.at) });
-      const text = element("div", { class: "entry-text" });
-      // Agent replies arrive as server-rendered markdown; user text is always escaped.
-      if (entry.html) text.innerHTML = String(entry.html);
-      else text.textContent = String(entry.text || "");
-      row.append(text);
-      const links = replyLinks(entry, previousAgentAt);
-      previousAgentAt = entry.at;
-      if (links.length > 0) {
-        const list = element("div", { class: "entry-links" });
-        for (const itemId of links) {
-          const item = itemById(itemId);
-          if (!item) continue;
-          const link = element("button", { class: "entry-link", type: "button", text: `${designName(item, "")} ↗` });
-          link.addEventListener("click", () => focusItem(itemId));
-          list.append(link);
-        }
-        row.append(list);
-      }
-      rows.push(row);
-      continue;
+      previousReply.set(entry, lastReplyAt);
+      lastReplyAt = String(entry.at || "");
+      for (const id of threadsOfReply(entry)) add(id, entry);
+    } else {
+      add(threadOfEntry(entry), entry);
     }
-    const matched = noteByPromptId(entry.prompt_id);
-    if (matched) {
-      const heading = designName(matched.item, noteDevice(matched.note));
-      if (heading !== lastHeading) {
-        rows.push(element("h3", { class: "chat-group", text: heading }));
-        lastHeading = heading;
-      }
-    }
-    const row = element("div", { class: "entry", title: formatTime(entry.at) });
-    if (matched) {
-      row.dataset.note = matched.note.id;
-      row.append(element("span", { class: "entry-number", text: String(matched.note.number) }));
-      row.addEventListener("click", () => focusPin(matched.item, matched.note));
-    }
-    if (entry.text) row.append(element("div", { class: "entry-text", text: String(entry.text || "") }));
-    // The pin's own picture is for the agent; the panel shows only images people added.
-    const added = Array.isArray(entry.attachments)
-      ? entry.attachments.filter((ref) => !CROP_NAME.test(String(ref?.name || "")))
-      : [];
-    if (added.length > 0) {
-      const strip = thumbStrip(added, null);
-      strip.classList.add("entry-thumbs");
-      row.append(strip);
-    }
-    const quiet = entryStateText(entry);
-    if (quiet) row.append(element("div", { class: "entry-state", text: quiet }));
-    rows.push(row);
   }
   // A note in flight shows before the server has written it into the transcript.
   for (const promptId of sendingPrompts) {
     if (state.chat.some((entry) => entry && entry.prompt_id === promptId)) continue;
     const matched = noteByPromptId(promptId);
     if (!matched) continue;
-    const row = element("div", { class: "entry", "data-note": matched.note.id });
-    row.append(
-      element("span", { class: "entry-number", text: String(matched.note.number) }),
-      element("div", { class: "entry-text", text: String(matched.note.text || "") }),
-      element("div", { class: "entry-state", text: "Sending" }),
-    );
-    rows.push(row);
+    add(matched.note.id, {
+      role: "user",
+      text: matched.note.text,
+      prompt_id: promptId,
+      at: new Date().toISOString(),
+    });
   }
+  const ordered = [...threads.values()].sort((left, right) => left.last.localeCompare(right.last));
+  const rows = ordered.map((thread) => renderThread(thread, previousReply));
   if (rows.length === 0) {
     rows.push(element("p", { class: "chat-empty", text: "Click anything on a design to leave a note." }));
   }
+  const focused = threadComposer && document.activeElement === threadComposer.field;
+  const selection =
+    focused && threadComposer ? [threadComposer.field.selectionStart, threadComposer.field.selectionEnd] : null;
   const atBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 40;
   log.replaceChildren(...rows);
-  if (atBottom) log.scrollTop = log.scrollHeight;
+  if (focused && threadComposer && selection) {
+    threadComposer.field.focus({ preventScroll: true });
+    threadComposer.field.setSelectionRange(selection[0], selection[1]);
+  }
+  if (atBottom && !focused) log.scrollTop = log.scrollHeight;
   renderDrafts();
+}
+
+function renderThread(thread, previousReply) {
+  const section = element("section", { class: "thread", "data-thread": thread.id });
+  const subject = threadSubject(thread.id);
+  if (subject) section.append(threadHead(thread.id, subject));
+  for (const entry of thread.entries) {
+    section.append(entry.role === "agent" ? agentBubble(entry, previousReply.get(entry) || "") : userBubble(entry));
+  }
+  const last = thread.entries.at(-1);
+  if (last && last.role !== "agent" && !state.ended) section.append(replyingLine(last));
+  if (subject && subject.kind !== "gone" && !state.ended) section.append(threadFoot(thread.id, subject));
+  return section;
+}
+
+function threadHead(id, subject) {
+  const head = element("button", { class: "thread-head", type: "button" });
+  if (subject.kind === "note") {
+    const crop = subject.note.crop?.id;
+    if (crop) head.append(element("img", { class: "thread-thumb", src: attachmentUrl(crop), alt: "" }));
+    head.append(element("span", { class: "thread-number", text: String(subject.note.number) }));
+    const title = designName(subject.item, noteDevice(subject.note));
+    threadTitles.set(id, `${subject.note.number} · ${title}`);
+    head.append(element("span", { class: "thread-title", text: title }));
+    head.addEventListener("click", () => focusPin(subject.item, subject.note));
+  } else if (subject.kind === "item") {
+    const title = designName(subject.item, "");
+    threadTitles.set(id, title);
+    head.append(element("span", { class: "thread-title", text: title }));
+    head.addEventListener("click", () => focusItem(subject.item.id));
+  } else {
+    head.disabled = true;
+    head.append(element("span", { class: "thread-title", text: `${threadTitles.get(id) || "A note"} (deleted)` }));
+  }
+  return head;
+}
+
+const FOLLOWUP_LABELS = { edit: "Edited the note", deleted: "Deleted the note" };
+
+function userBubble(entry) {
+  const bubble = element("div", { class: "bubble bubble-user", title: formatTime(entry.at) });
+  const matched = noteByPromptId(entry.prompt_id);
+  if (matched && !entry.followup) bubble.dataset.note = matched.note.id;
+  const label = FOLLOWUP_LABELS[entry.followup];
+  if (label) bubble.append(element("span", { class: "bubble-label", text: label }));
+  if (entry.text && entry.followup !== "deleted") {
+    bubble.append(element("div", { class: "entry-text", text: String(entry.text) }));
+  }
+  const added = Array.isArray(entry.attachments)
+    ? entry.attachments.filter((ref) => !CROP_NAME.test(String(ref?.name || "")))
+    : [];
+  if (added.length > 0) {
+    const strip = thumbStrip(added, null);
+    strip.classList.add("entry-thumbs");
+    bubble.append(strip);
+  }
+  if (entry.prompt_id && sendingPrompts.has(entry.prompt_id)) {
+    bubble.append(element("div", { class: "entry-state", text: "Sending" }));
+  }
+  return bubble;
+}
+
+function agentBubble(entry, previousAt) {
+  const bubble = element("div", { class: "bubble bubble-agent", title: formatTime(entry.at) });
+  const text = element("div", { class: "entry-text" });
+  // Agent replies arrive as server-rendered markdown; user text is always escaped.
+  if (entry.html) text.innerHTML = String(entry.html);
+  else text.textContent = String(entry.text || "");
+  bubble.append(text);
+  const links = [...new Set([...replyLinks(entry, previousAt), ...mentionedItems(entry.text)])];
+  if (links.length > 0) {
+    const list = element("div", { class: "entry-links" });
+    for (const itemId of links) {
+      const item = itemById(itemId);
+      if (!item) continue;
+      const link = element("button", { class: "entry-link", type: "button", text: `${designName(item, "")} ↗` });
+      link.addEventListener("click", () => focusItem(itemId));
+      list.append(link);
+    }
+    bubble.append(list);
+  }
+  return bubble;
+}
+
+function replyingLine(entry) {
+  const heard =
+    Boolean(entry.delivered_at) || presence.dataset.state === "listening" || presence.dataset.state === "working";
+  const line = element("div", { class: "replying", "data-active": String(heard) });
+  line.append(
+    document.createTextNode(heard ? `${AGENT_NAME} is replying` : `Sent. ${AGENT_NAME} will see it when back`),
+  );
+  if (heard) line.append(element("span", { class: "replying-dots", "aria-hidden": "true" }));
+  return line;
+}
+
+function threadFoot(id, subject) {
+  if (threadComposer?.id === id) return threadEditor(id, subject);
+  const foot = element("div", { class: "thread-foot" });
+  const note = subject.kind === "note" ? subject.note : null;
+  if (note && confirmingDelete === id) {
+    const sure = element("button", { class: "thread-action danger", type: "button", text: "Delete" });
+    sure.addEventListener("click", () => deleteNote(note.id));
+    const keep = element("button", { class: "thread-action", type: "button", text: "Keep it" });
+    keep.addEventListener("click", () => {
+      confirmingDelete = "";
+      renderChatPanel();
+    });
+    foot.append(element("span", { class: "thread-ask", text: `Delete note ${note.number}?` }), sure, keep);
+    return foot;
+  }
+  const action = (text, run) => {
+    const button = element("button", { class: "thread-action", type: "button", text });
+    button.addEventListener("click", run);
+    foot.append(button);
+  };
+  action("Reply", () => openThreadComposer(id, "reply"));
+  if (note && note.prompt_id) {
+    action("Edit note", () => openThreadComposer(id, "edit"));
+    action("Delete note", () => {
+      confirmingDelete = id;
+      renderChatPanel();
+    });
+  }
+  return foot;
+}
+
+function openThreadComposer(id, mode) {
+  const subject = threadSubject(id);
+  if (!subject || subject.kind === "gone") return;
+  confirmingDelete = "";
+  const field = /** @type {HTMLTextAreaElement} */ (
+    element("textarea", {
+      class: "thread-input",
+      rows: "2",
+      placeholder: mode === "edit" ? "Correct the note" : "Reply, or add to the note",
+    })
+  );
+  if (mode === "edit" && subject.kind === "note") field.value = String(subject.note.text || "");
+  field.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      event.stopPropagation();
+      closeThreadComposer();
+    } else if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      submitThreadComposer();
+    }
+  });
+  threadComposer = { id, mode, field };
+  setChatCollapsed(false);
+  renderChatPanel();
+  const thread = document.getElementById("chatLog")?.querySelector(`[data-thread="${CSS.escape(id)}"]`);
+  thread?.scrollIntoView({ block: "nearest" });
+  field.focus();
+  field.setSelectionRange(field.value.length, field.value.length);
+}
+
+function closeThreadComposer() {
+  threadComposer = null;
+  renderChatPanel();
+}
+
+function threadEditor(id, subject) {
+  const box = element("div", { class: "thread-editor" });
+  if (!threadComposer) return box;
+  const { mode, field } = threadComposer;
+  const cancel = element("button", { class: "thread-action", type: "button", text: "Cancel" });
+  cancel.addEventListener("click", closeThreadComposer);
+  const send = element("button", {
+    class: "button button-primary button-small",
+    type: "button",
+    text: mode === "edit" ? "Save edit" : "Send",
+  });
+  send.addEventListener("click", submitThreadComposer);
+  const row = element("div", { class: "thread-editor-actions" });
+  row.append(cancel, send);
+  if (mode === "edit" && subject.kind === "note") {
+    box.append(element("span", { class: "bubble-label", text: `Editing note ${subject.note.number}` }));
+  }
+  box.append(field, row);
+  return box;
+}
+
+function submitThreadComposer() {
+  if (!threadComposer || state.ended) return;
+  const { id, mode, field } = threadComposer;
+  const text = field.value.trim();
+  if (!text) {
+    field.focus();
+    return;
+  }
+  const subject = threadSubject(id);
+  if (mode === "edit" && subject?.kind === "note") {
+    if (text === String(subject.note.text || "").trim()) {
+      closeThreadComposer();
+      return;
+    }
+    subject.note.text = text;
+    persistNotes(subject.item.id, { immediate: true });
+  }
+  threadComposer = null;
+  sendFollowup(id, mode, text);
+}
+
+/** Delete a note; one the agent already has is withdrawn in its thread. */
+function deleteNote(noteId) {
+  const live = liveNote(noteId);
+  confirmingDelete = "";
+  if (threadComposer?.id === noteId) threadComposer = null;
+  if (!live) return;
+  if (live.note.prompt_id) {
+    sendFollowup(noteId, "deleted", `Note ${live.note.number} is withdrawn: please ignore it.`);
+  }
+  removeNote(noteId);
+}
+
+/**
+ * A reviewer's words in a thread: a reply, an edit of the note, or its withdrawal. It
+ * reaches poll as a prompt carrying the thread id, and the note it follows up.
+ */
+function sendFollowup(threadId, followup, text) {
+  const subject = threadSubject(threadId);
+  /** @type {any} */
+  const prompt = { uid: randomId(), prompt_id: randomId(), prompt: text, tag: "message", thread: threadId, followup };
+  if (subject && subject.kind !== "gone") prompt.item = { id: subject.item.id, label: subject.item.label };
+  if (subject?.kind === "note") {
+    const note = subject.note;
+    prompt.tag = "pin";
+    prompt.selector = note.selector;
+    prompt.text = note.label;
+    prompt.pin = {
+      id: note.id,
+      number: note.number,
+      viewport: deviceById(noteDevice(note)).width,
+      ...(note.excerpt ? { excerpt: note.excerpt } : {}),
+      ...(note.heading ? { heading: note.heading } : {}),
+    };
+  }
+  renderChatPanel();
+  return fetch(`/api/${encodeURIComponent(key)}/prompts`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ prompts: [prompt], domSnapshot: "" }),
+  })
+    .then((response) => {
+      if (!response.ok) throw new Error("not accepted");
+      dockStatus.textContent = "";
+      refreshBoard();
+      return true;
+    })
+    .catch(() => {
+      dockStatus.textContent = "Could not reach Easel. Try again.";
+      return false;
+    });
 }
 
 function draftsToSend() {
@@ -2339,6 +2678,7 @@ function setChatCollapsed(collapsed) {
   document.body.dataset.panel = collapsed ? "closed" : "open";
   if (open) open.hidden = !collapsed;
   writeStorage(panelStorageKey, collapsed ? "closed" : "open");
+  renderUnread();
 }
 
 /* ------------------------------------------------------------------ tune */
