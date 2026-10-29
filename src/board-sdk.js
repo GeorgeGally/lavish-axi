@@ -8,6 +8,40 @@
   const url = new URL(script ? script.src : window.location.href);
   const itemId = url.searchParams.get("item") || "";
   const deviceId = url.searchParams.get("device") || "desktop";
+
+  // The board grows the frame to the page's whole height, so to the page's own scripts
+  // the window must stay one screen of the device, as its vh units do: a script that
+  // sizes a canvas or a section from `innerHeight` would otherwise read the grown frame,
+  // grow the page, and grow the frame again. The SDK keeps the real reading for itself.
+  const DEVICE_SCREEN = { desktop: 900, ipad: 1194, phone: 844 }[deviceId] || 0;
+  const innerHeightOf = (() => {
+    const own = Object.getOwnPropertyDescriptor(window, "innerHeight");
+    const getter = own?.get || Object.getOwnPropertyDescriptor(Object.getPrototypeOf(window), "innerHeight")?.get;
+    return getter ? () => getter.call(window) : () => window.innerHeight;
+  })();
+  function pinWindowHeight() {
+    if (!DEVICE_SCREEN) return;
+    const screenHeight = () => DEVICE_SCREEN;
+    try {
+      Object.defineProperty(window, "innerHeight", { configurable: true, get: screenHeight });
+    } catch {
+      // A page that locked the property keeps the real one.
+    }
+    try {
+      const root = document.documentElement;
+      if (root) Object.defineProperty(root, "clientHeight", { configurable: true, get: screenHeight });
+    } catch {
+      // Same.
+    }
+    try {
+      if (window.visualViewport) {
+        Object.defineProperty(window.visualViewport, "height", { configurable: true, get: screenHeight });
+      }
+    } catch {
+      // Same.
+    }
+  }
+  pinWindowHeight();
   const channel = "easel";
   const state = { pins: [], tuning: {} };
 
@@ -397,6 +431,10 @@
       if (!target || event.source !== target) return;
       const data = event.data;
       if (!data || data.channel !== channel) return;
+      if (data.type === "stylesheet") {
+        adoptStylesheet(String(data.href || ""), typeof data.text === "string" ? data.text : null);
+        return;
+      }
       if (data.type === "pins") {
         state.pins = Array.isArray(data.pins) ? data.pins : [];
         schedulePins();
@@ -407,8 +445,8 @@
         if (pin && data.reveal) {
           const anchor = resolution(pin);
           const top = anchor.y - window.scrollY;
-          if (top < 40 || top > window.innerHeight - 40)
-            window.scrollTo({ top: Math.max(0, anchor.y - window.innerHeight / 3) });
+          if (top < 40 || top > innerHeightOf() - 40)
+            window.scrollTo({ top: Math.max(0, anchor.y - innerHeightOf() / 3) });
           schedulePins();
         }
         flashPin(String(data.id || ""));
@@ -504,7 +542,7 @@
   function contentHeight() {
     const root = document.documentElement;
     const body = document.body;
-    const viewport = Math.round(window.innerHeight);
+    const viewport = Math.round(innerHeightOf());
     if (root.scrollHeight > viewport + 1 || !body) {
       overflowFloor = Math.max(overflowFloor, root.scrollHeight);
       return root.scrollHeight;
@@ -532,6 +570,9 @@
   }
 
   function reportSize() {
+    // Until every stylesheet's viewport units are pinned, the page's height still
+    // follows the frame's, and reporting it would grow the frame for nothing.
+    if (sheetsPending.size > 0) return;
     const height = contentHeight();
     if (height === reportedHeight) return;
     reportedHeight = height;
@@ -580,12 +621,65 @@
       try {
         if (sheet.cssRules) walk(sheet.cssRules);
       } catch {
-        // A stylesheet that cannot be read is left alone; the others are still pinned.
+        // The frame's origin is opaque, so a linked stylesheet's rules cannot be read.
+        // The board, on this item's own origin, reads its text instead, and a pinned
+        // copy takes its place.
+        requestStylesheet(sheet);
       }
     }
     for (const element of Array.from(document.querySelectorAll("[style]"))) {
       if (element instanceof HTMLElement) pinStyle(element.style);
     }
+  }
+
+  /** @type {Map<string, any>} */
+  const sheetsPending = new Map();
+  const SHEET_WAIT_MS = 3000;
+  function requestStylesheet(sheet) {
+    const link = sheet.ownerNode;
+    if (!link || link.nodeName !== "LINK" || !sheet.href || sheetsPending.has(sheet.href)) return;
+    if (link.hasAttribute("data-easel-pinned")) return;
+    sheetsPending.set(sheet.href, link);
+    post({ type: "stylesheet", href: sheet.href });
+    // A board that never answers must not hold the size back for good.
+    window.setTimeout(() => {
+      if (!sheetsPending.delete(sheet.href)) return;
+      scheduleSize();
+    }, SHEET_WAIT_MS);
+  }
+
+  function adoptStylesheet(href, text) {
+    const link = sheetsPending.get(href);
+    if (!link) return;
+    sheetsPending.delete(href);
+    if (text !== null && pinnedVh) {
+      const absolute = (value) => {
+        if (/^(data:|[a-z][a-z0-9+.-]*:|#|\/\/)/i.test(value)) return value;
+        try {
+          return new URL(value, href).href;
+        } catch {
+          return value;
+        }
+      };
+      const css = text
+        .replace(
+          /url\(\s*(['"]?)([^'")]+)\1\s*\)/g,
+          (_match, quote, value) => `url(${quote}${absolute(value)}${quote})`,
+        )
+        .replace(/@import\s+(['"])([^'"]+)\1/g, (_match, quote, value) => `@import ${quote}${absolute(value)}${quote}`)
+        .replace(
+          /(-?\d*\.?\d+)(dvh|svh|lvh|vh)\b/g,
+          (_match, amount) => `${((Number(amount) * pinnedVh) / 100).toFixed(2)}px`,
+        );
+      const style = document.createElement("style");
+      style.setAttribute("data-easel-pinned", href);
+      if (link.media) style.media = link.media;
+      style.textContent = css;
+      link.after(style);
+      link.setAttribute("data-easel-pinned", "");
+      link.disabled = true;
+    }
+    if (sheetsPending.size === 0) scheduleSize();
   }
 
   function auditLayout() {

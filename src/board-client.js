@@ -634,8 +634,16 @@ function createArtboard(item, device) {
     sandbox: "allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads",
   });
   iframe.style.width = `${device.width}px`;
+  // A page loads in one screen of its device, and only then grows to its content:
+  // scripts that size things from the window height at load would otherwise read the
+  // grown frame and grow the page again.
   iframe.style.height = `${device.height}px`;
   iframe.addEventListener("load", () => {
+    const loaded = state.artboards.get(id);
+    if (loaded) {
+      loaded.loaded = true;
+      iframe.style.height = loaded.screen.style.height || `${device.height}px`;
+    }
     postPins(item.id, device.id);
     postTune(item.id, device.id);
   });
@@ -656,7 +664,20 @@ function createArtboard(item, device) {
   canvas.append(root, label);
   // Every frame loads up front: the layout needs each page's real height.
   iframe.src = itemUrl(item, device.id);
-  const record = { id, itemId: item.id, device, root, screen, iframe, shield, label, name, width, updated };
+  const record = {
+    id,
+    itemId: item.id,
+    device,
+    root,
+    screen,
+    iframe,
+    shield,
+    label,
+    name,
+    width,
+    updated,
+    loaded: false,
+  };
   state.artboards.set(id, record);
   return record;
 }
@@ -705,7 +726,7 @@ function render() {
         record.screen.style.top = `${board.pad.top}px`;
         record.screen.style.width = `${board.screenWidth}px`;
         record.screen.style.height = `${board.screenHeight}px`;
-        record.iframe.style.height = `${board.screenHeight}px`;
+        record.iframe.style.height = `${record.loaded ? board.screenHeight : Math.min(board.screenHeight, board.device.height)}px`;
         record.label.style.left = `${board.x}px`;
         record.label.style.top = `${board.y - layout.labelReserve}px`;
         record.label.style.width = `${board.width}px`;
@@ -837,6 +858,8 @@ function markSeen(itemId, mtime) {
 function reloadItem(item) {
   for (const record of state.artboards.values()) {
     if (record.itemId !== item.id) continue;
+    record.loaded = false;
+    record.iframe.style.height = `${record.device.height}px`;
     record.iframe.src = `${itemUrl(item, record.device.id)}&r=${encodeURIComponent(String(item.mtime || Date.now()))}`;
   }
 }
@@ -2618,6 +2641,44 @@ function refreshBoard() {
     .catch(() => {});
 }
 
+// A sandboxed item cannot read its own linked stylesheets, so it cannot pin their
+// viewport units. The board reads the text for it - only a file under that item's
+// own path on this origin - and hands it back.
+/** @type {Map<string, Promise<string | null>>} */
+const stylesheetTexts = new Map();
+const STYLESHEET_MAX_CHARS = 8 * 1024 * 1024;
+function sendStylesheet(record, itemId, href) {
+  let url;
+  try {
+    url = new URL(href, location.href);
+  } catch {
+    return;
+  }
+  const base = `/board/${encodeURIComponent(key)}/item/${encodeURIComponent(itemId)}/`;
+  const reply = (text) =>
+    record.iframe.contentWindow?.postMessage(
+      { channel: "easel", item: itemId, device: record.device.id, type: "stylesheet", href, text },
+      "*",
+    );
+  if (url.origin !== location.origin || !url.pathname.startsWith(base)) {
+    reply(null);
+    return;
+  }
+  const path = url.pathname + url.search;
+  if (!stylesheetTexts.has(path)) {
+    stylesheetTexts.set(
+      path,
+      fetch(path, { cache: "no-store" })
+        .then((response) => (response.ok ? response.text() : null))
+        .then((text) => (text !== null && text.length <= STYLESHEET_MAX_CHARS ? text : null))
+        .catch(() => null),
+    );
+    // A later edit to the stylesheet is read afresh.
+    window.setTimeout(() => stylesheetTexts.delete(path), 5000);
+  }
+  stylesheetTexts.get(path)?.then(reply);
+}
+
 /** @param {MessageEvent} event */
 function onArtboardMessage(event) {
   const data = event.data;
@@ -2638,6 +2699,10 @@ function onArtboardMessage(event) {
   if (data.type === "ready") {
     postPins(itemId, deviceId);
     postTune(itemId, deviceId);
+    return;
+  }
+  if (data.type === "stylesheet") {
+    sendStylesheet(record, itemId, String(data.href || ""));
     return;
   }
   if (data.type === "select") {
