@@ -137,8 +137,11 @@ pnpm link
 ## Board mode
 
 A board is a folder your agent fills, not a design tool: `board.json` plus one HTML file per item.
-Every item renders as a row of three whole-page artboards - desktop 1440, iPad 834, phone 390 - at those real viewport widths and scaled together, so a desktop page looks like a desktop page in miniature rather than a phone-width reflow.
-The top-bar device switch (All / Desktop / iPad / Phone) narrows the row, each artboard's title bar names its width, and the board opens at fit so the whole pages are visible at once. Double-click an artboard's title bar to see it at full width.
+Every item renders as three whole-page artboards - desktop 1440, iPad 834, phone 390 - at those real viewport widths, each as tall as the page's own content.
+Name files `NN-name-today.html` and `NN-name-proposed.html` (more proposals as `-proposed-b`, `-proposed-c`) and the board shows them side by side under a short explanation taken from each file's `<meta name="easel-caption">` (or `easel-explain`, plus an optional `easel-title`).
+The All view shows one design per row; **Desktop**, **iPad** and **Phone** show that device only, in a device frame, packed in rows, and scrolling over a device scrolls its page.
+
+Moving around: two-finger scroll pans, pinch or Cmd+scroll zooms around the pointer, holding Space or Cmd turns the pointer into a hand that drags the board from anywhere, and double-clicking a design zooms to 100% there (again to fit). **Fit** (`0`) and **100%** (`1`) sit in the top bar.
 
 ```sh
 easel board open hero-directions --name "Hero directions"
@@ -175,8 +178,8 @@ easel poll hero-directions                 # the agent waits here
 }
 ```
 
-With **Annotate** on (`A`), hovering an artboard outlines the element under the cursor and clicking drops a numbered pin with its note field right there; the composer lists the notes as chips, and several go to the agent in one send.
-With Annotate off, clicks pass through to the page as normal. Each note reaches the agent with the item, the pin, and the viewport width it was made at, and the pin turns green once the agent has replied.
+Annotation is always on: hovering a design outlines the element under the pointer, and clicking drops a numbered pin there with a note card. **Send now** (Enter) sends that note at once, **Queue** keeps it as a draft in the notes panel to send later with **Send**, and clicking away keeps a written note as a draft and discards an empty one. **Remove** appears only on a note that was already saved.
+The notes panel down the right lists what you sent, grouped under the design it is about, with the agent's replies in between. A note reads **Not read yet** until the agent's poll has taken it, then nothing. Each note reaches the agent with the item, the pin number, and the viewport width it was made at; a sent pin is filled, a draft pin is an outline.
 
 ### Tuning
 
