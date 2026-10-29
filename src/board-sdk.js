@@ -561,6 +561,16 @@
     auditTimer = window.setTimeout(auditLayout, 400);
   }
 
+  // A phone or tablet shows no scrollbar; the preview should not either. Scrolling
+  // still works. Only this served document changes, never the file.
+  if (deviceId === "ipad" || deviceId === "phone") {
+    const style = document.createElement("style");
+    style.setAttribute("data-easel-ui", "scrollbars");
+    style.textContent =
+      "html,body{scrollbar-width:none!important}html::-webkit-scrollbar,body::-webkit-scrollbar{display:none!important}";
+    (document.head || document.documentElement).appendChild(style);
+  }
+
   pinViewportUnits();
   if (document.readyState === "complete") {
     auditLayout();

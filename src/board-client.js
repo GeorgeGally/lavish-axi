@@ -43,6 +43,8 @@ const state = {
   artboards: new Map(),
   /** @type {Map<string, any>} */
   explains: new Map(),
+  /** @type {Map<string, any>} */
+  choices: new Map(),
   /** @type {Map<string, number>} */
   heights: loadHeights(),
   /** @type {Map<string, any[]>} */
@@ -348,6 +350,8 @@ function computeLayout(groups, captionMax, labelMax) {
   const devices = visibleDevices();
   const memberGap = MEMBER_GAP[state.deviceMode] || MEMBER_GAP.all;
   const labelReserve = Math.ceil(labelMax * 2);
+  // Room under a compared design for its Accept / Keep today choice.
+  const choiceReserve = Math.ceil(labelMax * 6);
   const placed = [];
   for (const group of groups) {
     let x = 0;
@@ -364,13 +368,14 @@ function computeLayout(groups, captionMax, labelMax) {
         mh = Math.max(mh, size.height + size.below);
       }
       const width = mx - DEVICE_GAP;
-      members.push({ ...member, x, width, boards });
+      members.push({ ...member, x, width, boards, contentH: mh });
       x += width + memberGap;
       contentH = Math.max(contentH, mh);
     }
     const width = x - memberGap;
     const captionH = captionMax > 0 ? explainHeight(group, width, captionMax) : 0;
-    placed.push({ ...group, members, width, captionH, height: captionH + labelReserve + contentH, x: 0, y: 0 });
+    const below = group.single ? 0 : choiceReserve;
+    placed.push({ ...group, members, width, captionH, height: captionH + labelReserve + contentH + below, x: 0, y: 0 });
   }
   const area = availableArea();
   const aspect = area.width / area.height;
@@ -409,6 +414,8 @@ function computeLayout(groups, captionMax, labelMax) {
           board.x = cursorX + member.x + board.x;
           board.y = top;
         }
+        member.choiceX = cursorX + member.x;
+        member.choiceY = top + member.contentH;
       }
       group.height = captionH - (group.y - cursorY) + contentH;
       cursorX += group.width + columnGap;
@@ -422,6 +429,7 @@ function computeLayout(groups, captionMax, labelMax) {
     captionMax,
     labelMax,
     labelReserve,
+    choiceReserve,
     bounds: placed.length > 0 ? { left: 0, top: 0, width, height } : null,
   };
 }
@@ -548,12 +556,97 @@ function render() {
     record.root.hidden = true;
     record.label.hidden = true;
   }
+  const seenChoices = new Set();
+  for (const group of layout.groups) {
+    if (group.single) continue;
+    for (const member of group.members) {
+      seenChoices.add(member.item.id);
+      let choice = state.choices.get(member.item.id);
+      if (!choice) {
+        choice = element("div", { class: "choice", "data-item": member.item.id });
+        canvas.append(choice);
+        state.choices.set(member.item.id, choice);
+      }
+      choice.style.left = `${member.choiceX}px`;
+      choice.style.top = `${member.choiceY}px`;
+      choice.style.width = `${member.width}px`;
+      choice.style.height = `${layout.choiceReserve}px`;
+      renderChoice(choice, group, member);
+    }
+  }
+  for (const [id, choice] of state.choices) {
+    if (seenChoices.has(id)) continue;
+    choice.remove();
+    state.choices.delete(id);
+  }
   for (const [id, explain] of state.explains) {
     if (seenGroups.has(id)) continue;
     explain.remove();
     state.explains.delete(id);
   }
   emptyElement.hidden = layout.groups.length > 0;
+}
+
+/* ----------------------------------------------------------------- choices */
+
+// Choosing a version is one click: Accept under a proposal, Keep today under today.
+// The choice lives on the item's `status` in board.json, and each click (or undo) is
+// sent to the agent at once, so the decision never waits in a queue.
+const CHOSEN = { today: "kept", proposed: "accepted" };
+
+function chosenStatus(item) {
+  return CHOSEN[item.pair?.role === "today" ? "today" : "proposed"];
+}
+
+function renderChoice(container, group, member) {
+  const item = member.item;
+  const today = item.pair?.role === "today";
+  const chosen = item.status === chosenStatus(item);
+  container.dataset.chosen = String(chosen);
+  if (chosen) {
+    const mark = element("span", { class: "choice-mark", text: today ? "✓ Kept" : "✓ Accepted" });
+    const undo = element("button", { class: "button button-quiet choice-undo", type: "button", text: "Undo" });
+    undo.addEventListener("click", () => choose(group, member, false));
+    container.replaceChildren(mark, undo);
+    return;
+  }
+  const button = element("button", {
+    class: today ? "button choice-button" : "button button-primary choice-button",
+    type: "button",
+    text: today ? "Keep today" : "Accept",
+  });
+  button.disabled = state.ended;
+  button.addEventListener("click", () => choose(group, member, true));
+  container.replaceChildren(button);
+}
+
+function choose(group, member, accept) {
+  if (state.ended) return;
+  const scope = framedView() ? String(visibleDevices()[0].width) : "all sizes";
+  const item = member.item;
+  const today = item.pair?.role === "today";
+  const changes = [];
+  for (const other of group.members) {
+    const next = accept && other === member ? chosenStatus(other.item) : "open";
+    if (other.item.status !== next) {
+      other.item.status = next;
+      changes.push({ id: other.item.id, status: next });
+    }
+  }
+  if (changes.length > 0) {
+    fetch(`/api/boards/${encodeURIComponent(key)}/place`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ items: changes }),
+    }).catch(() => {});
+  }
+  const message = accept
+    ? today
+      ? `Keep today: ${group.title} (${scope})`
+      : `Accepted: ${group.title} - ${member.label} (${scope})`
+    : `Changed my mind: ${group.title} - ${member.label} is no longer ${today ? "kept" : "accepted"}`;
+  sendPrompts([], message);
+  render();
 }
 
 /* ------------------------------------------------------------------ camera */
@@ -1806,7 +1899,7 @@ function connectLiveEvents() {
 
 function itemsSignature(items) {
   return items
-    .map((item) => `${item.id}|${item.file}|${item.tab}|${item.caption || ""}|${item.title || ""}`)
+    .map((item) => `${item.id}|${item.file}|${item.tab}|${item.caption || ""}|${item.title || ""}|${item.status || ""}`)
     .join("\n");
 }
 

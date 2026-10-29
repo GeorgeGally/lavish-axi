@@ -372,6 +372,44 @@ body[data-pan="true"] .shield {
   color: var(--ink);
 }
 
+/* Accept / Keep today, under each compared version. Sized like the labels so it stays
+   readable and clickable at any zoom. */
+.choice {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  white-space: nowrap;
+  --size: clamp(13px, calc(13px / var(--zoom)), var(--label-max, 13px));
+  font-size: var(--size);
+  padding-top: 1.3em;
+}
+
+.choice .button {
+  height: 2.6em;
+  padding: 0 1.1em;
+  border-radius: 0.7em;
+  font-size: 1em;
+}
+
+.choice .button-quiet {
+  height: 2em;
+  margin-left: -0.6em;
+  padding: 0 0.6em;
+}
+
+.choice .button-quiet:hover:not(:disabled) {
+  color: var(--ink);
+}
+
+.choice-mark {
+  display: inline-flex;
+  align-items: center;
+  height: 2.6em;
+  font-weight: 600;
+  color: var(--ink);
+}
+
 /* Artboards */
 .artboard {
   position: absolute;
