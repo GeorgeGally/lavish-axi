@@ -421,8 +421,257 @@
       const relative = /^(-?\d*\.?\d+)(dvh|svh|vh)$/.exec(String(value).trim());
       const next = relative && pinnedVh ? `${((Number(relative[1]) * pinnedVh) / 100).toFixed(2)}px` : String(value);
       document.documentElement.style.setProperty(property, next);
+      // A page that re-declares a variable deeper (a theme class on body) would ignore a
+      // value set only on :root, so the body carries the same value and wins.
+      if (document.body) document.body.style.setProperty(property, next);
     }
     window.dispatchEvent(new CustomEvent("easel:tune", { detail: { ...values } }));
+  }
+
+  /* ---------------------------------------------------------- element tuning */
+
+  // Properties a clicked element can be tuned by, each written as an inline override.
+  // `applies` decides which of them make sense for that element at all.
+  const SHADOW_PRESETS = [
+    { value: "0 1px 2px rgba(0,0,0,0.08)", label: "Soft" },
+    { value: "0 8px 24px rgba(0,0,0,0.14)", label: "Lifted" },
+    { value: "none", label: "None" },
+  ];
+
+  /** @param {string} value */
+  function hexOf(value) {
+    const rgb = /^rgba?\(([^)]+)\)$/.exec(String(value).trim());
+    if (!rgb) return /^#[0-9a-f]{6}$/i.test(value) ? value : "#000000";
+    const parts = rgb[1]
+      .split(/[\s,/]+/)
+      .filter(Boolean)
+      .slice(0, 4)
+      .map(Number);
+    if (parts.length > 3 && parts[3] === 0) return "#000000";
+    return `#${parts
+      .slice(0, 3)
+      .map((part) =>
+        Math.max(0, Math.min(255, Math.round(part)))
+          .toString(16)
+          .padStart(2, "0"),
+      )
+      .join("")}`;
+  }
+
+  /** @param {string} value */
+  function pxOf(value) {
+    const parsed = Number.parseFloat(String(value));
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+
+  /** @param {string} text */
+  function shortText(text) {
+    return String(text || "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 28);
+  }
+
+  /** @param {Element} element */
+  function targetLabel(element) {
+    const tag = element.tagName.toLowerCase();
+    const words = shortText(element.textContent);
+    return words ? `${tag} · “${words}”` : tag;
+  }
+
+  /** @param {Element | null} element */
+  function sectionLabel(element) {
+    if (!element) return "";
+    const head = element.querySelector("h1, h2, h3, legend, summary");
+    const text = shortText(head ? head.textContent : "");
+    return text ? `${element.tagName.toLowerCase()} · ${text}` : element.tagName.toLowerCase();
+  }
+
+  /**
+   * The controls that genuinely apply to a clicked element, plus the ones its nearest
+   * section owns (a flex or grid gap belongs to the container, not the child).
+   * @param {Element} element
+   * @param {Element | null} section
+   */
+  function elementTuneControls(element, section) {
+    const style = getComputedStyle(element);
+    const box = style.display !== "inline" && element.tagName !== "BR";
+    const text = shortText(element.textContent).length > 0;
+    // Fill, radius and shadow only mean something on a box that draws itself: a painted
+    // or bordered surface, an image, or a button. A bare heading gets type and space.
+    const replaced = ["IMG", "VIDEO", "SVG", "CANVAS", "PICTURE"].includes(element.tagName);
+    const bordered = style.borderTopWidth !== "0px" && style.borderTopStyle !== "none";
+    const paints =
+      replaced ||
+      bordered ||
+      style.backgroundImage !== "none" ||
+      !/^rgba?\(0,\s*0,\s*0,\s*0\)$|^transparent$/.test(style.backgroundColor.trim());
+    const controls = [];
+    if (text) {
+      controls.push({
+        id: "color",
+        css: "color",
+        label: "Colour",
+        type: "color",
+        value: hexOf(style.color),
+        scope: "element",
+      });
+    }
+    if (paints) {
+      controls.push({
+        id: "fill",
+        css: "background-color",
+        label: "Fill",
+        type: "color",
+        value: hexOf(style.backgroundColor),
+        scope: "element",
+      });
+    }
+    if (text) {
+      const size = Math.max(8, Math.round(pxOf(style.fontSize)));
+      controls.push({
+        id: "font-size",
+        css: "font-size",
+        label: "Type size",
+        type: "number",
+        unit: "px",
+        value: String(size),
+        min: 8,
+        max: Math.max(32, Math.round(size * 3)),
+        step: 1,
+        scope: "element",
+      });
+      const weights = ["300", "400", "500", "600", "700", "800", "900"];
+      const weight = String(style.fontWeight);
+      controls.push({
+        id: "weight",
+        css: "font-weight",
+        label: "Weight",
+        type: "select",
+        value: weight,
+        options: (weights.includes(weight) ? weights : [weight, ...weights]).map((value) => ({ value, label: value })),
+        scope: "element",
+      });
+    }
+    if (box) {
+      const pad = Math.max(0, Math.round(pxOf(style.paddingTop)));
+      controls.push({
+        id: "padding",
+        css: "padding",
+        label: "Padding",
+        type: "number",
+        unit: "px",
+        value: String(pad),
+        min: 0,
+        max: Math.max(48, Math.round(pad * 4)),
+        step: 1,
+        scope: "element",
+      });
+      const radius = Math.max(0, Math.round(pxOf(style.borderTopLeftRadius)));
+      const width = Math.round(element.getBoundingClientRect().width);
+      controls.push({
+        id: "width",
+        css: "width",
+        label: "Width",
+        type: "number",
+        unit: "px",
+        value: String(width),
+        min: 40,
+        max: Math.max(320, Math.round(width * 2)),
+        step: 1,
+        scope: "element",
+      });
+      if (paints) {
+        controls.push({
+          id: "radius",
+          css: "border-radius",
+          label: "Radius",
+          type: "number",
+          unit: "px",
+          value: String(radius),
+          min: 0,
+          max: Math.max(32, Math.round(radius * 4)),
+          step: 1,
+          scope: "element",
+        });
+        const shadow = String(style.boxShadow);
+        const known = SHADOW_PRESETS.some((preset) => preset.value === shadow);
+        controls.push({
+          id: "shadow",
+          css: "box-shadow",
+          label: "Shadow",
+          type: "select",
+          value: shadow,
+          options: known ? SHADOW_PRESETS : [{ value: shadow, label: "Current" }, ...SHADOW_PRESETS],
+          scope: "element",
+        });
+      }
+    }
+    if (section && section !== element) {
+      const sectionStyle = getComputedStyle(section);
+      if (/flex|grid/.test(sectionStyle.display)) {
+        const gap = Math.max(0, Math.round(pxOf(sectionStyle.columnGap || sectionStyle.gap)));
+        controls.push({
+          id: "gap",
+          css: "gap",
+          label: "Gap",
+          type: "number",
+          unit: "px",
+          value: String(gap),
+          min: 0,
+          max: Math.max(64, Math.round(gap * 4)),
+          step: 1,
+          scope: "section",
+        });
+      }
+    }
+    return controls;
+  }
+
+  /** Inline overrides this SDK set, so Reset can take them all back off. */
+  const elementStyles = new Map();
+
+  /** @param {string} selector @param {string} css @param {string} value */
+  function applyElementStyle(selector, css, value) {
+    if (!selector || !css) return;
+    /** @type {Element | null} */
+    let element;
+    try {
+      element = document.querySelector(selector);
+    } catch {
+      return;
+    }
+    if (!(element instanceof HTMLElement)) return;
+    let applied = elementStyles.get(element);
+    if (!applied) {
+      applied = new Map();
+      elementStyles.set(element, applied);
+    }
+    applied.set(css, value);
+    element.style.setProperty(css, value);
+  }
+
+  function resetElementStyles() {
+    for (const [element, applied] of elementStyles) {
+      for (const css of applied.keys()) element.style.removeProperty(css);
+    }
+    elementStyles.clear();
+  }
+
+  /** What the board tunes when Alt-Ctrl clicks a point in the page. */
+  function reportTuneTarget(x, y) {
+    const leaf = document.elementFromPoint(x, y);
+    const element = leaf instanceof Element && !leaf.closest("[data-easel-ui]") ? leaf : document.body;
+    if (!(element instanceof Element)) return;
+    const section = element.closest("section, article, header, footer, main, nav, form") || element.parentElement;
+    post({
+      type: "tune-target",
+      selector: selectorFor(element),
+      sectionSelector: section ? selectorFor(section) : "",
+      label: targetLabel(element),
+      sectionLabel: sectionLabel(section),
+      controls: elementTuneControls(element, section),
+    });
   }
 
   window.addEventListener(
@@ -466,6 +715,18 @@
       }
       if (data.type === "tune-spec") {
         post({ type: "tune-spec", controls: collectTuneControls() });
+        return;
+      }
+      if (data.type === "tune-target") {
+        reportTuneTarget(Number(data.x), Number(data.y));
+        return;
+      }
+      if (data.type === "style") {
+        applyElementStyle(String(data.selector || ""), String(data.css || ""), String(data.value ?? ""));
+        return;
+      }
+      if (data.type === "style-reset") {
+        resetElementStyles();
         return;
       }
       // The board covers each artboard with a transparent shield while annotating and

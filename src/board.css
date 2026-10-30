@@ -79,6 +79,10 @@ textarea:focus-visible {
     transform 80ms ease;
 }
 
+.button[hidden] {
+  display: none;
+}
+
 .button:hover:not(:disabled) {
   border-color: var(--ink-4);
 }
@@ -514,11 +518,44 @@ body[data-pan="true"] .shield {
   background: #ffffff;
 }
 
+/* The shield only hears the pointer while Alt arms annotation; the rest of the time it
+   stays out of the way so the page inside the frame takes its own clicks and scrolling. */
 .shield {
   position: absolute;
   inset: 0;
   z-index: 2;
   cursor: crosshair;
+  pointer-events: none;
+}
+
+body[data-annotate="true"] .shield {
+  pointer-events: auto;
+}
+
+/* One quiet line the first time a cursor reaches a design, teaching the Alt press. */
+.annotate-hint {
+  position: fixed;
+  left: 50%;
+  top: 62px;
+  z-index: 30;
+  padding: 7px 14px;
+  border-radius: 999px;
+  background: rgba(30, 28, 26, 0.88);
+  color: #fdfbf7;
+  font-size: 12.5px;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transform: translate(-50%, -6px);
+  transition:
+    opacity 260ms ease,
+    transform 260ms ease;
+}
+
+.annotate-hint[data-shown="true"] {
+  opacity: 1;
+  transform: translate(-50%, 0);
 }
 
 /* Where a version the agent is still making will land: device-sized, light, with a
