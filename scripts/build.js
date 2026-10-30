@@ -47,6 +47,9 @@ await chmod("dist/server.mjs", 0o755);
 
 await copyFile("src/chrome-client.js", "dist/chrome-client.js");
 await copyFile("src/chrome.css", "dist/chrome.css");
+await copyFile("src/board-client.js", "dist/board-client.js");
+await copyFile("src/board-sdk.js", "dist/board-sdk.js");
+await copyFile("src/board.css", "dist/board.css");
 await mkdir("dist/design", { recursive: true });
 await copyFile("node_modules/daisyui/daisyui.css", "dist/design/daisyui.css");
 await copyFile("node_modules/daisyui/themes.css", "dist/design/daisyui-themes.css");

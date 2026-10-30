@@ -1344,6 +1344,8 @@ body[data-panel="closed"] .tune {
 .tune-body {
   display: grid;
   gap: 12px;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .tune-group-name {
@@ -1355,6 +1357,7 @@ body[data-panel="closed"] .tune {
 .tune-control {
   display: grid;
   gap: 4px;
+  min-width: 0;
 }
 
 .tune-control-label {
@@ -1367,6 +1370,10 @@ body[data-panel="closed"] .tune {
 .tune-control-value {
   color: var(--ink-3);
   font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 65%;
 }
 
 .tune-control input[type="range"] {
@@ -1393,6 +1400,42 @@ body[data-panel="closed"] .tune {
   color: var(--ink);
   font: inherit;
   font-size: 13px;
+}
+
+.tune-preview {
+  position: relative;
+  width: 100%;
+  padding: 10px 14px 28px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink-2);
+  text-align: left;
+  cursor: pointer;
+}
+
+.tune-preview-dot {
+  position: absolute;
+  bottom: 9px;
+  left: 10%;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--ink);
+  transform: translateX(-50%);
+}
+
+.tune-spring .dialkit-labeled-control {
+  display: none;
+}
+
+@media (max-width: 860px) {
+  .tune,
+  body[data-panel="closed"] .tune {
+    right: 12px;
+    width: min(300px, calc(100vw - 24px));
+    box-sizing: border-box;
+  }
 }
 
 .tune-actions {

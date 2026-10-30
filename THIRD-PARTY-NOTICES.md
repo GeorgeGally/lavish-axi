@@ -13,7 +13,7 @@ The whiteboard bundle (`dist/whiteboard/`) is built from these packages by `scri
 | `mermaid` (exact 11.12.1, bundled for the converter) | MIT     | Copyright (c) 2014 - 2022 Knut Sveidqvist         |
 | `react`, `react-dom`                                 | MIT     | Copyright (c) Meta Platforms, Inc. and affiliates |
 
-The full MIT license text applies to each of the packages above:
+The full MIT license text applies to each of the packages above and to DialKit, whose vanilla browser assets the board serves from the installed `dialkit` package (Copyright (c) 2026 Josh Puckett):
 
 ```
 Permission is hereby granted, free of charge, to any person obtaining a copy

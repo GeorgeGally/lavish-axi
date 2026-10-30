@@ -422,6 +422,7 @@
       const next = relative && pinnedVh ? `${((Number(relative[1]) * pinnedVh) / 100).toFixed(2)}px` : String(value);
       document.documentElement.style.setProperty(property, next);
     }
+    window.dispatchEvent(new CustomEvent("easel:tune", { detail: { ...values } }));
   }
 
   window.addEventListener(

@@ -202,12 +202,17 @@ An item declares its own controls in a `application/easel-tune` JSON array, bind
   [
     { "id": "radius", "label": "Card radius", "type": "number", "css": "--radius", "min": 0, "max": 24, "step": 1, "value": 6, "unit": "px" },
     { "id": "accent", "label": "Accent", "type": "color", "css": "--accent", "value": "#b7872f" },
-    { "id": "density", "label": "Density", "type": "select", "css": "--density", "options": ["cozy", "compact"], "value": "cozy" }
+    { "id": "density", "label": "Density", "type": "select", "css": "--density", "options": ["cozy", "compact"], "value": "cozy" },
+    { "id": "spring", "label": "Spring", "type": "spring", "css": "--spring", "value": { "stiffness": 180, "damping": 20, "mass": 1 } },
+    { "id": "curve", "label": "Easing", "type": "easing", "css": "--curve", "value": "cubic-bezier(0.25, 0.1, 0.25, 1)" },
+    { "id": "position", "label": "Position", "type": "pad", "css": "--position", "value": { "x": 0, "y": 0 } },
+    { "id": "progress", "label": "Progress", "type": "timeline", "css": "--progress", "min": 0, "max": 1, "value": 0, "duration": 2 }
   ]
 </script>
 ```
 
 The tune panel writes those properties live, saves named versions with thumbnails, and **Copy for agent** produces the values plus the instruction that bakes them into the item's file.
+The spring and XY pad write JSON objects to their custom properties; page scripts can parse them from `getComputedStyle(document.documentElement).getPropertyValue(...)`. The board dispatches an `easel:tune` event on the item window after applying values, so scripts can respond live; its `detail` maps CSS property names to values. The easing editor writes a CSS `cubic-bezier(...)` value. The timeline plays or scrubs a linear value from `min` to `max` over `duration` seconds and writes the current value, with an optional `unit`. These controls use DialKit's vanilla editors and timeline engine locally.
 Every item has a tune button. When it declares no controls, the panel is built from the page's own CSS custom properties: colours become swatches and pickers, lengths, radii, spacing and font sizes become sliders, grouped and labelled from the property names.
 
 ## How It Works

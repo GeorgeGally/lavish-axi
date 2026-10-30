@@ -37,6 +37,7 @@
     "chokidar": "^4.0.3",
     "cross-spawn": "7.0.6",
     "daisyui": "^5.5.19",
+    "dialkit": "2.0.2",
     "express": "^5.2.1",
     "open": "^10.2.0",
     "parse5": "^8.0.1",

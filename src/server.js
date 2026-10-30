@@ -112,6 +112,7 @@ const chromeCssUrl = new URL("./chrome.css", import.meta.url);
 const boardClientUrl = new URL("./board-client.js", import.meta.url);
 const boardSdkUrl = new URL("./board-sdk.js", import.meta.url);
 const boardCssUrl = new URL("./board.css", import.meta.url);
+const dialkitUrl = new URL(import.meta.resolve("dialkit/vanilla"));
 const designAssetUrls = {
   "daisyui.css": {
     packaged: new URL("./design/daisyui.css", import.meta.url),
@@ -2104,6 +2105,16 @@ export async function serve({
     try {
       res.setHeader("cache-control", "no-store");
       res.type("application/javascript").send(await readFile(boardClientUrl, "utf8"));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/dialkit/:asset", async (req, res, next) => {
+    if (req.params.asset !== "styles.css" && req.params.asset !== "browser.global.js") return res.sendStatus(404);
+    try {
+      res.type(req.params.asset.endsWith(".css") ? "text/css" : "application/javascript");
+      res.send(await readFile(new URL(req.params.asset, dialkitUrl), "utf8"));
     } catch (error) {
       next(error);
     }

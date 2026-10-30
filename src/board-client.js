@@ -1,4 +1,4 @@
-/* global CSS, document, window, location, Element, HTMLElement */
+/* global CSS, document, window, location, Element, HTMLElement, requestAnimationFrame, cancelAnimationFrame */
 
 const bootstrap = JSON.parse(document.getElementById("easel-board")?.textContent || "{}");
 const key = String(bootstrap.key || "");
@@ -2727,6 +2727,7 @@ let tuneItemId = "";
 let tuneDeviceId = "";
 /** @type {ReturnType<typeof setTimeout> | undefined} */
 let tuneSaveTimer;
+let tuneCleanup = [];
 
 function tuneCss(item, spec, values = item.tune) {
   /** @type {Record<string, string>} */
@@ -2734,7 +2735,10 @@ function tuneCss(item, spec, values = item.tune) {
   for (const control of spec) {
     const raw = values?.[control.id];
     if (raw === undefined || raw === "") continue;
-    css[control.css] = control.type === "number" && control.unit ? `${raw}${control.unit}` : String(raw);
+    css[control.css] =
+      (control.type === "number" || control.type === "timeline") && control.unit
+        ? `${raw}${control.unit}`
+        : String(raw);
   }
   return css;
 }
@@ -2773,12 +2777,16 @@ function openTune(itemId, deviceId) {
 }
 
 function closeTune() {
+  for (const cleanup of tuneCleanup) cleanup();
+  tuneCleanup = [];
   const panel = document.getElementById("tune");
   if (panel) panel.hidden = true;
   tuneItemId = "";
 }
 
 function renderTune() {
+  for (const cleanup of tuneCleanup) cleanup();
+  tuneCleanup = [];
   const item = itemById(tuneItemId);
   if (!item) return;
   const sub = document.getElementById("tuneSub");
@@ -2812,7 +2820,7 @@ function createTuneControl(item, control) {
   const valueLabel = element("span", { class: "tune-control-value", text: String(item.tune[control.id] ?? "") });
   const label = element("label", { class: "tune-control-label" });
   label.append(element("span", { text: control.label }), valueLabel);
-  wrapper.append(label);
+  if (control.type !== "spring" && control.type !== "pad") wrapper.append(label);
   const apply = (raw) => {
     item.tune[control.id] = raw;
     valueLabel.textContent = String(raw);
@@ -2820,7 +2828,173 @@ function createTuneControl(item, control) {
     clearTimeout(tuneSaveTimer);
     tuneSaveTimer = setTimeout(() => flushTune(item), 350);
   };
-  if (control.type === "color") {
+  const dial = /** @type {any} */ (window).DialKit;
+  if (control.type === "spring" && dial) {
+    wrapper.classList.add("tune-spring");
+    let spring;
+    try {
+      spring = JSON.parse(item.tune[control.id]);
+    } catch {
+      spring = {};
+    }
+    if (!spring || typeof spring !== "object" || Array.isArray(spring)) spring = {};
+    spring = { type: "spring", stiffness: 180, damping: 20, mass: 1, ...spring };
+    const host = element("div", { class: "dialkit-root", "data-theme": "light" });
+    wrapper.append(host);
+    const panelId = `easel-${item.id}-${control.id}`;
+    const kit = dial.createDialKit(control.label, { motion: spring }, { id: panelId });
+    dial.DialStore.updateSpringMode(panelId, "motion", "advanced");
+    let mounted;
+    const props = () => ({
+      panelId,
+      path: "motion",
+      label: control.label,
+      spring,
+      onChange: (next) => {
+        spring = next;
+        apply(JSON.stringify(next));
+        mounted.update(props());
+      },
+    });
+    mounted = dial.mountSpringControl(host, props());
+    const preview = element("button", { class: "tune-preview", type: "button", text: "Play spring" });
+    const dot = element("span", { class: "tune-preview-dot" });
+    preview.append(dot);
+    let animation = 0;
+    preview.addEventListener("click", () => {
+      cancelAnimationFrame(animation);
+      const start = performance.now();
+      let previous = start,
+        x = 0,
+        velocity = 0;
+      const tick = (now) => {
+        const dt = Math.min((now - previous) / 1000, 0.032);
+        previous = now;
+        velocity +=
+          (((Number(spring.stiffness) || 180) * (1 - x) - (Number(spring.damping) || 20) * velocity) /
+            (Number(spring.mass) || 1)) *
+          dt;
+        x += velocity * dt;
+        dot.style.left = `${Math.max(5, Math.min(95, 10 + x * 75))}%`;
+        if (now - start < 2500) animation = requestAnimationFrame(tick);
+      };
+      animation = requestAnimationFrame(tick);
+    });
+    wrapper.append(preview);
+    tuneCleanup.push(() => {
+      cancelAnimationFrame(animation);
+      mounted.destroy();
+      kit.destroy();
+    });
+  } else if (control.type === "easing" && dial) {
+    const presets = {
+      Ease: [0.25, 0.1, 0.25, 1],
+      Linear: [0, 0, 1, 1],
+      "Ease in": [0.42, 0, 1, 1],
+      "Ease out": [0, 0, 0.58, 1],
+      "Ease in out": [0.42, 0, 0.58, 1],
+    };
+    const match = String(item.tune[control.id]).match(/cubic-bezier\(([^)]+)\)/);
+    let ease = match ? match[1].split(",").map(Number) : presets.Ease;
+    if (ease.length !== 4 || ease.some((n) => !Number.isFinite(n))) ease = presets.Ease;
+    const host = element("div", { class: "dialkit-root", "data-theme": "light" });
+    const select = element("select", { "aria-label": `${control.label} preset` });
+    select.append(element("option", { value: "", text: "Custom curve" }));
+    for (const name of Object.keys(presets)) select.append(element("option", { value: name, text: name }));
+    select.value = Object.keys(presets).find((name) => presets[name].every((part, i) => part === ease[i])) || "";
+    wrapper.append(select, host);
+    let mounted;
+    const props = () => ({
+      easing: { type: "easing", duration: 0.3, ease },
+      onChange: (next) => {
+        ease = next;
+        select.value = "";
+        apply(`cubic-bezier(${ease.join(", ")})`);
+        mounted.update(props());
+      },
+    });
+    mounted = dial.mountEasingVisualization(host, props());
+    select.addEventListener("change", () => {
+      if (presets[select.value]) {
+        ease = presets[select.value];
+        apply(`cubic-bezier(${ease.join(", ")})`);
+        mounted.update(props());
+      }
+    });
+    tuneCleanup.push(() => mounted.destroy());
+  } else if (control.type === "pad" && dial) {
+    let value;
+    try {
+      value = JSON.parse(item.tune[control.id]);
+    } catch {
+      value = {};
+    }
+    if (!value || typeof value !== "object" || Array.isArray(value)) value = {};
+    value = { x: Number(value.x) || 0, y: Number(value.y) || 0 };
+    const host = element("div", { class: "dialkit-root", "data-theme": "light" });
+    wrapper.append(host);
+    let mounted;
+    const props = () => ({
+      label: control.label,
+      value,
+      onChange: (next) => {
+        value = next;
+        apply(JSON.stringify(next));
+        mounted.update(props());
+      },
+    });
+    mounted = dial.mountDialPad(host, props());
+    tuneCleanup.push(() => mounted.destroy());
+  } else if (control.type === "timeline" && dial) {
+    const from = Number(control.min ?? 0),
+      to = Number(control.max ?? 100);
+    const duration = Number(control.duration ?? 1);
+    const timeline = dial.createDialTimeline(
+      control.label,
+      {
+        duration,
+        value: {
+          at: 0,
+          duration,
+          from: { value: from },
+          to: { value: to },
+          transition: { type: "easing", duration, ease: [0, 0, 1, 1] },
+        },
+      },
+      { autoplay: false },
+    );
+    const input = element("input", {
+      type: "range",
+      min: "0",
+      max: String(duration),
+      step: "0.01",
+      "aria-label": `${control.label} playhead`,
+    });
+    const play = element("button", { class: "button", type: "button", text: "Play" });
+    wrapper.append(input, play);
+    const initialTime = Math.max(
+      0,
+      Math.min(duration, (duration * (Number(item.tune[control.id]) - from)) / (to - from || 1)),
+    );
+    timeline.seek(initialTime);
+    input.value = String(initialTime);
+    const unsubscribe = timeline.subscribe((values) => {
+      input.value = String(values.time);
+      play.textContent = values.playing ? "Pause" : "Play";
+      const raw = Number(values.value.current.value.toFixed(4));
+      apply(String(raw));
+    }, false);
+    input.addEventListener("input", () => timeline.seek(Number(input.value)));
+    play.addEventListener("click", () => {
+      if (timeline.values.playing) timeline.pause();
+      else if (timeline.values.time >= duration) timeline.replay();
+      else timeline.play();
+    });
+    tuneCleanup.push(() => {
+      unsubscribe();
+      timeline.destroy();
+    });
+  } else if (control.type === "color") {
     const input = element("input", { type: "color" });
     input.value = item.tune[control.id] || "#000000";
     input.addEventListener("input", () => apply(input.value));
@@ -2877,9 +3051,12 @@ function renderVersions(item, spec) {
     button.append(thumb, element("span", { class: "version-label", text: version.label }));
     button.setAttribute("aria-current", String(JSON.stringify(version.values) === JSON.stringify(item.tune)));
     button.addEventListener("click", () => {
-      item.tune = { ...version.values };
-      postTuneAll(item.id);
-      flushTune(item);
+      const current = itemById(item.id);
+      if (!current) return;
+      clearTimeout(tuneSaveTimer);
+      current.tune = { ...version.values };
+      postTuneAll(current.id);
+      flushTune(current);
       renderTune();
     });
     return button;
@@ -2899,8 +3076,10 @@ function saveTuneVersion() {
     })
       .then((response) => (response.ok ? response.json() : null))
       .then((payload) => {
-        if (payload?.versions) item.versions = payload.versions;
-        renderVersions(item, tuneSpecFor(item.id));
+        const current = itemById(item.id);
+        if (!current) return;
+        if (payload?.versions) current.versions = payload.versions;
+        renderVersions(current, tuneSpecFor(current.id));
       })
       .catch(() => {}),
   );
@@ -2922,14 +3101,15 @@ function copyTune() {
     .filter((control) => item.tune[control.id] !== undefined && item.tune[control.id] !== "")
     .map((control) => {
       const value =
-        control.type === "number" && control.unit ? `${item.tune[control.id]}${control.unit}` : item.tune[control.id];
+        (control.type === "number" || control.type === "timeline") && control.unit
+          ? `${item.tune[control.id]}${control.unit}`
+          : item.tune[control.id];
       return `- ${control.label}: ${value}  (${control.css})`;
     });
   const text =
-    item.tuneInstruction ||
-    (lines.length > 0
+    lines.length > 0
       ? `Bake these tune values into ${item.file} as CSS custom properties:\n${lines.join("\n")}`
-      : `No tune values set for ${item.file}.`);
+      : `No tune values set for ${item.file}.`;
   const sub = document.getElementById("tuneSub");
   const done = () => {
     if (sub) sub.textContent = "Copied";

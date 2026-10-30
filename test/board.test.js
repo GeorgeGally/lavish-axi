@@ -175,6 +175,27 @@ test("tuneCssValues appends the declared unit and tuneInstruction names the file
   assert.match(instruction, /18px/);
 });
 
+test("advanced tune declarations survive extraction and handoff", () => {
+  const spec = extractTuneSpec(`<script type="application/easel-tune">[
+    {"id":"spring","type":"spring","css":"--spring","value":{"stiffness":180,"damping":20,"mass":1}},
+    {"id":"curve","type":"easing","css":"--curve","value":"cubic-bezier(0.25, 0.1, 0.25, 1)"},
+    {"id":"position","type":"pad","css":"--position","value":{"x":0.5,"y":0.25}},
+    {"id":"time","type":"timeline","css":"--time","min":0,"max":2,"step":0.01,"value":0.5,"unit":"s"}
+  ]</script>`);
+  assert.deepEqual(
+    spec.map((control) => control.type),
+    ["spring", "easing", "pad", "timeline"],
+  );
+  const board = normalizeBoard({ items: [{ id: "v1", file: "v1.html" }] }, "b");
+  const values = Object.fromEntries(spec.map((control) => [control.id, control.value]));
+  assert.deepEqual(tuneCssValues(board, "v1", spec, values), {
+    "--spring": '{"stiffness":180,"damping":20,"mass":1}',
+    "--curve": "cubic-bezier(0.25, 0.1, 0.25, 1)",
+    "--position": '{"x":0.5,"y":0.25}',
+    "--time": "0.5s",
+  });
+});
+
 test("writeBoard round-trips through board.json and bounds what it stores", async (t) => {
   const dir = await boardDir(t);
   const board = normalizeBoard({ name: "hero", items: [{ id: "v1", file: "v1.html" }] }, "hero");

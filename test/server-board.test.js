@@ -77,6 +77,12 @@ test("a board registers as a session and renders one page for its items", async 
   const html = await page.text();
   assert.match(html, /Easel/);
   assert.match(html, /\/board-client\.js/);
+  assert.match(html, /\/dialkit\/browser\.global\.js/);
+  const dialkit = await fetch(`${base}/dialkit/browser.global.js`);
+  assert.equal(dialkit.status, 200);
+  assert.match(await dialkit.text(), /createDialTimeline/);
+  assert.equal((await fetch(`${base}/dialkit/styles.css`)).status, 200);
+  assert.equal((await fetch(`${base}/dialkit/package.json`)).status, 404);
   assert.match(html, /"id":"v1"/);
   assert.equal(page.headers.get("x-frame-options"), "DENY");
 
@@ -91,6 +97,44 @@ test("a board registers as a session and renders one page for its items", async 
   assert.equal(v1.tuneSpec[0].css, "--radius");
   assert.match(v1.tuneInstruction, /v1\.html/);
   assert.equal(state.ended, false);
+});
+
+test("advanced tune values persist and appear in the agent instruction", async (t) => {
+  const { base, boardDirectory } = await setup(t);
+  await writeFile(
+    path.join(boardDirectory, "v1.html"),
+    `<script type="application/easel-tune">[
+    {"id":"spring","type":"spring","css":"--spring","value":{"stiffness":180,"damping":20,"mass":1}},
+    {"id":"curve","type":"easing","css":"--curve","value":"cubic-bezier(0, 0, 1, 1)"},
+    {"id":"position","type":"pad","css":"--position","value":{"x":0,"y":0}},
+    {"id":"time","type":"timeline","css":"--time","min":0,"max":2,"unit":"s","duration":2,"value":0}
+  ]</script>`,
+  );
+  const board = await register(base, boardDirectory);
+  const values = {
+    spring: '{"stiffness":300,"damping":20,"mass":1}',
+    curve: "cubic-bezier(0.42, 0, 1, 1)",
+    position: '{"x":0.5,"y":-0.2}',
+    time: "1",
+  };
+  const response = await fetch(`${base}/api/boards/${board.key}/tune`, {
+    method: "POST",
+    headers: write(base),
+    body: JSON.stringify({ item: "v1", values }),
+  });
+  assert.equal(response.status, 200);
+  assert.deepEqual((await response.json()).css, {
+    "--spring": values.spring,
+    "--curve": values.curve,
+    "--position": values.position,
+    "--time": "1s",
+  });
+  const reread = await fetch(`${base}/api/boards/${board.key}`).then((r) => r.json());
+  const item = reread.items.find((entry) => entry.id === "v1");
+  assert.deepEqual(item.tune, values);
+  assert.equal(item.tuneSpec.find((control) => control.id === "time").duration, 2);
+  assert.match(item.tuneInstruction, /--position/);
+  assert.match(item.tuneInstruction, /1s/);
 });
 
 test("a board item's explanation comes from its own easel metas", async (t) => {

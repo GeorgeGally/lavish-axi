@@ -66,6 +66,7 @@ export function createBoardHtml(
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>${escapeHtml(board.name)} · ${PRODUCT_NAME}</title>
 <link rel="stylesheet" href="/board.css?v=${encodeURIComponent(assetVersion)}">
+<link rel="stylesheet" href="/dialkit/styles.css">
 </head>
 <body>
 <header class="bar">
@@ -121,6 +122,7 @@ export function createBoardHtml(
 <button class="chat-open" id="chatOpen" type="button" hidden>Notes</button>
 <div class="ended" id="ended" hidden>Session ended. Run <code>easel board open</code> when you want it reopened.</div>
 <script id="easel-board" type="application/json">${bootstrap}</script>
+<script src="/dialkit/browser.global.js"></script>
 <script src="/board-client.js?v=${encodeURIComponent(assetVersion)}"></script>
 </body>
 </html>`;

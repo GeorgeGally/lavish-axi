@@ -20,7 +20,7 @@ const MAX_NOTE_IMAGES = 8;
  */
 /** @typedef {{ id: string, label: string }} BoardTab */
 /** @typedef {{ id: string, number: number, label: string, selector: string, tag: string, text: string, x: number, y: number, ox?: number, oy?: number, attachments?: Array<{ id: string, name?: string }>, prompt_id?: string, at?: string, device?: string, excerpt?: string, heading?: string, box?: { x: number, y: number, w: number, h: number }, crop?: { id: string } }} BoardNote */
-/** @typedef {{ id: string, label: string, type: "number" | "color" | "select", css: string, min?: number, max?: number, step?: number, unit?: string, options?: Array<{ value: string, label: string }>, value: string }} TuneControl */
+/** @typedef {{ id: string, label: string, type: "number" | "color" | "select" | "spring" | "easing" | "pad" | "timeline", css: string, min?: number, max?: number, step?: number, duration?: number, unit?: string, options?: Array<{ value: string, label: string }>, value: string }} TuneControl */
 /** @typedef {{ id: string, label: string, values: Record<string, string>, at: string }} TuneVersion */
 /**
  * @typedef {{
@@ -512,16 +512,20 @@ export function normalizeTuneSpec(value) {
     if (!entry || typeof entry !== "object") continue;
     const id = slug(entry.id, "");
     const css = text(entry.css, 80);
-    const type = entry.type === "color" || entry.type === "select" ? entry.type : "number";
+    const type = ["color", "select", "spring", "easing", "pad", "timeline"].includes(entry.type)
+      ? entry.type
+      : "number";
     if (!id || seen.has(id) || !css.startsWith("--")) continue;
     seen.add(id);
     /** @type {TuneControl} */
-    const control = { id, label: text(entry.label, 60) || id, type, css, value: text(entry.value, 120) };
-    if (type === "number") {
+    const raw = entry.value && typeof entry.value === "object" ? JSON.stringify(entry.value) : entry.value;
+    const control = { id, label: text(entry.label, 60) || id, type, css, value: text(raw, 120) };
+    if (type === "number" || type === "timeline") {
       control.min = number(entry.min, 0, -100_000, 100_000);
       control.max = number(entry.max, 100, control.min, 100_000);
       control.step = number(entry.step, 1, 0.01, 10_000);
       if (entry.unit !== undefined) control.unit = text(entry.unit, 8);
+      if (type === "timeline") control.duration = number(entry.duration, 1, 0.01, 600);
     }
     if (type === "select") {
       control.options = (Array.isArray(entry.options) ? entry.options.slice(0, 40) : [])
@@ -552,7 +556,8 @@ export function tuneCssValues(board, itemId, spec, values) {
   for (const control of spec) {
     const value = merged[control.id];
     if (value === undefined) continue;
-    css[control.css] = control.type === "number" && control.unit ? `${value}${control.unit}` : value;
+    css[control.css] =
+      (control.type === "number" || control.type === "timeline") && control.unit ? `${value}${control.unit}` : value;
   }
   return css;
 }
@@ -569,7 +574,9 @@ export function tuneInstruction(item, spec) {
     .filter((control) => item.tune[control.id] !== undefined && item.tune[control.id] !== "")
     .map((control) => {
       const value =
-        control.type === "number" && control.unit ? `${item.tune[control.id]}${control.unit}` : item.tune[control.id];
+        (control.type === "number" || control.type === "timeline") && control.unit
+          ? `${item.tune[control.id]}${control.unit}`
+          : item.tune[control.id];
       return `- ${control.label}: ${value}  (${control.css})`;
     });
   if (lines.length === 0) return `No tune values set for ${item.label} (${item.file}).`;
