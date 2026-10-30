@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmod, mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, mkdir, readFile, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -97,6 +97,25 @@ test("a board registers as a session and renders one page for its items", async 
   assert.equal(v1.tuneSpec[0].css, "--radius");
   assert.match(v1.tuneInstruction, /v1\.html/);
   assert.equal(state.ended, false);
+});
+
+test("a rewritten item carries a new content hash even when its mtime does not move", async (t) => {
+  const { base, boardDirectory } = await setup(t);
+  const board = await register(base, boardDirectory);
+  const itemOf = async () =>
+    (await fetch(`${base}/api/boards/${board.key}`).then((response) => response.json())).items.find(
+      (item) => item.id === "v1",
+    );
+  const before = await itemOf();
+  const file = path.join(boardDirectory, "v1.html");
+  const info = await stat(file);
+  // A tool that writes and restores the timestamp, or two writes inside one millisecond,
+  // leaves mtime unchanged. The frame still has to notice the new bytes.
+  await writeFile(file, ITEM_HTML.replace("The whole fleet", "The whole fleet, rewritten"));
+  await utimes(file, info.atime, info.mtime);
+  const after = await itemOf();
+  assert.equal(after.mtime, before.mtime);
+  assert.notEqual(after.hash, before.hash);
 });
 
 test("advanced tune values persist and appear in the agent instruction", async (t) => {

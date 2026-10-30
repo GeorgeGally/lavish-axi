@@ -188,7 +188,7 @@
           "font-variant-numeric:tabular-nums",
           "box-shadow:0 1px 2px rgba(0,0,0,.18),0 4px 12px rgba(0,0,0,.18)",
           "pointer-events:none",
-          "transition:transform .16s ease, box-shadow .16s ease",
+          "transition:transform .16s ease, box-shadow .16s ease, opacity .16s ease",
           "transform:translate(-50%,-50%)",
           "z-index:2147483000",
         ].join(";");
@@ -207,6 +207,9 @@
         element.style.color = "#ffffff";
         element.style.border = "2px solid #ffffff";
       }
+      const done = pin.state === "done";
+      element.style.opacity = done ? "0.42" : "1";
+      element.style.transform = done ? "translate(calc(-50% - 30px), -50%)" : "translate(-50%, -50%)";
       const anchor = resolution(pin);
       if (!anchor.visible) {
         element.style.display = "none";
@@ -247,6 +250,7 @@
     const docX = x + window.scrollX;
     const docY = y + window.scrollY;
     for (const pin of state.pins) {
+      if (pin.state === "done") continue;
       const anchor = resolution(pin);
       if (Math.abs(anchor.x - docX) <= 13 && Math.abs(anchor.y - docY) <= 13) return pin;
     }
@@ -607,7 +611,7 @@
         });
       }
     }
-    if (section && section !== element) {
+    if (section) {
       const sectionStyle = getComputedStyle(section);
       if (/flex|grid/.test(sectionStyle.display)) {
         const gap = Math.max(0, Math.round(pxOf(sectionStyle.columnGap || sectionStyle.gap)));

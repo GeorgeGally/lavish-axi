@@ -846,6 +846,8 @@ function renderPlaceholder(board, first, framed, layout) {
 const seenStorageKey = `easel:seen:${key}`;
 /** @type {Map<string, number>} */
 const knownMtimes = new Map();
+/** @type {Map<string, string>} */
+const knownHashes = new Map();
 /** @type {Set<string>} */
 const updatedItems = new Set();
 /** @type {Map<string, number>} */
@@ -870,7 +872,7 @@ function reloadItem(item) {
     if (record.itemId !== item.id) continue;
     record.loaded = false;
     record.iframe.style.height = `${record.device.height}px`;
-    record.iframe.src = `${itemUrl(item, record.device.id)}&r=${encodeURIComponent(String(item.mtime || Date.now()))}`;
+    record.iframe.src = `${itemUrl(item, record.device.id)}&r=${encodeURIComponent(`${item.mtime || Date.now()}-${item.hash || ""}`)}`;
   }
 }
 
@@ -887,8 +889,11 @@ function noticeFileChanges(initial) {
   for (const item of state.items) {
     const mtime = Number(item.mtime) || 0;
     if (!mtime) continue;
+    const hash = String(item.hash || "");
     const before = knownMtimes.get(item.id);
+    const beforeHash = knownHashes.get(item.id);
     knownMtimes.set(item.id, mtime);
+    knownHashes.set(item.id, hash);
     if (initial) {
       if (seen[item.id] === undefined) markSeen(item.id, mtime);
       else if (mtime > Number(seen[item.id])) setUpdated(item.id, true);
@@ -898,7 +903,7 @@ function noticeFileChanges(initial) {
       setUpdated(item.id, true);
       continue;
     }
-    if (mtime !== before) {
+    if (mtime !== before || (hash && hash !== beforeHash)) {
       reloadItem(item);
       setUpdated(item.id, true);
     }
@@ -1326,10 +1331,26 @@ function bindNavigation() {
   /** @type {null | { x: number, y: number, cameraX: number, cameraY: number, id: number, moved: boolean }} */
   let drag = null;
   let suppressClick = false;
+  let tuneGestureAt = 0;
+  const altDown = (event) => annotateArmed() || event.altKey;
+  const ctrlDown = (event) => ctrlHeld || event.ctrlKey;
 
   plane.addEventListener("pointerdown", (event) => {
     if (event.target instanceof Element && event.target.closest("button")) return;
-    const onShield = Boolean(recordForShield(event.target));
+    const record = recordForShield(event.target);
+    if (
+      record &&
+      altDown(event) &&
+      (event.button === 2 || ctrlDown(event)) &&
+      !panModeActive() &&
+      (event.button === 0 || event.button === 2)
+    ) {
+      event.preventDefault();
+      tuneGestureAt = performance.now();
+      openTargetTune(record, pointInFrame(record, event.clientX, event.clientY));
+      return;
+    }
+    const onShield = Boolean(record);
     const pan = event.button === 1 || (event.button === 0 && (panModeActive() || !onShield));
     suppressClick = pan && onShield;
     if (!pan) return;
@@ -1397,7 +1418,7 @@ function bindNavigation() {
     // Alt-Ctrl tunes what was clicked; Alt alone leaves a note.
     if (ctrlHeld || event.ctrlKey) {
       clearTimeout(clickTimer);
-      openTargetTune(record, point);
+      if (performance.now() - tuneGestureAt > 600) openTargetTune(record, point);
       return;
     }
     const at = { x: event.clientX, y: event.clientY };
@@ -1411,8 +1432,13 @@ function bindNavigation() {
 
   // On a Mac a Ctrl click is a right click; while arming, that gesture is ours.
   plane.addEventListener("contextmenu", (event) => {
-    if (!annotateArmed()) return;
+    const record = recordForShield(event.target);
+    if (!altDown(event)) return;
     event.preventDefault();
+    if (!record || (!ctrlDown(event) && event.button !== 2) || panModeActive()) return;
+    if (performance.now() - tuneGestureAt < 600) return;
+    tuneGestureAt = performance.now();
+    openTargetTune(record, pointInFrame(record, event.clientX, event.clientY));
   });
 
   plane.addEventListener("dblclick", (event) => {
@@ -1559,16 +1585,21 @@ function postToArtboard(itemId, deviceId, message) {
 function pinsFor(item, deviceId) {
   return (item.notes || [])
     .filter((note) => noteDevice(note) === deviceId)
-    .map((note) => ({
-      id: note.id,
-      number: note.number,
-      selector: note.selector,
-      x: note.x,
-      y: note.y,
-      ox: note.ox,
-      oy: note.oy,
-      state: note.prompt_id ? "sent" : "draft",
-    }));
+    .map((note) => {
+      const entry = note.prompt_id
+        ? state.chat.find((message) => message && message.prompt_id === note.prompt_id)
+        : null;
+      return {
+        id: note.id,
+        number: note.number,
+        selector: note.selector,
+        x: note.x,
+        y: note.y,
+        ox: note.ox,
+        oy: note.oy,
+        state: note.prompt_id ? (entry?.done_at ? "done" : "sent") : "draft",
+      };
+    });
 }
 
 function postPins(itemId, deviceId) {
