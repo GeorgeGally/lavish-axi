@@ -787,8 +787,20 @@ export async function serve({
     return defaultJsonParser(req, res, next);
   });
 
-  app.get("/", (_req, res) => {
-    res.type("html").send(createLandingHtml());
+  app.get("/", async (_req, res, next) => {
+    try {
+      const sessions = await store.listSessions();
+      const boards = [];
+      for (const session of sessions) {
+        if (path.basename(session.file) !== BOARD_FILE_NAME || session.status === "ended") continue;
+        const dir = path.dirname(session.file);
+        const board = await readBoard(dir).catch(() => null);
+        boards.push({ key: session.key, name: board?.name || path.basename(dir) });
+      }
+      res.type("html").send(createLandingHtml(boards));
+    } catch (error) {
+      next(error);
+    }
   });
 
   app.get("/health", async (req, res) => {
@@ -3206,8 +3218,13 @@ function wantsHtml(req) {
   return accept.toLowerCase().includes("text/html");
 }
 
-function createLandingHtml() {
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Lavish Editor</title><style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#f7f4ef;color:#25221f;font:16px/1.5 system-ui,sans-serif}.card{width:min(560px,calc(100% - 40px));padding:32px;border:1px solid #d9d0c5;border-radius:16px;background:#fffdf9;box-shadow:0 12px 40px #25221f18}h1{margin:0 0 12px;font-size:26px}p{margin:0}</style></head><body><main class="card"><h1>Lavish Editor is running</h1><p>Open the review session URL printed by your agent.</p></main></body></html>`;
+/** @param {Array<{ key: string, name: string }>} boards */
+function createLandingHtml(boards) {
+  const list =
+    boards.length > 0
+      ? `<ul>${boards.map((board) => `<li><a href="/board/${escapeHtml(board.key)}">${escapeHtml(board.name)}</a></li>`).join("")}</ul>`
+      : "<p>No boards are open.</p>";
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${PRODUCT_NAME}</title><style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#f7f4ef;color:#25221f;font:16px/1.5 system-ui,sans-serif}.card{width:min(560px,calc(100% - 40px));padding:32px;border:1px solid #d9d0c5;border-radius:16px;background:#fffdf9;box-shadow:0 12px 40px #25221f18}h1{margin:0 0 12px;font-size:26px}p{margin:0}ul{margin:0;padding:0;list-style:none}li+li{margin-top:6px}a{color:inherit;font-weight:600}</style></head><body><main class="card"><h1>${PRODUCT_NAME}</h1>${list}</main></body></html>`;
 }
 
 function createDeniedHtml({ title, message, workingUrl }) {

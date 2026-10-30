@@ -1573,7 +1573,7 @@ test("Tailscale mode binds concrete listeners, serves the MagicDNS link, and tea
       headers: { accept: "text/html" },
     });
     assert.equal(landing.status, 200);
-    assert.match(landing.body, /Lavish Editor is running/);
+    assert.match(landing.body, /<h1>Easel<\/h1>/);
 
     const shutdown = await rawRequest(server.port, "/shutdown", {
       method: "POST",
@@ -6382,7 +6382,7 @@ test("/health and the landing page stay responsive after opening two back-to-bac
       new Promise((_, reject) => setTimeout(() => reject(new Error("/ timed out")), 1000)),
     ]);
     assert.equal(rootRes.status, 200);
-    assert.match(await rootRes.text(), /Lavish Editor/);
+    assert.match(await rootRes.text(), /<title>Easel<\/title>/);
 
     assert.ok(Date.now() - start < 1000, "both probes should return well under one second");
   } finally {

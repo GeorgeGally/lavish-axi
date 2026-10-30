@@ -375,6 +375,20 @@ test("a pin prompt keeps the item and pin it belongs to, and earns its receipts"
   assert.ok(done.chat.find((entry) => entry.prompt_id === "p-1").done_at, "the note reads Done after a reply");
 });
 
+test("the server home page is Easel and lists the boards it has open", async (t) => {
+  const { base, boardDirectory } = await setup(t);
+  const empty = await (await fetch(`${base}/`, { headers: { accept: "text/html" } })).text();
+  assert.match(empty, /<title>Easel<\/title>/);
+  assert.match(empty, /<h1>Easel<\/h1>/);
+  assert.doesNotMatch(empty, /Lavish/);
+  assert.match(empty, /No boards are open/);
+
+  const registered = await register(base, boardDirectory);
+  const listed = await (await fetch(`${base}/`, { headers: { accept: "text/html" } })).text();
+  assert.match(listed, new RegExp(`<a href="/board/${registered.key}">hero</a>`));
+  assert.doesNotMatch(listed, /No boards are open/);
+});
+
 test("an unknown board key is not a board", async (t) => {
   const { base } = await setup(t);
   const missing = await fetch(`${base}/api/boards/deadbeef`);
