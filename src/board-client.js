@@ -632,7 +632,16 @@ function scheduleLayout() {
 /* ------------------------------------------------------------------ render */
 
 function itemUrl(item, deviceId) {
-  return `/board/${encodeURIComponent(key)}/item/${encodeURIComponent(item.id)}/index.html?device=${encodeURIComponent(deviceId)}`;
+  const url = `/board/${encodeURIComponent(key)}/item/${encodeURIComponent(item.id)}/index.html?device=${encodeURIComponent(deviceId)}`;
+  // The token is the file's own content, so a frame never keeps a page the file no
+  // longer is - not even through a cache that ignores the server's no-store.
+  const token = contentToken(item);
+  return token ? `${url}&r=${encodeURIComponent(token)}` : url;
+}
+
+/** What an item's frames are keyed by: its bytes when the board knows them. */
+function contentToken(item) {
+  return String(item?.hash || (Number(item?.mtime) ? String(item.mtime) : ""));
 }
 
 function createArtboard(item, device) {
@@ -844,10 +853,8 @@ function renderPlaceholder(board, first, framed, layout) {
 // has been on screen long enough to be seen. What this browser has seen is kept per
 // board, so an edit made while the board was closed is still marked on the next visit.
 const seenStorageKey = `easel:seen:${key}`;
-/** @type {Map<string, number>} */
-const knownMtimes = new Map();
 /** @type {Map<string, string>} */
-const knownHashes = new Map();
+const knownStamps = new Map();
 /** @type {Set<string>} */
 const updatedItems = new Set();
 /** @type {Map<string, number>} */
@@ -861,9 +868,9 @@ function loadSeen() {
   }
 }
 
-function markSeen(itemId, mtime) {
+function markSeen(itemId, stamp) {
   const seen = loadSeen();
-  seen[itemId] = mtime;
+  seen[itemId] = stamp;
   writeStorage(seenStorageKey, JSON.stringify(seen));
 }
 
@@ -872,7 +879,7 @@ function reloadItem(item) {
     if (record.itemId !== item.id) continue;
     record.loaded = false;
     record.iframe.style.height = `${record.device.height}px`;
-    record.iframe.src = `${itemUrl(item, record.device.id)}&r=${encodeURIComponent(`${item.mtime || Date.now()}-${item.hash || ""}`)}`;
+    record.iframe.src = itemUrl(item, record.device.id);
   }
 }
 
@@ -887,23 +894,23 @@ function noticeFileChanges(initial) {
   const seen = loadSeen();
   const marked = updatedItems.size;
   for (const item of state.items) {
-    const mtime = Number(item.mtime) || 0;
-    if (!mtime) continue;
-    const hash = String(item.hash || "");
-    const before = knownMtimes.get(item.id);
-    const beforeHash = knownHashes.get(item.id);
-    knownMtimes.set(item.id, mtime);
-    knownHashes.set(item.id, hash);
+    const stamp = contentToken(item);
+    if (!stamp) continue;
+    const before = knownStamps.get(item.id);
+    knownStamps.set(item.id, stamp);
     if (initial) {
-      if (seen[item.id] === undefined) markSeen(item.id, mtime);
-      else if (mtime > Number(seen[item.id])) setUpdated(item.id, true);
+      if (seen[item.id] === undefined) markSeen(item.id, stamp);
+      else if (stamp !== String(seen[item.id])) setUpdated(item.id, true);
       continue;
     }
     if (before === undefined) {
+      // A frame whose file only just appeared would otherwise keep the page it loaded
+      // when the file was missing.
+      reloadItem(item);
       setUpdated(item.id, true);
       continue;
     }
-    if (mtime !== before || (hash && hash !== beforeHash)) {
+    if (stamp !== before) {
       reloadItem(item);
       setUpdated(item.id, true);
     }
@@ -933,7 +940,7 @@ function checkViewed() {
     viewedFor.set(itemId, since);
     if (Date.now() - since < 2500) continue;
     const item = itemById(itemId);
-    if (item) markSeen(itemId, Number(item.mtime) || 0);
+    if (item) markSeen(itemId, contentToken(item));
     setUpdated(itemId, false);
     if (state.layout) render();
   }
@@ -1582,24 +1589,25 @@ function postToArtboard(itemId, deviceId, message) {
   record.iframe.contentWindow.postMessage({ channel: "easel", item: itemId, device: deviceId, ...message }, "*");
 }
 
+/** A note whose thread carries the agent's answer: its Done stamp. */
+function answeredNote(note) {
+  const entry = state.chat.find((message) => message && message.prompt_id === note.prompt_id);
+  return Boolean(entry && entry.done_at);
+}
+
 function pinsFor(item, deviceId) {
   return (item.notes || [])
     .filter((note) => noteDevice(note) === deviceId)
-    .map((note) => {
-      const entry = note.prompt_id
-        ? state.chat.find((message) => message && message.prompt_id === note.prompt_id)
-        : null;
-      return {
-        id: note.id,
-        number: note.number,
-        selector: note.selector,
-        x: note.x,
-        y: note.y,
-        ox: note.ox,
-        oy: note.oy,
-        state: note.prompt_id ? (entry?.done_at ? "done" : "sent") : "draft",
-      };
-    });
+    .map((note) => ({
+      id: note.id,
+      number: note.number,
+      selector: note.selector,
+      x: note.x,
+      y: note.y,
+      ox: note.ox,
+      oy: note.oy,
+      state: note.prompt_id ? (answeredNote(note) ? "done" : "sent") : "draft",
+    }));
 }
 
 function postPins(itemId, deviceId) {
@@ -2066,10 +2074,20 @@ function popoverPoint(item, note) {
 function sentState(note) {
   if (sendingPrompts.has(note.prompt_id)) return "Sending";
   const entry = state.chat.find((message) => message && message.prompt_id === note.prompt_id);
-  if (!entry) return "Sent";
-  if (entry.done_at) return "Answered";
-  return entry.delivered_at || entry.receipt === "none" ? "Read" : "Not read yet";
+  if (!entry || !entry.delivered_at) return "Sent";
+  // Applied means the design itself changed after the agent read the note. A reply on
+  // its own is an answer, not a fix, and must not read as one.
+  if (entry.done_at) {
+    const delivered = Date.parse(String(entry.delivered_at));
+    const changed = Number(liveNote(note.id)?.item?.mtime) || 0;
+    if (Number.isFinite(delivered) && changed > delivered) return "Applied";
+  }
+  return "Received";
 }
+
+/** What delete does, in the words the reviewer needs before agreeing to it. */
+const DELETE_NOTE_CONSEQUENCE =
+  "Deleting removes the instruction from the board. It never reverts the change it asked for.";
 
 /** @param {any} item @param {any} note @param {{ fresh?: boolean }} [options] */
 function showNoteWindow(item, note, { fresh = false } = {}) {
@@ -2113,7 +2131,8 @@ function showNoteWindow(item, note, { fresh = false } = {}) {
   });
   const actions = element("div", { class: "note-pop-actions" });
   if (saved) {
-    // Deleting asks once, in place: a sent note is also withdrawn from the agent.
+    // Deleting asks once, in place: a sent note is also withdrawn from the agent, and
+    // it never undoes the change the note asked for.
     const remove = element("button", { class: "button button-quiet", type: "button", text: "Delete note" });
     remove.addEventListener("click", () => {
       const sure = element("button", { class: "button button-danger", type: "button", text: "Delete" });
@@ -2125,6 +2144,7 @@ function showNoteWindow(item, note, { fresh = false } = {}) {
       keep.addEventListener("click", () => showNoteWindow(item, note));
       actions.replaceChildren(
         element("span", { class: "note-ask", text: `Delete note ${note.number}?` }),
+        element("span", { class: "note-ask-consequence", text: DELETE_NOTE_CONSEQUENCE }),
         element("span", { class: "spacer" }),
         keep,
         sure,
@@ -2135,7 +2155,8 @@ function showNoteWindow(item, note, { fresh = false } = {}) {
   actions.append(element("span", { class: "spacer" }));
   if (sent) {
     // A sent note is changed or added to in its thread, where the agent's answer sits.
-    actions.append(element("span", { class: "note-state", text: sentState(note) }));
+    const group = element("div", { class: "note-pop-group" });
+    group.append(element("span", { class: "note-state", text: sentState(note) }));
     const more = element("button", { class: "button", type: "button", text: "Add more" });
     more.addEventListener("click", () => {
       closeNoteWindow();
@@ -2146,7 +2167,8 @@ function showNoteWindow(item, note, { fresh = false } = {}) {
       closeNoteWindow();
       openThreadComposer(note.id, "edit");
     });
-    actions.append(more, edit);
+    group.append(more, edit);
+    actions.append(group);
   } else {
     const queue = element("button", { class: "button", type: "button", text: "Queue" });
     queue.addEventListener("click", () => {
@@ -2386,6 +2408,10 @@ function threadHead(id, subject) {
     const title = designName(subject.item, noteDevice(subject.note));
     threadTitles.set(id, `${subject.note.number} · ${title}`);
     head.append(element("span", { class: "thread-title", text: title }));
+    // Where this note stands, in the same words the note's popover uses.
+    if (subject.note.prompt_id) {
+      head.append(element("span", { class: "thread-state", text: sentState(subject.note) }));
+    }
     head.addEventListener("click", () => focusPin(subject.item, subject.note));
   } else if (subject.kind === "item") {
     const title = designName(subject.item, "");
@@ -2469,7 +2495,12 @@ function threadFoot(id, subject) {
       confirmingDelete = "";
       renderChatPanel();
     });
-    foot.append(element("span", { class: "thread-ask", text: `Delete note ${note.number}?` }), sure, keep);
+    foot.append(
+      element("span", { class: "thread-ask", text: `Delete note ${note.number}?` }),
+      element("span", { class: "note-ask-consequence", text: DELETE_NOTE_CONSEQUENCE }),
+      sure,
+      keep,
+    );
     return foot;
   }
   const action = (text, run) => {
@@ -2814,7 +2845,7 @@ let tuneItemId = "";
 let tuneDeviceId = "";
 /**
  * What Alt-Ctrl last clicked: its selectors, its own controls and their live values.
- * @type {null | { itemId: string, deviceId: string, selector?: string, sectionSelector?: string, label?: string, sectionLabel?: string, controls?: any[], values?: Record<string, string>, pending?: boolean }}
+ * @type {null | { itemId: string, deviceId: string, selector?: string, sectionSelector?: string, label?: string, sectionLabel?: string, parentSelector?: string, parentLabel?: string, controls?: any[], values?: Record<string, string>, pending?: boolean }}
  */
 let tuneTarget = null;
 /** @type {ReturnType<typeof setTimeout> | undefined} */
@@ -2872,6 +2903,8 @@ function openTune(itemId, deviceId) {
 function closeTune() {
   for (const cleanup of tuneCleanup) cleanup();
   tuneCleanup = [];
+  // Closing the panel takes its inline overrides back off: the frame returns to its file.
+  if (tuneTarget) postToArtboard(tuneTarget.itemId, tuneTarget.deviceId, { type: "style-reset" });
   const panel = document.getElementById("tune");
   if (panel) panel.hidden = true;
   tuneItemId = "";
@@ -2894,6 +2927,15 @@ function openTargetTune(record, point) {
     x: point.x,
     y: point.y,
   });
+}
+
+/** One click up the page: tune the element the current target sits in. */
+function stepUpTune() {
+  if (!tuneTarget || tuneTarget.pending || !tuneTarget.parentSelector) return;
+  const { itemId, deviceId, parentSelector } = tuneTarget;
+  tuneTarget = { itemId, deviceId, pending: true };
+  renderTune();
+  postToArtboard(itemId, deviceId, { type: "tune-element", selector: parentSelector });
 }
 
 /** @param {"element" | "section"} [scope] */
@@ -2955,19 +2997,35 @@ function renderTargetTune() {
       tuneTarget.sectionLabel && tuneTarget.sectionLabel !== tuneTarget.label ? tuneTarget.sectionLabel : "";
   const title = document.getElementById("tuneTitle");
   if (title) title.textContent = tuneTarget.label || "Tune";
+  const parent = tuneTarget.parentSelector
+    ? element("button", {
+        class: "tune-parent",
+        type: "button",
+        text: `↑ ${tuneTarget.parentLabel || "Parent"}`,
+        title: "Tune the element this one sits in",
+      })
+    : null;
+  parent?.addEventListener("click", stepUpTune);
   if (tuneTarget.pending) {
-    body.replaceChildren(element("p", { class: "tune-empty", text: "Reading the element…" }));
+    body.replaceChildren(
+      ...[parent, element("p", { class: "tune-empty", text: "Reading the element…" })].filter(Boolean),
+    );
   } else {
     const controls = tuneTarget.controls || [];
     if (controls.length === 0) {
-      body.replaceChildren(element("p", { class: "tune-empty", text: "Nothing here to tune." }));
+      body.replaceChildren(
+        ...[parent, element("p", { class: "tune-empty", text: "Nothing here to tune." })].filter(Boolean),
+      );
     } else {
       body.replaceChildren(
-        ...controls.map((control) =>
-          createTuneControl({ id: "target", tune: tuneTarget?.values || {} }, control, (raw) =>
-            applyTargetValue(control, raw),
+        ...[
+          parent,
+          ...controls.map((control) =>
+            createTuneControl({ id: "target", tune: tuneTarget?.values || {} }, control, (raw) =>
+              applyTargetValue(control, raw),
+            ),
           ),
-        ),
+        ].filter(Boolean),
       );
     }
   }
@@ -3524,6 +3582,8 @@ function onArtboardMessage(event) {
         sectionSelector: String(data.sectionSelector || ""),
         label: String(data.label || ""),
         sectionLabel: String(data.sectionLabel || ""),
+        parentSelector: String(data.parentSelector || ""),
+        parentLabel: String(data.parentLabel || ""),
         controls,
         values,
       };

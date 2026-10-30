@@ -960,8 +960,10 @@ export async function serve({
       const info = await stat(file).catch(() => null);
       captions[item.id] = {
         ...explanationFromHtml(html),
-        mtime: info ? Math.round(info.mtimeMs) : 0,
+        // The file's own bytes decide whether an open board reloads that frame: an
+        // mtime can be preserved by a copy or a checkout, so content is the proof.
         hash: crypto.createHash("sha1").update(html).digest("hex"),
+        mtime: info ? Math.round(info.mtimeMs) : 0,
         // When the file first appeared: a pending version's placeholder gives way to a
         // file created after the reply that announced it.
         created: info ? Math.round(info.birthtimeMs || info.ctimeMs) : 0,

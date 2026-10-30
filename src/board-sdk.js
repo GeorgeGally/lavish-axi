@@ -1,4 +1,4 @@
-/* global CSS, Element, HTMLElement, ResizeObserver, document, getComputedStyle, parent, window */
+/* global CSS, Element, HTMLElement, SVGElement, ResizeObserver, document, getComputedStyle, parent, window */
 // The board item SDK. It is deliberately small: the board owns the notes, the pins and
 // the composer, so an item only reports a clicked element, draws the pins it is told
 // about, and applies tune values as CSS custom properties.
@@ -188,7 +188,7 @@
           "font-variant-numeric:tabular-nums",
           "box-shadow:0 1px 2px rgba(0,0,0,.18),0 4px 12px rgba(0,0,0,.18)",
           "pointer-events:none",
-          "transition:transform .16s ease, box-shadow .16s ease, opacity .16s ease",
+          "transition:transform .18s ease, left .3s cubic-bezier(.2,.9,.2,1), opacity .3s ease, box-shadow .16s ease",
           "transform:translate(-50%,-50%)",
           "z-index:2147483000",
         ].join(";");
@@ -202,22 +202,28 @@
         element.style.background = "#ffffff";
         element.style.color = "#16181d";
         element.style.border = "2px solid #16181d";
+      } else if (pin.state === "done") {
+        // Answered: struck back to a dull grey so the design reads as it is now.
+        element.style.background = "#bcc3cf";
+        element.style.color = "#333a45";
+        element.style.border = "2px solid #ffffff";
       } else {
         element.style.background = "#16181d";
         element.style.color = "#ffffff";
         element.style.border = "2px solid #ffffff";
       }
-      const done = pin.state === "done";
-      element.style.opacity = done ? "0.42" : "1";
-      element.style.transform = done ? "translate(calc(-50% - 30px), -50%)" : "translate(-50%, -50%)";
       const anchor = resolution(pin);
       if (!anchor.visible) {
         element.style.display = "none";
         continue;
       }
       element.style.display = "grid";
-      element.style.left = `${anchor.x}px`;
+      // An answered pin slides to the page's left edge and half out of it: it stays
+      // findable and it no longer sits on the design.
+      element.style.left = pin.state === "done" ? "0px" : `${anchor.x}px`;
       element.style.top = `${anchor.y}px`;
+      element.style.transform = "translate(-50%,-50%)";
+      element.style.opacity = pin.state === "done" ? "0.6" : "1";
     }
     for (const node of Array.from(layer.children)) {
       if (!(node instanceof HTMLElement) || !seen.has(node.dataset.pin)) node.remove();
@@ -250,6 +256,7 @@
     const docX = x + window.scrollX;
     const docY = y + window.scrollY;
     for (const pin of state.pins) {
+      // An answered pin has left the page; it no longer takes clicks there.
       if (pin.state === "done") continue;
       const anchor = resolution(pin);
       if (Math.abs(anchor.x - docX) <= 13 && Math.abs(anchor.y - docY) <= 13) return pin;
@@ -269,7 +276,8 @@
   function flashPin(id) {
     /** @type {HTMLElement | null} */
     const element = pinLayer().querySelector(`[data-pin="${CSS.escape(id)}"]`);
-    if (!element) return;
+    const pin = state.pins.find((entry) => entry.id === id);
+    if (!element || !pin) return;
     element.style.transform = "translate(-50%,-50%) scale(1.35)";
     element.style.boxShadow = "0 0 0 6px rgba(37,99,235,.28), 0 4px 12px rgba(0,0,0,.2)";
     window.setTimeout(() => {
@@ -493,7 +501,9 @@
 
   /**
    * The controls that genuinely apply to a clicked element, plus the ones its nearest
-   * section owns (a flex or grid gap belongs to the container, not the child).
+   * section owns (a flex or grid gap belongs to the container, not the child). A
+   * property that cannot show on this element - no fill, no border, no text - is left
+   * out rather than offered as a control that changes nothing.
    * @param {Element} element
    * @param {Element | null} section
    */
@@ -501,8 +511,6 @@
     const style = getComputedStyle(element);
     const box = style.display !== "inline" && element.tagName !== "BR";
     const text = shortText(element.textContent).length > 0;
-    // Fill, radius and shadow only mean something on a box that draws itself: a painted
-    // or bordered surface, an image, or a button. A bare heading gets type and space.
     const replaced = ["IMG", "VIDEO", "SVG", "CANVAS", "PICTURE"].includes(element.tagName);
     const bordered = style.borderTopWidth !== "0px" && style.borderTopStyle !== "none";
     const paints =
@@ -511,103 +519,114 @@
       style.backgroundImage !== "none" ||
       !/^rgba?\(0,\s*0,\s*0,\s*0\)$|^transparent$/.test(style.backgroundColor.trim());
     const controls = [];
+    /** @param {string} id @param {string} css @param {string} label @param {Record<string, unknown>} control */
+    const add = (id, css, label, control) => controls.push({ id, css, label, scope: "element", ...control });
+    /** @param {string} value */
+    const round = (value) => Math.round(pxOf(value) * 100) / 100;
+
     if (text) {
-      controls.push({
-        id: "color",
-        css: "color",
-        label: "Colour",
-        type: "color",
-        value: hexOf(style.color),
-        scope: "element",
-      });
-    }
-    if (paints) {
-      controls.push({
-        id: "fill",
-        css: "background-color",
-        label: "Fill",
-        type: "color",
-        value: hexOf(style.backgroundColor),
-        scope: "element",
-      });
-    }
-    if (text) {
-      const size = Math.max(8, Math.round(pxOf(style.fontSize)));
-      controls.push({
-        id: "font-size",
-        css: "font-size",
-        label: "Type size",
+      add("color", "color", "Colour", { type: "color", value: hexOf(style.color) });
+      const fontSize = Math.max(8, Math.round(pxOf(style.fontSize)));
+      add("font-size", "font-size", "Type size", {
         type: "number",
         unit: "px",
-        value: String(size),
+        value: String(fontSize),
         min: 8,
-        max: Math.max(32, Math.round(size * 3)),
+        max: Math.max(32, Math.round(fontSize * 3)),
         step: 1,
-        scope: "element",
       });
       const weights = ["300", "400", "500", "600", "700", "800", "900"];
       const weight = String(style.fontWeight);
-      controls.push({
-        id: "weight",
-        css: "font-weight",
-        label: "Weight",
+      add("weight", "font-weight", "Weight", {
         type: "select",
         value: weight,
         options: (weights.includes(weight) ? weights : [weight, ...weights]).map((value) => ({ value, label: value })),
-        scope: "element",
+      });
+      add("letter-spacing", "letter-spacing", "Tracking", {
+        type: "number",
+        unit: "px",
+        value: String(round(style.letterSpacing)),
+        min: -4,
+        max: 12,
+        step: 0.1,
+      });
+      const lineHeight = round(style.lineHeight) || Math.round(fontSize * 1.5);
+      add("line-height", "line-height", "Line height", {
+        type: "number",
+        unit: "px",
+        value: String(lineHeight),
+        min: 8,
+        max: Math.max(48, Math.round(lineHeight * 2)),
+        step: 1,
+      });
+    }
+    if (paints) {
+      add("fill", "background-color", "Fill", { type: "color", value: hexOf(style.backgroundColor) });
+    }
+    if (bordered) {
+      add("border-color", "border-color", "Border", { type: "color", value: hexOf(style.borderTopColor) });
+      add("border-width", "border-width", "Border width", {
+        type: "number",
+        unit: "px",
+        value: String(Math.max(0, Math.round(pxOf(style.borderTopWidth)))),
+        min: 0,
+        max: 12,
+        step: 1,
       });
     }
     if (box) {
       const pad = Math.max(0, Math.round(pxOf(style.paddingTop)));
-      controls.push({
-        id: "padding",
-        css: "padding",
-        label: "Padding",
+      add("padding", "padding", "Padding", {
         type: "number",
         unit: "px",
         value: String(pad),
         min: 0,
         max: Math.max(48, Math.round(pad * 4)),
         step: 1,
-        scope: "element",
       });
-      const radius = Math.max(0, Math.round(pxOf(style.borderTopLeftRadius)));
+      const margin = Math.round(pxOf(style.marginTop));
+      add("margin", "margin", "Margin", {
+        type: "number",
+        unit: "px",
+        value: String(margin),
+        min: Math.min(0, margin * 2),
+        max: Math.max(48, Math.round(margin * 4)),
+        step: 1,
+      });
       const width = Math.round(element.getBoundingClientRect().width);
-      controls.push({
-        id: "width",
-        css: "width",
-        label: "Width",
+      add("width", "width", "Width", {
         type: "number",
         unit: "px",
         value: String(width),
         min: 40,
         max: Math.max(320, Math.round(width * 2)),
         step: 1,
-        scope: "element",
+      });
+      const rect = element.getBoundingClientRect();
+      add("height", "height", "Height", {
+        type: "number",
+        unit: "px",
+        value: String(Math.round(rect.height)),
+        min: 0,
+        max: Math.max(320, Math.round(rect.height * 3)),
+        step: 1,
       });
       if (paints) {
-        controls.push({
-          id: "radius",
-          css: "border-radius",
-          label: "Radius",
+        const radius = Math.max(0, Math.round(pxOf(style.borderTopLeftRadius)));
+        add("radius", "border-radius", "Radius", {
           type: "number",
           unit: "px",
           value: String(radius),
           min: 0,
           max: Math.max(32, Math.round(radius * 4)),
           step: 1,
-          scope: "element",
         });
         const shadow = String(style.boxShadow);
         const known = SHADOW_PRESETS.some((preset) => preset.value === shadow);
-        controls.push({
-          id: "shadow",
-          css: "box-shadow",
-          label: "Shadow",
+        add("shadow", "box-shadow", "Shadow", {
           type: "select",
           value: shadow,
           options: known ? SHADOW_PRESETS : [{ value: shadow, label: "Current" }, ...SHADOW_PRESETS],
-          scope: "element",
         });
       }
     }
@@ -632,6 +651,17 @@
     return controls;
   }
 
+  /**
+   * The box that owns a gap for this element: the element itself when it lays its
+   * children out in a row or grid, otherwise the section it sits in.
+   * @param {Element} element
+   */
+  function gapOwnerOf(element) {
+    if (/flex|grid/.test(getComputedStyle(element).display)) return element;
+    const above = element.closest("section, article, header, footer, main, nav, form, aside");
+    return above && /flex|grid/.test(getComputedStyle(above).display) ? above : null;
+  }
+
   /** Inline overrides this SDK set, so Reset can take them all back off. */
   const elementStyles = new Map();
 
@@ -645,7 +675,7 @@
     } catch {
       return;
     }
-    if (!(element instanceof HTMLElement)) return;
+    if (!(element instanceof HTMLElement || element instanceof SVGElement)) return;
     let applied = elementStyles.get(element);
     if (!applied) {
       applied = new Map();
@@ -667,15 +697,47 @@
     const leaf = document.elementFromPoint(x, y);
     const element = leaf instanceof Element && !leaf.closest("[data-easel-ui]") ? leaf : document.body;
     if (!(element instanceof Element)) return;
-    const section = element.closest("section, article, header, footer, main, nav, form") || element.parentElement;
-    post({
-      type: "tune-target",
+    reportTuneFor(element);
+  }
+
+  /** @param {Element} element */
+  function reportTuneFor(element) {
+    const owner = gapOwnerOf(element);
+    const parent = element.parentElement;
+    // Read the page's own values, not the ones this panel is currently previewing, so
+    // Copy shows exactly what still differs from the file.
+    const held = [...new Set([element, owner, parent].filter(Boolean))].map((node) => [node, elementStyles.get(node)]);
+    for (const [node, applied] of held) {
+      if (applied) for (const css of applied.keys()) node.style.removeProperty(css);
+    }
+    const controls = elementTuneControls(element, owner);
+    const payload = {
       selector: selectorFor(element),
-      sectionSelector: section ? selectorFor(section) : "",
+      // The gap belongs to this container, not to the clicked child.
+      sectionSelector: owner ? selectorFor(owner) : "",
       label: targetLabel(element),
-      sectionLabel: sectionLabel(section),
-      controls: elementTuneControls(element, section),
-    });
+      sectionLabel: owner && owner !== element ? sectionLabel(owner) : "",
+      // One click steps up: the panel offers the element this one sits in.
+      parentSelector: parent ? selectorFor(parent) : "",
+      parentLabel: parent ? targetLabel(parent) : "",
+    };
+    for (const [node, applied] of held) {
+      if (applied) for (const [css, value] of applied) node.style.setProperty(css, value);
+    }
+    post({ type: "tune-target", ...payload, controls });
+  }
+
+  /** @param {string} selector */
+  function reportTuneSelector(selector) {
+    /** @type {Element | null} */
+    let element;
+    try {
+      element = document.querySelector(selector);
+    } catch {
+      element = null;
+    }
+    if (!(element instanceof Element) || element.closest("[data-easel-ui]")) return;
+    reportTuneFor(element);
   }
 
   window.addEventListener(
@@ -723,6 +785,10 @@
       }
       if (data.type === "tune-target") {
         reportTuneTarget(Number(data.x), Number(data.y));
+        return;
+      }
+      if (data.type === "tune-element") {
+        reportTuneSelector(String(data.selector || ""));
         return;
       }
       if (data.type === "style") {
