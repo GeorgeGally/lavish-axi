@@ -138,3 +138,21 @@ export async function captureCrop({ chrome, url, width, height, timeoutMs = CAPT
     await rm(dir, { recursive: true, force: true }).catch(() => {});
   }
 }
+
+// A version's thumbnail is the top screen of its desktop page, at a quarter size.
+export const THUMB_SCALE = 0.25;
+
+/**
+ * The page Chrome photographs for a version's thumbnail: the saved page in a sandboxed
+ * desktop-sized frame, scaled down so one screen of it fills a small window.
+ *
+ * @param {{ src: string, deviceWidth: number, deviceHeight: number }} options
+ */
+export function thumbFrameHtml({ src, deviceWidth, deviceHeight }) {
+  const escaped = src.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+  return `<!doctype html>
+<html><head><meta charset="utf-8"><style>
+html, body { margin: 0; overflow: hidden; background: #ffffff; }
+iframe { position: absolute; left: 0; top: 0; width: ${deviceWidth}px; height: ${deviceHeight}px; border: 0; transform: scale(${THUMB_SCALE}); transform-origin: 0 0; }
+</style></head><body><iframe sandbox="allow-scripts" src="${escaped}"></iframe></body></html>`;
+}

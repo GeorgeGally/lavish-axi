@@ -152,7 +152,9 @@ let heightSaveTimer = 0;
 function saveHeights() {
   clearTimeout(heightSaveTimer);
   heightSaveTimer = window.setTimeout(() => {
-    writeStorage(heightStorageKey, JSON.stringify(Object.fromEntries(state.heights)));
+    // A compared build's frame is gone once its history closes; only items are kept.
+    const kept = [...state.heights].filter(([id]) => !id.includes("~"));
+    writeStorage(heightStorageKey, JSON.stringify(Object.fromEntries(kept)));
   }, 600);
 }
 
@@ -388,6 +390,7 @@ function buildGroups() {
       .filter((member) => member.item.changed)
       .map((member) => ({ label: member.label, text: capitalize(member.item.changed) }));
   }
+  insertCompare(groups);
   return groups;
 }
 
@@ -711,6 +714,7 @@ function render() {
   const seen = new Set();
   const seenGroups = new Set();
   const seenPlaceholders = new Set();
+  const seenCompares = new Set();
   canvas.style.setProperty("--cap-max", `${layout.captionMax}px`);
   canvas.style.setProperty("--label-max", `${layout.labelMax}px`);
   for (const group of layout.groups) {
@@ -731,6 +735,13 @@ function render() {
         member.boards.forEach((board, index) => {
           seenPlaceholders.add(board.key);
           renderPlaceholder(board, index === 0, framed, layout);
+        });
+        continue;
+      }
+      if (member.item.compareOf) {
+        member.boards.forEach((board, index) => {
+          seenCompares.add(board.key);
+          renderCompare(board, index === 0, member, framed, layout);
         });
         continue;
       }
@@ -782,7 +793,7 @@ function render() {
   for (const group of layout.groups) {
     if (!group.compared) continue;
     for (const member of group.members) {
-      if (member.item.placeholder) continue;
+      if (member.item.placeholder || member.item.compareOf) continue;
       seenChoices.add(member.item.id);
       let choice = state.choices.get(member.item.id);
       if (!choice) {
@@ -811,6 +822,14 @@ function render() {
     explain.remove();
     state.explains.delete(id);
   }
+  for (const [id, frame] of compareFrames) {
+    if (seenCompares.has(id)) continue;
+    frame.root.remove();
+    frame.label.remove();
+    compareFrames.delete(id);
+    state.heights.delete(id);
+  }
+  positionHistory();
   emptyElement.hidden = layout.groups.length > 0;
 }
 
@@ -829,6 +848,14 @@ function renderBuilds(record, item) {
     record.buildsEl.replaceChildren();
     return;
   }
+  const toggle = element("button", { class: "history-toggle", type: "button", text: "History" });
+  toggle.hidden = builds.length < 2;
+  toggle.setAttribute("aria-expanded", String(historyItem === item.id));
+  toggle.addEventListener("click", (event) => {
+    event.stopPropagation();
+    if (historyItem === item.id) closeBuildPreview();
+    else openHistory(item.id);
+  });
   record.buildsEl.replaceChildren(
     ...builds.map((build, index) => {
       const node = element("button", {
@@ -842,62 +869,349 @@ function renderBuilds(record, item) {
       if (build.label) node.append(element("span", { class: "build-name", text: build.label }));
       node.addEventListener("click", (event) => {
         event.stopPropagation();
-        previewBuild(item, build);
+        openHistory(item.id, build.hash);
       });
       return node;
     }),
+    toggle,
   );
 }
 
+/* ----------------------------------------------------------------- history */
+
+// An item's history is its line of builds, opened as a strip of thumbnails: oldest
+// first and the file as it is now last, each with its time and the notes that led to
+// it. Picking one lays that build out on the board beside the current version, at the
+// same device widths, as a frame the board never answers: no pins, notes or tune.
+let historyItem = "";
+/** @type {{ itemId: string, hash: string } | null} */
+let compare = null;
+/** @type {Map<string, any>} */
+const compareFrames = new Map();
+/** @type {Map<string, Set<string>>} */
+const thumbsReady = new Map();
+// A build is seen on the board's next read of its file, so a reply sent just after the
+// write can carry an earlier time than the build it answers.
+const BUILD_SEEN_SLACK_MS = 30 * 1000;
+
+function compareId(itemId, hash) {
+  return `${itemId}~${hash}`;
+}
+
+/** A saved build sits under its own folder, so its relative links reach the item's files. */
+function buildUrl(itemId, hash, deviceId) {
+  return `/board/${encodeURIComponent(key)}/item/${encodeURIComponent(itemId)}/build/${encodeURIComponent(hash)}/?device=${encodeURIComponent(deviceId)}`;
+}
+
+/** Builds oldest first, with the one the file is now at the end. */
+function historyBuilds(item) {
+  const builds = [...(item?.builds || [])];
+  const index = builds.findIndex((build) => build.hash === item.hash);
+  if (index >= 0) builds.push(...builds.splice(index, 1));
+  return builds;
+}
+
+/**
+ * What led to a build: the notes on this item answered by the first reply after the
+ * change, or else what was said about this item since the build before it.
+ */
+function buildNotes(item, builds, index) {
+  if (index === 0) return [];
+  const at = Date.parse(String(builds[index].at || ""));
+  if (!Number.isFinite(at)) return [];
+  const from = Date.parse(String(builds[index - 1].at || "")) || 0;
+  const reply = state.chat.find(
+    (entry) => entry?.role === "agent" && (Date.parse(String(entry.at || "")) || 0) >= at - BUILD_SEEN_SLACK_MS,
+  );
+  const answered = reply
+    ? threadsOfReply(reply)
+        .map(threadSubject)
+        .filter((subject) => subject?.kind === "note" && subject.item.id === item.id)
+        .map((subject) => String(subject.note.text || ""))
+    : [];
+  const said =
+    answered.length > 0
+      ? answered
+      : state.chat
+          .filter((entry) => {
+            if (!entry || entry.role === "agent") return false;
+            const sent = Date.parse(String(entry.at || "")) || 0;
+            if (sent <= from || sent > at) return false;
+            const thread = threadOfEntry(entry);
+            return thread === `item:${item.id}` || liveNote(thread)?.item.id === item.id;
+          })
+          .map((entry) => String(entry.text || ""));
+  return [...new Set(said.map((text) => text.trim()).filter(Boolean))];
+}
+
+/** Ask the server to photograph builds that have no thumbnail yet (one, or all). */
+function requestThumbs(itemId, hash = "") {
+  fetch(`/api/boards/${encodeURIComponent(key)}/thumbs`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(hash ? { item: itemId, hash } : { item: itemId }),
+  })
+    .then((response) => (response.ok ? response.json() : null))
+    .then((payload) => {
+      const ready = thumbsReady.get(itemId) || new Set();
+      for (const done of Array.isArray(payload?.thumbs) ? payload.thumbs : []) ready.add(String(done));
+      thumbsReady.set(itemId, ready);
+      if (historyItem === itemId) renderHistory();
+    })
+    .catch(() => {});
+}
+
+function openHistory(itemId, hash = "") {
+  const item = itemById(itemId);
+  if (!item) return;
+  historyItem = itemId;
+  const current = historyBuilds(item).at(-1);
+  setCompare(hash && hash !== current?.hash ? { itemId, hash } : null);
+  requestThumbs(itemId);
+}
+
+/** Close the history strip and any build laid out beside its item. */
 function closeBuildPreview() {
-  document.getElementById("buildPreview")?.remove();
+  if (!historyItem && !compare) return;
+  historyItem = "";
+  compare = null;
+  document.getElementById("history")?.remove();
+  if (state.layout) relayout();
 }
 
-/** The build as it was, and the one action that continues from it. */
-function previewBuild(item, build) {
-  closeBuildPreview();
-  const panel = element("div", { class: "build-preview", id: "buildPreview", role: "dialog" });
-  const head = element("div", { class: "build-preview-head" });
-  const stamp = build.at ? new Date(build.at) : null;
-  head.append(
-    element("span", {
-      class: "build-preview-title",
-      text:
-        build.label || `${item.label} · ${stamp && !Number.isNaN(stamp.getTime()) ? stamp.toLocaleString() : "build"}`,
-    }),
-  );
-  const close = element("button", { class: "icon-button", type: "button", text: "×", "aria-label": "Close" });
+function setCompare(next) {
+  const itemId = next?.itemId || compare?.itemId || "";
+  compare = next;
+  relayout();
+  renderHistory();
+  if (!itemId) return;
+  const ids = new Set([itemId, next ? compareId(next.itemId, next.hash) : ""]);
+  focusBoards(eachBoard().filter((board) => ids.has(board.item.id)));
+}
+
+/** The strip keeps clear of the panel, except where the panel is a sheet over the board. */
+function positionHistory() {
+  const panel = document.getElementById("history");
+  if (!panel) return;
+  const right = panelWidth();
+  panel.style.right = `${right > window.innerWidth * 0.6 ? 0 : right}px`;
+}
+
+function renderHistory() {
+  const item = itemById(historyItem);
+  const builds = historyBuilds(item);
+  let panel = document.getElementById("history");
+  if (!item || builds.length === 0) {
+    panel?.remove();
+    historyItem = "";
+    return;
+  }
+  const ready = thumbsReady.get(item.id) || new Set();
+  const signature = JSON.stringify([
+    item.id,
+    builds.map((build) => [build.hash, ready.has(build.hash)]),
+    compare?.hash || "",
+    state.chat.length,
+    designName(item, ""),
+  ]);
+  if (!panel) {
+    panel = element("section", { class: "history", id: "history", "aria-label": `History of ${item.label}` });
+    document.body.append(panel);
+  }
+  positionHistory();
+  if (panel.dataset.signature === signature) return;
+  panel.dataset.signature = signature;
+  const previous = panel.querySelector(".history-list");
+  const scrolled = previous && panel.dataset.item === item.id ? previous.scrollLeft : null;
+  panel.dataset.item = item.id;
+  const head = element("div", { class: "history-head" });
+  head.append(element("h2", { class: "history-title", text: designName(item, "") }));
+  const close = element("button", { class: "icon-button", type: "button", text: "×", "aria-label": "Close history" });
   close.addEventListener("click", closeBuildPreview);
   head.append(close);
-  const frame = element("iframe", {
-    sandbox: "allow-scripts allow-forms",
-    title: build.label || `Build of ${item.label}`,
-    src: `/board/${encodeURIComponent(key)}/item/${encodeURIComponent(item.id)}/build/${encodeURIComponent(build.hash)}`,
+  const list = element("ol", { class: "history-list" });
+  builds.forEach((build, index) => {
+    const current = index === builds.length - 1;
+    const shown = compare?.itemId === item.id ? compare.hash === build.hash : current;
+    const tile = element("button", { class: "history-tile", type: "button", "aria-pressed": String(shown) });
+    if (current) tile.dataset.current = "true";
+    const thumb = element("span", { class: "history-thumb" });
+    if (ready.has(build.hash)) {
+      thumb.append(
+        element("img", {
+          src: `/board/${encodeURIComponent(key)}/item/${encodeURIComponent(item.id)}/thumb/${encodeURIComponent(build.hash)}`,
+          alt: "",
+        }),
+      );
+    }
+    const time = formatTime(build.at);
+    const notes = buildNotes(item, builds, index);
+    const said = notes.join(" · ") || build.label || (index === 0 ? "First version" : "");
+    tile.append(thumb, element("span", { class: "history-time", text: current ? `${time} · Now` : time }));
+    if (said) tile.append(element("span", { class: "history-notes", text: said, title: said }));
+    tile.addEventListener("click", () => setCompare(current ? null : { itemId: item.id, hash: build.hash }));
+    const row = element("li");
+    row.append(tile);
+    list.append(row);
   });
-  const actions = element("div", { class: "build-preview-actions" });
-  const carry = element("button", { class: "button button-primary", type: "button", text: "Continue from here" });
-  carry.addEventListener("click", () => {
-    sendItemNote(
-      item,
-      [
-        `Continue ${item.label} (${item.file}) from the build saved at ${build.at || "an earlier round"}`,
-        build.label ? `(${build.label})` : "",
-        `— its snapshot is .easel-builds/${item.id}/${build.hash}.html in the board folder.`,
-        "Build the next version from that, not from a fresh page.",
-      ]
-        .filter(Boolean)
-        .join(" "),
-      "",
-      "build",
+  panel.replaceChildren(head, list);
+  list.scrollLeft = scrolled ?? list.scrollWidth;
+}
+
+/** Lay the compared build out as one more version, just before its item. */
+function insertCompare(groups) {
+  if (!compare) return;
+  const item = itemById(compare.itemId);
+  const build = (item?.builds || []).find((entry) => entry.hash === compare?.hash);
+  if (!item || !build) {
+    compare = null;
+    return;
+  }
+  const entry = {
+    item: {
+      id: compareId(item.id, build.hash),
+      compareOf: item.id,
+      build,
+      label: item.label,
+      file: item.file,
+      tab: item.tab,
+    },
+    label: build.label || formatTime(build.at),
+    children: [],
+  };
+  for (const group of groups) {
+    for (const list of [group.members, ...group.members.map((member) => member.children)]) {
+      const index = list.findIndex((member) => member.item.id === item.id);
+      if (index < 0) continue;
+      list.splice(index, 0, entry);
+      return;
+    }
+  }
+}
+
+function renderCompare(board, first, member, framed, layout) {
+  let frame = compareFrames.get(board.key);
+  if (!frame) {
+    const root = element("div", { class: "artboard compare-frame", "data-device": board.device.id });
+    const screen = element("div", { class: "screen" });
+    const iframe = element("iframe", {
+      title: `${member.item.label} as it was at ${board.device.width}`,
+      sandbox: "allow-scripts",
+      tabindex: "-1",
+    });
+    iframe.style.width = `${board.device.width}px`;
+    iframe.style.height = `${board.device.height}px`;
+    screen.append(iframe);
+    root.append(screen);
+    const label = element("div", { class: "artboard-label" });
+    const name = element("span", { class: "name" });
+    const width = element("span", { class: "width" });
+    const actions = element("span", { class: "compare-actions" });
+    const carry = element("button", { class: "compare-button", type: "button", text: "Continue from here" });
+    carry.addEventListener("click", (event) => {
+      event.stopPropagation();
+      continueFromBuild(itemById(member.item.compareOf), member.item.build);
+    });
+    const close = element("button", { class: "compare-button", type: "button", text: "Close" });
+    close.addEventListener("click", (event) => {
+      event.stopPropagation();
+      setCompare(null);
+    });
+    actions.append(carry, close);
+    label.append(name, width, actions);
+    canvas.append(root, label);
+    frame = { key: board.key, itemId: member.item.compareOf, device: board.device, root, screen, iframe, label };
+    frame.name = name;
+    frame.width = width;
+    frame.actions = actions;
+    frame.loaded = false;
+    const record = frame;
+    // The page cannot be touched, but in a device view it still scrolls under the wheel.
+    root.addEventListener(
+      "wheel",
+      (event) => {
+        if (event.ctrlKey || event.metaKey || !framedView()) return;
+        event.preventDefault();
+        event.stopPropagation();
+        record.iframe.contentWindow?.postMessage(
+          {
+            channel: "easel",
+            item: record.itemId,
+            device: record.device.id,
+            type: "scroll",
+            dx: wheelDelta(event, "deltaX"),
+            dy: wheelDelta(event, "deltaY"),
+          },
+          "*",
+        );
+      },
+      { passive: false },
     );
-    closeBuildPreview();
+    iframe.addEventListener("load", () => {
+      record.loaded = true;
+      iframe.style.height = screen.style.height || `${board.device.height}px`;
+    });
+    iframe.src = buildUrl(member.item.compareOf, member.item.build.hash, board.device.id);
+    compareFrames.set(board.key, frame);
+  }
+  frame.root.dataset.framed = String(framed);
+  Object.assign(frame.root.style, {
+    left: `${board.x}px`,
+    top: `${board.y}px`,
+    width: `${board.width}px`,
+    height: `${board.height}px`,
   });
-  actions.append(carry);
-  panel.append(head, frame, actions);
-  document.body.append(panel);
-  panel.addEventListener("click", (event) => {
-    if (event.target === panel) closeBuildPreview();
+  Object.assign(frame.screen.style, {
+    position: "absolute",
+    left: `${board.pad.side}px`,
+    top: `${board.pad.top}px`,
+    width: `${board.screenWidth}px`,
+    height: `${board.screenHeight}px`,
   });
+  frame.iframe.style.height = `${frame.loaded ? board.screenHeight : Math.min(board.screenHeight, board.device.height)}px`;
+  Object.assign(frame.label.style, {
+    left: `${board.x}px`,
+    top: `${board.y - layout.labelReserve}px`,
+    width: `${board.width}px`,
+    height: `${layout.labelReserve}px`,
+  });
+  frame.name.textContent = first ? member.label : "";
+  frame.actions.hidden = !first;
+  frame.width.textContent = framed && member.label ? "" : String(board.device.width);
+}
+
+/** A compared build sizes itself and asks for its stylesheets like a live frame. */
+window.addEventListener("message", (event) => {
+  const data = event.data;
+  if (!data || data.channel !== "easel") return;
+  const frame = [...compareFrames.values()].find((entry) => entry.iframe.contentWindow === event.source);
+  if (!frame) return;
+  if (data.type === "stylesheet") sendStylesheet(frame, frame.itemId, String(data.href || ""));
+  if (data.type !== "size") return;
+  const height = clamp(Math.round(Number(data.height) || 0), 0, 30000);
+  if (height > 0 && height !== state.heights.get(frame.key)) {
+    state.heights.set(frame.key, height);
+    if (!framedView()) scheduleLayout();
+  }
+});
+
+/** Hand the agent a saved build to carry on from, instead of growing a new object. */
+function continueFromBuild(item, build) {
+  if (!item || !build) return;
+  sendItemNote(
+    item,
+    [
+      `Continue ${item.label} (${item.file}) from the build saved at ${build.at || "an earlier round"}`,
+      build.label ? `(${build.label})` : "",
+      `— its snapshot is .easel-builds/${item.id}/${build.hash}.html in the board folder.`,
+      "Build the next version from that, not from a fresh page.",
+    ]
+      .filter(Boolean)
+      .join(" "),
+    "",
+    "build",
+  );
+  closeBuildPreview();
 }
 
 // The board keeps at most this many notes on an item.
@@ -1078,9 +1392,11 @@ function noticeFileChanges(initial) {
     if (stamp !== before) {
       reloadItem(item);
       setUpdated(item.id, true);
+      if ((item.builds || []).length > 1) requestThumbs(item.id, String(item.hash || ""));
     }
   }
   if (updatedItems.size !== marked && state.layout) render();
+  if (historyItem) renderHistory();
 }
 
 // An update counts as seen once one of its artboards has been on screen, at a size you
@@ -1119,19 +1435,28 @@ function focusItem(itemId) {
     setDeviceMode("all");
     return focusItem(itemId);
   }
+  focusBoards(boards);
+  return undefined;
+}
+
+/** Frame a set of artboards on screen, above the history strip when it is open. */
+function focusBoards(boards) {
+  if (boards.length === 0) return;
   userAdjustedCamera = true;
   const left = Math.min(...boards.map((board) => board.x));
-  const top = Math.min(...boards.map((board) => board.y));
+  // The label row above the frames carries the name and the compared build's buttons.
+  const top = Math.min(...boards.map((board) => board.y)) - (state.layout?.labelReserve || 0);
   const right = Math.max(...boards.map((board) => board.x + board.width));
   const bottom = Math.max(...boards.map((board) => board.y + board.height));
-  const area = availableArea();
+  const strip = document.getElementById("history")?.getBoundingClientRect().height || 0;
+  const area = { ...availableArea() };
+  area.height = Math.max(200, area.height - strip);
   const zoom = clamp(
     Math.min(1, (area.width - 96) / (right - left), (area.height - 96) / Math.min(bottom - top, area.height * 3)),
     MIN_ZOOM,
     1,
   );
   setCamera({ zoom, x: (area.width - (right - left) * zoom) / 2 - left * zoom, y: 48 - top * zoom }, true);
-  return undefined;
 }
 
 // A reply is linked to the versions whose files changed between the previous reply
@@ -4039,7 +4364,7 @@ function itemsSignature(items) {
   return items
     .map(
       (item) =>
-        `${item.id}|${item.file}|${item.tab}|${item.caption || ""}|${item.title || ""}|${item.changed || ""}|${item.parent || ""}|${item.status || ""}`,
+        `${item.id}|${item.file}|${item.tab}|${item.caption || ""}|${item.title || ""}|${item.changed || ""}|${item.parent || ""}|${item.status || ""}|${(item.builds || []).map((build) => build.hash).join(",")}`,
     )
     .join("\n");
 }

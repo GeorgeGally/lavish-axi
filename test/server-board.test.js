@@ -548,3 +548,88 @@ test("a changed item file leaves a build on its timeline", async (t) => {
   assert.equal(build.status, 200);
   assert.match(await build.text(), /Second round/);
 });
+
+test("a saved build lays out beside its item: sized by the SDK, reading the item's own files", async (t) => {
+  const { base, boardDirectory } = await setup(t);
+  const registered = await register(base, boardDirectory);
+  const first = (await fetch(`${base}/api/boards/${registered.key}`).then((response) => response.json())).items.find(
+    (entry) => entry.id === "v1",
+  ).builds[0];
+  await writeFile(path.join(boardDirectory, "v1.html"), ITEM_HTML.replace("The whole fleet", "Round two"));
+  await writeFile(path.join(boardDirectory, "item.css"), "h1 { color: blue; }");
+  const second = (await fetch(`${base}/api/boards/${registered.key}`).then((response) => response.json())).items.find(
+    (entry) => entry.id === "v1",
+  ).builds[1];
+
+  // Shown in a dialog, a build is the file as it was; laid out on the board at a device
+  // width it carries the item SDK, which sizes the frame like the live one.
+  const plain = await fetch(`${base}/board/${registered.key}/item/v1/build/${first.hash}`).then((r) => r.text());
+  assert.doesNotMatch(plain, /board-sdk\.js/);
+  const framed = await fetch(`${base}/board/${registered.key}/item/v1/build/${first.hash}/?device=phone`);
+  assert.equal(framed.status, 200);
+  assert.match(framed.headers.get("content-security-policy") || "", /sandbox/);
+  const html = await framed.text();
+  assert.match(html, /The whole fleet/);
+  assert.match(
+    html,
+    /board-sdk\.js\?key=[0-9a-f]+&amp;item=v1&amp;device=phone|board-sdk\.js\?key=[0-9a-f]+&item=v1&device=phone/,
+  );
+
+  // Its relative links resolve under the build's folder: a stylesheet to the copy kept
+  // with that build, so an old round still looks as it did.
+  const css = await fetch(`${base}/board/${registered.key}/item/v1/build/${first.hash}/item.css`);
+  assert.equal(css.status, 200);
+  assert.match(await css.text(), /color: red/);
+  const now = await fetch(`${base}/board/${registered.key}/item/v1/build/${second.hash}/item.css`).then((r) =>
+    r.text(),
+  );
+  assert.match(now, /color: blue/);
+  const live = await fetch(`${base}/board/${registered.key}/item/v1/item.css`).then((r) => r.text());
+  assert.match(live, /color: blue/);
+  const escape = await fetch(`${base}/board/${registered.key}/item/v1/build/${first.hash}/..%2F..%2Fsecret.txt`);
+  assert.notEqual(escape.status, 200);
+});
+
+test("a build's thumbnail is served once taken, and never without Chrome", async (t) => {
+  const { base, boardDirectory } = await setup(t, { env: { EASEL_CHROME: path.join(tmpdir(), "easel-no-chrome") } });
+  const registered = await register(base, boardDirectory);
+  const item = (await fetch(`${base}/api/boards/${registered.key}`).then((response) => response.json())).items.find(
+    (entry) => entry.id === "v1",
+  );
+  const hash = item.builds[0].hash;
+  const thumbUrl = `${base}/board/${registered.key}/item/v1/thumb/${hash}`;
+  assert.equal((await fetch(thumbUrl)).status, 404);
+
+  const asked = await fetch(`${base}/api/boards/${registered.key}/thumbs`, {
+    method: "POST",
+    headers: write(base),
+    body: JSON.stringify({ item: "v1" }),
+  });
+  assert.deepEqual(await asked.json(), { status: "unavailable", thumbs: [] });
+  const foreign = await fetch(`${base}/api/boards/${registered.key}/thumbs`, {
+    method: "POST",
+    headers: { "content-type": "application/json", origin: "http://evil.example" },
+    body: JSON.stringify({ item: "v1" }),
+  });
+  assert.equal(foreign.status, 403);
+
+  // A thumbnail on disk beside the build's snapshot is reported and served.
+  const png = Buffer.from("89504e470d0a1a0a0000000d49484452", "hex");
+  await writeFile(path.join(boardDirectory, ".easel-builds", "v1", `${hash}.png`), png);
+  const again = await fetch(`${base}/api/boards/${registered.key}/thumbs`, {
+    method: "POST",
+    headers: write(base),
+    body: JSON.stringify({ item: "v1" }),
+  }).then((response) => response.json());
+  assert.deepEqual(again.thumbs, [hash]);
+  const served = await fetch(thumbUrl);
+  assert.equal(served.status, 200);
+  assert.equal(served.headers.get("content-type"), "image/png");
+  assert.deepEqual(Buffer.from(await served.arrayBuffer()), png);
+  assert.equal((await fetch(`${base}/board/${registered.key}/item/v1/thumb/${"0".repeat(40)}`)).status, 404);
+
+  // The page Chrome would photograph frames that build, scaled to one desktop screen.
+  const frame = await fetch(`${base}/board/${registered.key}/thumb-frame?item=v1&hash=${hash}`).then((r) => r.text());
+  assert.match(frame, new RegExp(`/item/v1/build/${hash}/`));
+  assert.match(frame, /scale\(0\.25\)/);
+});

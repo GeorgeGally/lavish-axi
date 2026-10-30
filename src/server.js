@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import { EventEmitter } from "node:events";
 import { existsSync } from "node:fs";
-import { mkdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
 import { createServer, get as httpGet } from "node:http";
 import { isIP } from "node:net";
 import { homedir } from "node:os";
@@ -77,7 +77,7 @@ import {
 } from "./board.js";
 import { missingHistory, readBoardHistory, writeBoardHistory } from "./board-history.js";
 import { createBoardHtml } from "./board-page.js";
-import { captureCrop, cropBox, cropFrameHtml, findChrome } from "./board-crop.js";
+import { THUMB_SCALE, captureCrop, cropBox, cropFrameHtml, findChrome, thumbFrameHtml } from "./board-crop.js";
 import { newSubmissionId, runNotifyCommand } from "./board-notify.js";
 import {
   bindHost,
@@ -997,6 +997,7 @@ export async function serve({
       await writeFile(path.join(folder, `${hash}.html`), html, { flag: "wx" }).catch((error) => {
         if (error?.code !== "EEXIST") throw error;
       });
+      await snapshotStylesheets(file, html, path.join(folder, hash)).catch(() => {});
       item.builds.push({
         at: new Date().toISOString(),
         hash,
@@ -1008,6 +1009,30 @@ export async function serve({
       changed = true;
     }
     return changed ? writeBoard(dir, board) : board;
+  }
+
+  /**
+   * A build only looks as it did if its own stylesheets come with it: each local
+   * stylesheet the file links is copied under `<hash>/` beside the snapshot, and the
+   * build's asset route serves that copy before the item's live file.
+   * @param {string} file
+   * @param {string} html
+   * @param {string} target
+   */
+  async function snapshotStylesheets(file, html, target) {
+    for (const tag of (String(html).match(/<link\b[^>]*>/gi) || []).slice(0, 40)) {
+      if (!/\brel=["']?stylesheet/i.test(tag)) continue;
+      const href = /\bhref=(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i.exec(tag);
+      const value = String(href?.[1] ?? href?.[2] ?? href?.[3] ?? "").split(/[?#]/)[0];
+      if (!value || /^([a-z][a-z0-9+.-]*:|[/\\])/i.test(value)) continue;
+      const source = await resolveArtifactAsset(path.dirname(file), value);
+      const info = source ? await stat(source).catch(() => null) : null;
+      if (!source || !info?.isFile() || info.size > 2 * 1024 * 1024) continue;
+      const destination = await resolveArtifactAsset(target, value);
+      if (!destination) continue;
+      await mkdir(path.dirname(destination), { recursive: true });
+      await copyFile(source, destination);
+    }
   }
 
   async function boardTuneSpecs(dir, board) {
@@ -1320,10 +1345,42 @@ export async function serve({
         res.status(404).type("text").send("Build not found");
         return;
       }
-      // A saved build is the file as it was: no SDK, and sandboxed like any other page.
+      // A saved build is the file as it was, sandboxed like any other page. Shown on the
+      // board beside the current version (`?device=`), it carries the item SDK only so it
+      // sizes itself and pins its viewport units exactly like the live frame; the board
+      // never answers it, so it stays read-only.
+      const device = String(req.query.device || "");
+      const html = await readFile(file, "utf8");
       res.setHeader("content-security-policy", ARTIFACT_CONTENT_SECURITY_POLICY);
       res.setHeader("cache-control", "no-store");
-      res.type("html").send(await readFile(file, "utf8"));
+      if (!Object.hasOwn(BOARD_DEVICE_SIZES, device)) {
+        res.type("html").send(html);
+        return;
+      }
+      const src = `/board-sdk.js?key=${encodeURIComponent(resolved.session.key)}&item=${encodeURIComponent(item.id)}&device=${device}&v=${encodeURIComponent(version)}`;
+      res.type("html").send(injectBoardSdk(html, src));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // A version's thumbnail, once the board has asked for it to be taken.
+  app.get("/board/:key/item/:id/thumb/:hash", async (req, res, next) => {
+    try {
+      const hash = String(req.params.hash || "");
+      const resolved = /^[0-9a-f]{8,64}$/.test(hash) ? await boardForRequest(req.params.key) : null;
+      const item = resolved?.board.items.find((entry) => entry.id === String(req.params.id || ""));
+      if (!resolved || !item || !item.builds.some((build) => build.hash === hash)) {
+        res.status(404).type("text").send("Thumbnail not found");
+        return;
+      }
+      const file = path.join(resolved.dir, BOARD_BUILD_DIR, item.id, `${hash}.png`);
+      if (!(await stat(file).catch(() => null))?.isFile()) {
+        res.status(404).type("text").send("Thumbnail not found");
+        return;
+      }
+      res.setHeader("cache-control", "no-cache");
+      res.type("png").send(await readFile(file));
     } catch (error) {
       next(error);
     }
@@ -1338,7 +1395,22 @@ export async function serve({
         res.status(404).type("text").send("Item not found");
         return;
       }
-      const asset = await resolveArtifactAsset(path.dirname(file), req.params[2]);
+      // A saved build is served from under `build/<hash>/`: its own stylesheets come from
+      // the copies kept with it, and any other file it links from the item, as the live
+      // page's do.
+      const saved = /^build\/([0-9a-f]{8,64})\/(.+)$/.exec(req.params[2]);
+      if (saved) {
+        const copy = await resolveArtifactAsset(path.join(resolved.dir, BOARD_BUILD_DIR, item.id, saved[1]), saved[2]);
+        if (copy && (await stat(copy).catch(() => null))?.isFile()) {
+          res.setHeader("content-security-policy", ARTIFACT_CONTENT_SECURITY_POLICY);
+          res.sendFile(copy, { dotfiles: "allow" });
+          return;
+        }
+      }
+      const asset = await resolveArtifactAsset(
+        path.dirname(file),
+        req.params[2].replace(/^build\/[0-9a-f]{8,64}\//, ""),
+      );
       if (!asset) {
         res.status(403).send("Forbidden");
         return;
@@ -1526,6 +1598,86 @@ export async function serve({
         });
       });
       res.json({ status: "stored", attachment });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // The page Chrome photographs for a version's thumbnail: one desktop screen of the
+  // saved build, scaled down.
+  app.get("/board/:key/thumb-frame", async (req, res, next) => {
+    try {
+      const hash = String(req.query.hash || "");
+      const resolved = await boardForRequest(req.params.key);
+      const item = resolved?.board.items.find((entry) => entry.id === String(req.query.item || ""));
+      if (!resolved || !item || !item.builds.some((build) => build.hash === hash)) {
+        res.status(404).type("text").send("Build not found");
+        return;
+      }
+      const size = BOARD_DEVICE_SIZES.desktop;
+      const src = `/board/${encodeURIComponent(resolved.session.key)}/item/${encodeURIComponent(item.id)}/build/${hash}/`;
+      res.setHeader("cache-control", "no-store");
+      res.type("html").send(thumbFrameHtml({ src, deviceWidth: size.width, deviceHeight: size.height }));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // Thumbnails are taken when the board asks: when it sees a file change and when its
+  // history opens. Each one goes through the same one-at-a-time Chrome queue as a pin's
+  // picture, and a version Chrome could not photograph is not tried again this run.
+  /** @type {Set<string>} */
+  const thumbFailures = new Set();
+  app.post("/api/boards/:key/thumbs", async (req, res, next) => {
+    try {
+      if (!boardWriteGuard(req, res)) return;
+      const resolved = await boardForRequest(req.params.key);
+      const item = resolved?.board.items.find((entry) => entry.id === String(req.body?.item || ""));
+      if (!resolved || !item) {
+        res.status(404).json({ status: "error", error: "item not found" });
+        return;
+      }
+      const folder = path.join(resolved.dir, BOARD_BUILD_DIR, item.id);
+      const has = async (hash) => Boolean((await stat(path.join(folder, `${hash}.png`)).catch(() => null))?.isFile());
+      const chrome = findChrome(env);
+      /** @type {string[]} */
+      const thumbs = [];
+      const only = String(req.body?.hash || "");
+      for (const build of item.builds) {
+        if (only && build.hash !== only) continue;
+        if (await has(build.hash)) {
+          thumbs.push(build.hash);
+          continue;
+        }
+        const failure = `${resolved.dir}\u0000${item.id}\u0000${build.hash}`;
+        if (!chrome || thumbFailures.has(failure)) continue;
+        if (!(await stat(path.join(folder, `${build.hash}.html`)).catch(() => null))?.isFile()) continue;
+        const query = new URLSearchParams({ item: item.id, hash: build.hash });
+        const url = `http://127.0.0.1:${req.socket.localPort}/board/${encodeURIComponent(resolved.session.key)}/thumb-frame?${query}`;
+        const size = BOARD_DEVICE_SIZES.desktop;
+        const capture = cropQueue.then(() =>
+          captureCrop({
+            chrome,
+            url,
+            width: Math.round(size.width * THUMB_SCALE),
+            height: Math.round(size.height * THUMB_SCALE),
+          }),
+        );
+        cropQueue = capture.then(
+          () => {},
+          () => {},
+        );
+        const png = await capture.catch(() => null);
+        if (!png) {
+          thumbFailures.add(failure);
+          continue;
+        }
+        await writeFile(path.join(folder, `${build.hash}.png`), png, { flag: "wx" }).catch((error) => {
+          if (error?.code !== "EEXIST") throw error;
+        });
+        thumbs.push(build.hash);
+      }
+      res.json({ status: chrome ? "ok" : "unavailable", thumbs });
     } catch (error) {
       next(error);
     }
