@@ -37,6 +37,7 @@ const DEVICE_GAP = MEMBER_GAP.all;
 // An ultrawide artboard is as wide as the other three together, so the All view leaves
 // it out until it is switched on.
 const ultrawideStorageKey = `easel:ultrawide:${key}`;
+const annotateHintStorageKey = `easel:alt-hint:${key}`;
 
 const state = {
   tabs: Array.isArray(bootstrap.tabs) ? bootstrap.tabs : [],
@@ -1231,12 +1232,23 @@ function toggleActual(clientX, clientY) {
 
 let metaHeld = false;
 let spaceHeld = false;
+let altHeld = false;
 let lastHoverKey = "";
 let hoverFrame = 0;
 let panWheelAt = 0;
 
 function panModeActive() {
   return metaHeld || spaceHeld;
+}
+
+// Annotation is armed only while Alt is down, so a plain click belongs to the page.
+function annotateArmed() {
+  return altHeld;
+}
+
+function updateAnnotateMode() {
+  document.body.dataset.annotate = String(annotateArmed());
+  if (!annotateArmed()) clearHover();
 }
 
 function updatePanMode() {
@@ -1258,6 +1270,33 @@ function recordForShield(target) {
   if (!(target instanceof Element)) return null;
   const shield = target.closest(".shield");
   return shield ? state.artboards.get(shield.getAttribute("data-key") || "") || null : null;
+}
+
+/** The artboard a pointer target sits in, shield or the page itself, without arming. */
+function recordForTarget(target) {
+  if (!(target instanceof Element)) return null;
+  const root = target.closest(".artboard");
+  return root ? state.artboards.get(root.getAttribute("data-key") || "") || null : null;
+}
+
+/**
+ * The first cursor entry into any design teaches the Alt press, once per board: with
+ * annotation off the frames belong to their pages, so this is the only moment the board
+ * can say why a click no longer drops a note.
+ */
+function hintAnnotateOnce(target) {
+  if (readStorage(annotateHintStorageKey)) return;
+  if (!recordForTarget(target)) return;
+  writeStorage(annotateHintStorageKey, "seen");
+  const hint = element("div", { class: "annotate-hint", text: "Hold Alt and click to leave a note" });
+  document.body.append(hint);
+  window.requestAnimationFrame(() => {
+    hint.dataset.shown = "true";
+  });
+  window.setTimeout(() => {
+    delete hint.dataset.shown;
+    window.setTimeout(() => hint.remove(), 400);
+  }, 4200);
 }
 
 /** A screen point inside an artboard's own viewport: one division by the zoom. */
@@ -1350,7 +1389,7 @@ function bindNavigation() {
   let clickTimer;
   plane.addEventListener("click", (event) => {
     const record = recordForShield(event.target);
-    if (!record || suppressClick || panModeActive()) return;
+    if (!record || suppressClick || panModeActive() || !annotateArmed()) return;
     const point = pointInFrame(record, event.clientX, event.clientY);
     const at = { x: event.clientX, y: event.clientY };
     // A double-click means zoom, so the note waits out the double-click window.
@@ -1365,7 +1404,7 @@ function bindNavigation() {
     if (event.target instanceof Element && event.target.closest("button")) return;
     clearTimeout(clickTimer);
     event.preventDefault();
-    if (recordForShield(event.target)) toggleActual(event.clientX, event.clientY);
+    if (annotateArmed() && recordForShield(event.target)) toggleActual(event.clientX, event.clientY);
     else {
       userAdjustedCamera = true;
       fit();
@@ -2264,7 +2303,7 @@ function renderChatPanel() {
   const ordered = [...threads.values()].sort((left, right) => left.last.localeCompare(right.last));
   const rows = ordered.map((thread) => renderThread(thread, previousReply));
   if (rows.length === 0) {
-    rows.push(element("p", { class: "chat-empty", text: "Click anything on a design to leave a note." }));
+    rows.push(element("p", { class: "chat-empty", text: "Hold Alt and click a design to leave a note." }));
   }
   const focused = threadComposer && document.activeElement === threadComposer.field;
   const selection =
@@ -3318,6 +3357,13 @@ document.addEventListener("pointerdown", (event) => {
 window.addEventListener("message", onArtboardMessage);
 
 window.addEventListener("keydown", (event) => {
+  if (event.key === "Alt") {
+    if (!altHeld) {
+      altHeld = true;
+      updateAnnotateMode();
+    }
+    return;
+  }
   if (event.key === "Meta") {
     if (!metaHeld) {
       metaHeld = true;
@@ -3355,6 +3401,10 @@ window.addEventListener("keydown", (event) => {
 });
 
 window.addEventListener("keyup", (event) => {
+  if (event.key === "Alt" && altHeld) {
+    altHeld = false;
+    updateAnnotateMode();
+  }
   if (event.key === "Meta" && metaHeld) {
     metaHeld = false;
     updatePanMode();
@@ -3365,11 +3415,15 @@ window.addEventListener("keyup", (event) => {
   }
 });
 
+document.addEventListener("pointerover", (event) => hintAnnotateOnce(event.target), true);
+
 window.addEventListener("blur", () => {
-  if (!metaHeld && !spaceHeld) return;
+  if (!metaHeld && !spaceHeld && !altHeld) return;
   metaHeld = false;
   spaceHeld = false;
+  altHeld = false;
   updatePanMode();
+  updateAnnotateMode();
 });
 
 let resizeTimer = 0;
