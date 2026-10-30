@@ -912,6 +912,7 @@ export async function serve({
           changed: captions[item.id]?.changed || "",
           parent: captions[item.id]?.parent || "",
           mtime: captions[item.id]?.mtime || 0,
+          hash: captions[item.id]?.hash || "",
           created: captions[item.id]?.created || 0,
           pair: pairInfo(item.file),
         };
@@ -947,7 +948,7 @@ export async function serve({
   async function boardItemMeta(dir, board) {
     /** @type {Record<string, import("./board.js").TuneControl[]>} */
     const specs = {};
-    /** @type {Record<string, { title: string, explain: string, changed: string, parent: string, mtime: number, created: number }>} */
+    /** @type {Record<string, { title: string, explain: string, changed: string, parent: string, mtime: number, hash: string, created: number }>} */
     const captions = {};
     for (const item of board.items) {
       const file = await itemFileFor(dir, item).catch(() => null);
@@ -960,6 +961,7 @@ export async function serve({
       captions[item.id] = {
         ...explanationFromHtml(html),
         mtime: info ? Math.round(info.mtimeMs) : 0,
+        hash: crypto.createHash("sha1").update(html).digest("hex"),
         // When the file first appeared: a pending version's placeholder gives way to a
         // file created after the reply that announced it.
         created: info ? Math.round(info.birthtimeMs || info.ctimeMs) : 0,
