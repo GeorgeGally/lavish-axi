@@ -1233,6 +1233,7 @@ function toggleActual(clientX, clientY) {
 let metaHeld = false;
 let spaceHeld = false;
 let altHeld = false;
+let ctrlHeld = false;
 let lastHoverKey = "";
 let hoverFrame = 0;
 let panWheelAt = 0;
@@ -1286,6 +1287,8 @@ function recordForTarget(target) {
  */
 function hintAnnotateOnce(target) {
   if (readStorage(annotateHintStorageKey)) return;
+  // Alt-Ctrl tunes the element, so that gesture teaches itself and stays quiet.
+  if (ctrlHeld) return;
   if (!recordForTarget(target)) return;
   writeStorage(annotateHintStorageKey, "seen");
   const hint = element("div", { class: "annotate-hint", text: "Hold Alt and click to leave a note" });
@@ -1391,6 +1394,12 @@ function bindNavigation() {
     const record = recordForShield(event.target);
     if (!record || suppressClick || panModeActive() || !annotateArmed()) return;
     const point = pointInFrame(record, event.clientX, event.clientY);
+    // Alt-Ctrl tunes what was clicked; Alt alone leaves a note.
+    if (ctrlHeld || event.ctrlKey) {
+      clearTimeout(clickTimer);
+      openTargetTune(record, point);
+      return;
+    }
     const at = { x: event.clientX, y: event.clientY };
     // A double-click means zoom, so the note waits out the double-click window.
     clearTimeout(clickTimer);
@@ -1398,6 +1407,12 @@ function bindNavigation() {
       pendingClick = { key: record.id, ...at, time: Date.now() };
       postHit(record, point);
     }, 220);
+  });
+
+  // On a Mac a Ctrl click is a right click; while arming, that gesture is ours.
+  plane.addEventListener("contextmenu", (event) => {
+    if (!annotateArmed()) return;
+    event.preventDefault();
   });
 
   plane.addEventListener("dblclick", (event) => {
@@ -2766,6 +2781,11 @@ function setChatCollapsed(collapsed) {
 
 let tuneItemId = "";
 let tuneDeviceId = "";
+/**
+ * What Alt-Ctrl last clicked: its selectors, its own controls and their live values.
+ * @type {null | { itemId: string, deviceId: string, selector?: string, sectionSelector?: string, label?: string, sectionLabel?: string, controls?: any[], values?: Record<string, string>, pending?: boolean }}
+ */
+let tuneTarget = null;
 /** @type {ReturnType<typeof setTimeout> | undefined} */
 let tuneSaveTimer;
 let tuneCleanup = [];
@@ -2805,6 +2825,7 @@ function openTune(itemId, deviceId) {
   const item = itemById(itemId);
   if (!item) return;
   item.tune = item.tune || {};
+  tuneTarget = null;
   tuneItemId = itemId;
   tuneDeviceId = deviceId;
   for (const control of tuneSpecFor(itemId)) {
@@ -2823,6 +2844,110 @@ function closeTune() {
   const panel = document.getElementById("tune");
   if (panel) panel.hidden = true;
   tuneItemId = "";
+  tuneTarget = null;
+}
+
+/**
+ * Ask the clicked frame what sits under the point, then show only that element's
+ * properties. The panel reads back a moment later, in onArtboardMessage.
+ */
+function openTargetTune(record, point) {
+  tuneTarget = { itemId: record.itemId, deviceId: record.device.id, pending: true };
+  tuneItemId = record.itemId;
+  tuneDeviceId = record.device.id;
+  const panel = document.getElementById("tune");
+  if (panel) panel.hidden = false;
+  renderTune();
+  postToArtboard(record.itemId, record.device.id, {
+    type: "tune-target",
+    x: point.x,
+    y: point.y,
+  });
+}
+
+/** @param {"element" | "section"} [scope] */
+function targetSelector(scope) {
+  if (!tuneTarget) return "";
+  return scope === "section" ? tuneTarget.sectionSelector || "" : tuneTarget.selector || "";
+}
+
+function applyTargetValue(control, raw) {
+  if (!tuneTarget) return;
+  tuneTarget.values = tuneTarget.values || {};
+  tuneTarget.values[control.id] = String(raw);
+  postToArtboard(tuneTarget.itemId, tuneTarget.deviceId, {
+    type: "style",
+    selector: targetSelector(control.scope),
+    css: control.css,
+    value:
+      (control.type === "number" || control.type === "timeline") && control.unit
+        ? `${raw}${control.unit}`
+        : String(raw),
+  });
+}
+
+function resetTargetTune() {
+  if (!tuneTarget) return;
+  postToArtboard(tuneTarget.itemId, tuneTarget.deviceId, { type: "style-reset" });
+  for (const control of tuneTarget.controls || []) {
+    tuneTarget.values = tuneTarget.values || {};
+    tuneTarget.values[control.id] = String(control.value ?? "");
+  }
+  renderTune();
+}
+
+/** Only what the reviewer changed, as CSS an agent can bake straight into the page. */
+function copyTargetTune() {
+  if (!tuneTarget) return "";
+  const lines = (tuneTarget.controls || [])
+    .filter((control) => {
+      const value = (tuneTarget?.values || {})[control.id];
+      return value !== undefined && String(value) !== String(control.value ?? "");
+    })
+    .map((control) => {
+      const raw = (tuneTarget?.values || {})[control.id];
+      const value =
+        (control.type === "number" || control.type === "timeline") && control.unit
+          ? `${raw}${control.unit}`
+          : String(raw);
+      return `${targetSelector(control.scope)} { ${control.css}: ${value}; }`;
+    });
+  return lines.join("\n");
+}
+
+function renderTargetTune() {
+  const sub = document.getElementById("tuneSub");
+  const body = document.getElementById("tuneBody");
+  if (!body || !tuneTarget) return;
+  if (sub)
+    sub.textContent =
+      tuneTarget.sectionLabel && tuneTarget.sectionLabel !== tuneTarget.label ? tuneTarget.sectionLabel : "";
+  const title = document.getElementById("tuneTitle");
+  if (title) title.textContent = tuneTarget.label || "Tune";
+  if (tuneTarget.pending) {
+    body.replaceChildren(element("p", { class: "tune-empty", text: "Reading the element…" }));
+  } else {
+    const controls = tuneTarget.controls || [];
+    if (controls.length === 0) {
+      body.replaceChildren(element("p", { class: "tune-empty", text: "Nothing here to tune." }));
+    } else {
+      body.replaceChildren(
+        ...controls.map((control) =>
+          createTuneControl({ id: "target", tune: tuneTarget?.values || {} }, control, (raw) =>
+            applyTargetValue(control, raw),
+          ),
+        ),
+      );
+    }
+  }
+  const save = /** @type {any} */ (document.getElementById("tuneSave"));
+  if (save) save.hidden = true;
+  const versions = document.getElementById("tuneVersions");
+  if (versions) versions.replaceChildren();
+  for (const id of ["tuneSave", "tuneCopy", "tuneReset"]) {
+    const button = /** @type {any} */ (document.getElementById(id));
+    if (button) button.disabled = tuneTarget.pending || (tuneTarget.controls || []).length === 0;
+  }
 }
 
 function renderTune() {
@@ -2830,6 +2955,14 @@ function renderTune() {
   tuneCleanup = [];
   const item = itemById(tuneItemId);
   if (!item) return;
+  const save = /** @type {any} */ (document.getElementById("tuneSave"));
+  const title = document.getElementById("tuneTitle");
+  if (tuneTarget) {
+    renderTargetTune();
+    return;
+  }
+  if (save) save.hidden = false;
+  if (title) title.textContent = "Tune";
   const sub = document.getElementById("tuneSub");
   if (sub) sub.textContent = designName(item, tuneDeviceId);
   const body = document.getElementById("tuneBody");
@@ -2856,7 +2989,7 @@ function renderTune() {
   renderVersions(item, spec);
 }
 
-function createTuneControl(item, control) {
+function createTuneControl(item, control, onChange) {
   const wrapper = element("div", { class: "tune-control" });
   const valueLabel = element("span", { class: "tune-control-value", text: String(item.tune[control.id] ?? "") });
   const label = element("label", { class: "tune-control-label" });
@@ -2865,6 +2998,10 @@ function createTuneControl(item, control) {
   const apply = (raw) => {
     item.tune[control.id] = raw;
     valueLabel.textContent = String(raw);
+    if (onChange) {
+      onChange(raw);
+      return;
+    }
     postTuneAll(item.id);
     clearTimeout(tuneSaveTimer);
     tuneSaveTimer = setTimeout(() => flushTune(item), 350);
@@ -3127,6 +3264,10 @@ function saveTuneVersion() {
 }
 
 function resetTune() {
+  if (tuneTarget) {
+    resetTargetTune();
+    return;
+  }
   const item = itemById(tuneItemId);
   if (!item) return;
   for (const control of tuneSpecFor(item.id)) item.tune[control.id] = control.value ?? "";
@@ -3138,8 +3279,14 @@ function resetTune() {
 function copyTune() {
   const item = itemById(tuneItemId);
   if (!item) return;
+  // Only values the reviewer moved away from the page's own are worth handing back.
   const lines = tuneSpecFor(item.id)
-    .filter((control) => item.tune[control.id] !== undefined && item.tune[control.id] !== "")
+    .filter(
+      (control) =>
+        item.tune[control.id] !== undefined &&
+        item.tune[control.id] !== "" &&
+        String(item.tune[control.id]) !== String(control.value ?? ""),
+    )
     .map((control) => {
       const value =
         (control.type === "number" || control.type === "timeline") && control.unit
@@ -3147,15 +3294,18 @@ function copyTune() {
           : item.tune[control.id];
       return `- ${control.label}: ${value}  (${control.css})`;
     });
-  const text =
-    lines.length > 0
+  const target = tuneTarget ? copyTargetTune() : "";
+  const text = tuneTarget
+    ? target || `No changes to ${tuneTarget.label || "this element"}.`
+    : lines.length > 0
       ? `Bake these tune values into ${item.file} as CSS custom properties:\n${lines.join("\n")}`
       : `No tune values set for ${item.file}.`;
   const sub = document.getElementById("tuneSub");
   const done = () => {
     if (sub) sub.textContent = "Copied";
     setTimeout(() => {
-      if (sub && sub.textContent === "Copied") sub.textContent = designName(item, tuneDeviceId);
+      if (sub && sub.textContent === "Copied")
+        sub.textContent = tuneTarget ? tuneTarget.sectionLabel || "" : designName(item, tuneDeviceId);
     }, 1600);
   };
   if (navigator.clipboard?.writeText) navigator.clipboard.writeText(text).then(done, done);
@@ -3330,6 +3480,26 @@ function onArtboardMessage(event) {
     }
     return;
   }
+  if (data.type === "tune-target") {
+    if (tuneTarget && tuneTarget.pending) {
+      const controls = Array.isArray(data.controls) ? data.controls : [];
+      /** @type {Record<string, string>} */
+      const values = {};
+      for (const control of controls) values[control.id] = String(control.value ?? "");
+      tuneTarget = {
+        itemId,
+        deviceId,
+        selector: String(data.selector || ""),
+        sectionSelector: String(data.sectionSelector || ""),
+        label: String(data.label || ""),
+        sectionLabel: String(data.sectionLabel || ""),
+        controls,
+        values,
+      };
+      renderTune();
+    }
+    return;
+  }
   if (data.type === "tune-spec") {
     const controls = Array.isArray(data.controls) ? data.controls : [];
     if (controls.length === 0) return;
@@ -3362,6 +3532,10 @@ window.addEventListener("keydown", (event) => {
       altHeld = true;
       updateAnnotateMode();
     }
+    return;
+  }
+  if (event.key === "Control") {
+    ctrlHeld = true;
     return;
   }
   if (event.key === "Meta") {
@@ -3405,6 +3579,10 @@ window.addEventListener("keyup", (event) => {
     altHeld = false;
     updateAnnotateMode();
   }
+  if (event.key === "Control") {
+    ctrlHeld = false;
+    return;
+  }
   if (event.key === "Meta" && metaHeld) {
     metaHeld = false;
     updatePanMode();
@@ -3418,10 +3596,11 @@ window.addEventListener("keyup", (event) => {
 document.addEventListener("pointerover", (event) => hintAnnotateOnce(event.target), true);
 
 window.addEventListener("blur", () => {
-  if (!metaHeld && !spaceHeld && !altHeld) return;
+  if (!metaHeld && !spaceHeld && !altHeld && !ctrlHeld) return;
   metaHeld = false;
   spaceHeld = false;
   altHeld = false;
+  ctrlHeld = false;
   updatePanMode();
   updateAnnotateMode();
 });

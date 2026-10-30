@@ -79,6 +79,10 @@ textarea:focus-visible {
     transform 80ms ease;
 }
 
+.button[hidden] {
+  display: none;
+}
+
 .button:hover:not(:disabled) {
   border-color: var(--ink-4);
 }

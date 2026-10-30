@@ -89,7 +89,7 @@ export function createBoardHtml(
 </main>
 <aside class="tune" id="tune" hidden aria-label="Tune">
   <div class="tune-head">
-    <span class="tune-title">Tune</span>
+    <span class="tune-title" id="tuneTitle">Tune</span>
     <span class="tune-sub" id="tuneSub"></span>
     <button class="icon-button" id="tuneClose" type="button" aria-label="Close">&times;</button>
   </div>
