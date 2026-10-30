@@ -30,8 +30,10 @@ const FRAME = {
   // A phone page starts below the status bar, so the island sits in the bezel.
   phone: { top: 54, side: 14, bottom: 14, below: 0 },
 };
-const DEVICE_GAP = 56;
 const MEMBER_GAP = { all: 200, ultrawide: 200, desktop: 140, ipad: 100, phone: 72 };
+// Only the All view shows more than one device, so this gap sets the air between the
+// 1440, 834 and 390 screens there, at the same breathing room as the space between items.
+const DEVICE_GAP = MEMBER_GAP.all;
 // An ultrawide artboard is as wide as the other three together, so the All view leaves
 // it out until it is switched on.
 const ultrawideStorageKey = `easel:ultrawide:${key}`;
