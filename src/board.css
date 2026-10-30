@@ -721,13 +721,16 @@ body[data-dragging="true"] .shield {
   pointer-events: none;
 }
 
+/* Its size, gap and height are set from the zoom and the frame's report, so it always
+   sits wholly in the gutter left of the frame. */
 .gutter-pin {
   position: absolute;
-  left: -12px;
-  width: 24px;
+  left: -32px;
+  box-sizing: border-box;
+  min-width: 24px;
   height: 24px;
-  margin: -12px 0 0 -12px;
-  padding: 0;
+  margin: -12px 0 0;
+  padding: 0 0.25em;
   border: 2px solid #ffffff;
   border-radius: 999px;
   background: #bcc3cf;
@@ -755,7 +758,8 @@ body[data-dragging="true"] .shield {
   transform: scale(1.15);
 }
 
-/* One quiet line the first time a cursor reaches a design, teaching the Alt press. */
+/* One quiet line the first time a cursor reaches a design, teaching the gestures, and
+   the same line saying whether notes are on. */
 .annotate-hint {
   position: fixed;
   left: 50%;

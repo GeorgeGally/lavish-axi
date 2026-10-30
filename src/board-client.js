@@ -741,6 +741,7 @@ function render() {
         record.label.hidden = false;
         record.root.dataset.framed = String(framed);
         record.pad = board.pad;
+        record.screenHeight = board.screenHeight;
         renderGutterPins(record);
         record.root.style.left = `${board.x}px`;
         record.root.style.top = `${board.y}px`;
@@ -899,32 +900,66 @@ function previewBuild(item, build) {
   });
 }
 
+// The board keeps at most this many notes on an item.
+const MAX_PARKED_PINS = 300;
+
+/** A parked pin's side and its gap from the frame, in board units at the current zoom. */
+function parkedPinMetrics() {
+  // It keeps a pin's on-screen size until the zoom would push it past the gutter
+  // between frames, so it never reaches a neighbouring design.
+  const gutter = MEMBER_GAP[state.deviceMode] || MEMBER_GAP.all;
+  const zoom = state.camera.zoom || 1;
+  return {
+    size: Math.min(gutter * 0.5, Math.max(24, 24 / zoom)),
+    gap: Math.min(gutter * 0.12, Math.max(4, 8 / zoom)),
+  };
+}
+
 /**
- * An answered note leaves the artwork: its pin sits in the board gutter beside the
- * frame, still findable and still opening its thread, but never on the design.
+ * An answered note leaves the artwork: its pin sits in the board gutter just left of
+ * the frame, at the height its anchor has in the frame's window now, still findable
+ * and still opening its thread, but never on the design. The frame reports those
+ * heights; a framed device that has scrolled an anchor out of view parks nothing for
+ * it, and pins that would land on one another stack downward instead.
  */
 function renderGutterPins(record) {
   if (!record.gutter) return;
   const pad = record.pad || { side: 0, top: 0 };
+  const screenHeight = record.screenHeight || Infinity;
+  const { size, gap } = parkedPinMetrics();
+  const parked = (record.parked || [])
+    .map((pin) => ({ id: String(pin?.id || ""), number: pin?.number, y: Number(pin?.y) }))
+    .filter((pin) => pin.id && Number.isFinite(pin.y) && pin.y >= 0 && pin.y <= screenHeight)
+    .sort((a, b) => a.y - b.y);
   const seen = new Set();
-  for (const note of itemById(record.itemId)?.notes || []) {
-    if (noteDevice(note) !== record.device.id || !note.prompt_id || !answeredNote(note)) continue;
-    seen.add(note.id);
+  let nextFree = -Infinity;
+  for (const entry of parked) {
+    const live = liveNote(entry.id);
+    if (!live) continue;
+    seen.add(entry.id);
     /** @type {HTMLElement | null} */
-    let pin = record.gutter.querySelector(`[data-note="${CSS.escape(note.id)}"]`);
+    let pin = record.gutter.querySelector(`[data-note="${CSS.escape(entry.id)}"]`);
     if (!pin) {
       pin = element("button", { class: "gutter-pin", type: "button" });
-      pin.dataset.note = note.id;
+      pin.dataset.note = entry.id;
       pin.addEventListener("click", () => {
-        const live = liveNote(note.id);
-        if (live) showNoteWindow(live.item, live.note);
-        flashEntry(note.id);
+        const current = liveNote(entry.id);
+        if (current) showNoteWindow(current.item, current.note);
+        flashEntry(entry.id);
       });
       record.gutter.append(pin);
     }
-    pin.textContent = String(note.number);
-    pin.setAttribute("aria-label", `Note ${note.number}, answered`);
-    pin.style.top = `${Math.round(pad.top + (Number(note.y) || 0))}px`;
+    const center = Math.max(pad.top + entry.y, nextFree);
+    nextFree = center + size + gap / 2;
+    pin.textContent = String(entry.number ?? live.note.number);
+    pin.setAttribute("aria-label", `Note ${entry.number ?? live.note.number}, answered`);
+    pin.style.top = `${Math.round(center)}px`;
+    pin.style.left = `${-Math.round(size + gap)}px`;
+    pin.style.minWidth = `${size}px`;
+    pin.style.height = `${size}px`;
+    pin.style.marginTop = `${-size / 2}px`;
+    pin.style.fontSize = `${size / 2}px`;
+    pin.style.borderWidth = `${size / 12}px`;
   }
   for (const node of Array.from(record.gutter.children)) {
     if (!(node instanceof HTMLElement) || !seen.has(node.dataset.note || "")) node.remove();
@@ -1198,11 +1233,17 @@ let userAdjustedCamera = false;
 let movingTimer = 0;
 
 // Camera coordinates are relative to the plane, which starts under the bar.
+let parkedZoom = 0;
 function applyCamera() {
   const { x, y, zoom } = state.camera;
   canvas.style.transform = `translate(${x}px, ${y}px) scale(${zoom})`;
   canvas.style.setProperty("--zoom", String(zoom));
   zoomLabel.textContent = `${Math.round(zoom * 100)}%`;
+  // Parked pins are sized for the zoom, so a new zoom re-spaces them.
+  if (zoom !== parkedZoom) {
+    parkedZoom = zoom;
+    renderAllGutterPins();
+  }
 }
 
 let cameraFrame = 0;
@@ -1372,21 +1413,28 @@ function toggleActual(clientX, clientY) {
 
 /* ------------------------------------------------------------- navigation */
 
-let metaHeld = false;
 let spaceHeld = false;
 let altHeld = false;
+// Cmd toggles notes: a lone press and release turns them on, the next one off. Cmd
+// used in a shortcut (Cmd+C, Cmd+click, Cmd+scroll) is a chord and never flips it.
+let annotateOn = false;
+let metaDown = false;
+let metaChord = false;
 let lastHoverKey = "";
 let hoverFrame = 0;
 let panWheelAt = 0;
+/** Where the pointer last rested on screen, over the board or inside a design. */
+/** @type {null | { x: number, y: number }} */
+let lastPointer = null;
 
 // Four gestures own the pointer over a design, one at a time: Space pans, Option
-// tunes, Cmd annotates, and with none of them the click belongs to the page. The
-// shield is the only surface the board has over a frame, so every one of the three
-// armed gestures raises it, and none of them can leak into another.
+// tunes, notes (Cmd toggles them) annotate, and with none of them the click belongs to
+// the page. The shield is the only surface the board has over a frame, so every one of
+// the three armed gestures raises it, and none of them can leak into another.
 function gestureMode() {
   if (spaceHeld) return "hand";
   if (altHeld) return "tune";
-  if (metaHeld) return "annotate";
+  if (annotateOn) return "annotate";
   return "";
 }
 
@@ -1406,7 +1454,65 @@ function updateGestureMode() {
   const mode = gestureMode();
   document.body.dataset.gesture = mode;
   document.body.dataset.pan = String(mode === "hand");
-  if (mode !== "annotate") clearHover();
+  document.body.dataset.notes = String(annotateOn);
+  if (mode === "annotate") hoverUnderPointer();
+  else clearHover();
+}
+
+/** @type {HTMLElement | null} */
+let notesState = null;
+/** @type {number | undefined} */
+let notesStateTimer;
+
+/** Notes on or off, said once where the hint sits; while on, the line stays. */
+function setAnnotate(on) {
+  if (annotateOn === on) return;
+  annotateOn = on;
+  updateGestureMode();
+  document.querySelector(".annotate-hint:not(.notes-state)")?.remove();
+  if (!notesState) {
+    notesState = element("div", { class: "annotate-hint notes-state", role: "status" });
+    document.body.append(notesState);
+  }
+  notesState.textContent = on ? "Notes on · click to leave a note · ⌘ to turn off" : "Notes off";
+  window.requestAnimationFrame(() => {
+    if (notesState) notesState.dataset.shown = "true";
+  });
+  clearTimeout(notesStateTimer);
+  if (!on)
+    notesStateTimer = window.setTimeout(() => {
+      if (notesState) delete notesState.dataset.shown;
+    }, 1200);
+}
+
+/** Cmd held through a click, a scroll or another key was a shortcut, not the toggle. */
+function noteChord() {
+  if (metaDown) metaChord = true;
+}
+
+function metaPressed() {
+  if (metaDown) return;
+  metaDown = true;
+  metaChord = false;
+}
+
+/** @param {boolean} lost the release happened somewhere else, so it toggles nothing */
+function metaReleased(lost = false) {
+  const lone = metaDown && !metaChord && !lost;
+  metaDown = false;
+  metaChord = false;
+  if (lone) setAnnotate(!annotateOn);
+}
+
+/** Outline what sits under a resting pointer the moment notes turn on, with no move needed. */
+function hoverUnderPointer() {
+  if (!lastPointer) return;
+  const record = recordForShield(document.elementFromPoint(lastPointer.x, lastPointer.y));
+  if (!record) return;
+  if (lastHoverKey && lastHoverKey !== record.id) clearHover();
+  lastHoverKey = record.id;
+  record.root.dataset.hover = "true";
+  postHit(record, { ...pointInFrame(record, lastPointer.x, lastPointer.y), hover: true });
 }
 
 function isTextTarget(target) {
@@ -1433,15 +1539,18 @@ function recordForTarget(target) {
 }
 
 /**
- * The first cursor entry into any design teaches the Alt press, once per board: with
- * annotation off the frames belong to their pages, so this is the only moment the board
- * can say why a click no longer drops a note.
+ * The first cursor entry into any design teaches the gestures, once per board: with
+ * notes off the frames belong to their pages, so this is the only moment the board can
+ * say why a click no longer drops a note.
  */
 function hintAnnotateOnce(target) {
   if (readStorage(annotateHintStorageKey)) return;
-  if (!recordForTarget(target)) return;
+  if (annotateOn || !recordForTarget(target)) return;
   writeStorage(annotateHintStorageKey, "seen");
-  const hint = element("div", { class: "annotate-hint", text: "⌘ click to note · ⌥ click to tune" });
+  const hint = element("div", {
+    class: "annotate-hint",
+    text: "⌘ turns notes on and off · ⌥ click to tune · hold Space to pan",
+  });
   document.body.append(hint);
   window.requestAnimationFrame(() => {
     hint.dataset.shown = "true";
@@ -1478,6 +1587,7 @@ function bindNavigation() {
   let suppressClick = false;
 
   plane.addEventListener("pointerdown", (event) => {
+    if (event.metaKey) noteChord();
     if (event.target instanceof Element && event.target.closest("button")) return;
     const record = recordForShield(event.target);
     // Tune owns the press: the panel opens on the point under the pointer, and the
@@ -1617,6 +1727,7 @@ function bindNavigation() {
     "wheel",
     (event) => {
       if (!event.ctrlKey && !event.metaKey) return;
+      if (event.metaKey) noteChord();
       event.preventDefault();
       event.stopPropagation();
       zoomWithWheel(event.clientX, event.clientY, event);
@@ -1720,23 +1831,18 @@ function answeredNote(note) {
 }
 
 function pinsFor(item, deviceId) {
-  return (
-    (item.notes || [])
-      .filter((note) => noteDevice(note) === deviceId)
-      .map((note) => ({
-        id: note.id,
-        number: note.number,
-        selector: note.selector,
-        x: note.x,
-        y: note.y,
-        ox: note.ox,
-        oy: note.oy,
-        state: note.prompt_id ? (answeredNote(note) ? "done" : "sent") : "draft",
-      }))
-      // An answered pin leaves the design: it is drawn in the board gutter instead, so
-      // the frame never paints anything the design does not have.
-      .filter((pin) => pin.state !== "done")
-  );
+  return (item.notes || [])
+    .filter((note) => noteDevice(note) === deviceId)
+    .map((note) => ({
+      id: note.id,
+      number: note.number,
+      selector: note.selector,
+      x: note.x,
+      y: note.y,
+      ox: note.ox,
+      oy: note.oy,
+      state: note.prompt_id ? (answeredNote(note) ? "done" : "sent") : "draft",
+    }));
 }
 
 function postPins(itemId, deviceId) {
@@ -4042,12 +4148,41 @@ function onArtboardMessage(event) {
   // The frame owns key events while it has focus, so it reports what is held: the four
   // gestures must arm no matter which document the reviewer last touched.
   if (data.type === "held") {
-    const next = { space: Boolean(data.space), alt: Boolean(data.alt), meta: Boolean(data.meta) };
-    if (next.space === spaceHeld && next.alt === altHeld && next.meta === metaHeld) return;
+    if (data.blur === true) {
+      // Focus that moved on to the board or another design keeps what is held, and
+      // the keyup lands there; focus that left the window took the keys with it.
+      window.setTimeout(() => {
+        if (!document.hasFocus()) releaseHeldKeys();
+      }, 0);
+      return;
+    }
+    if (data.meta === true) metaPressed();
+    else if (metaDown) metaReleased();
+    const next = { space: Boolean(data.space), alt: Boolean(data.alt) };
+    if (next.space === spaceHeld && next.alt === altHeld) return;
     spaceHeld = next.space;
     altHeld = next.alt;
-    metaHeld = next.meta;
     updateGestureMode();
+    return;
+  }
+  if (data.type === "key") {
+    boardKey({ key: String(data.key || ""), metaKey: data.metaKey === true, ctrlKey: data.ctrlKey === true }, () => {});
+    return;
+  }
+  if (data.type === "chord") {
+    noteChord();
+    return;
+  }
+  if (data.type === "pointer") {
+    // Only the position: the board reads modifiers from the keys themselves.
+    const rect = record.iframe.getBoundingClientRect();
+    const scale = rect.width / record.device.width || 1;
+    lastPointer = { x: rect.left + (Number(data.x) || 0) * scale, y: rect.top + (Number(data.y) || 0) * scale };
+    return;
+  }
+  if (data.type === "parked") {
+    record.parked = Array.isArray(data.pins) ? data.pins.slice(0, MAX_PARKED_PINS) : [];
+    renderGutterPins(record);
     return;
   }
   if (data.type === "stylesheet") {
@@ -4130,17 +4265,54 @@ document.addEventListener("pointerdown", (event) => {
 
 window.addEventListener("message", onArtboardMessage);
 
+/**
+ * A camera or panel key, heard by the board itself or handed up by a focused design.
+ * @param {{ key: string, metaKey: boolean, ctrlKey: boolean }} event
+ * @param {() => void} preventDefault
+ */
+function boardKey(event, preventDefault) {
+  if ((event.metaKey || event.ctrlKey) && ["+", "=", "-", "0"].includes(event.key)) {
+    preventDefault();
+    if (event.key === "0") {
+      userAdjustedCamera = true;
+      fit();
+    } else zoomBy(event.key === "-" ? 1 / 1.25 : 1.25);
+    return;
+  }
+  if (event.metaKey || event.ctrlKey) return;
+  if (event.key === "0") {
+    userAdjustedCamera = true;
+    fit();
+  } else if (event.key === "1") actualSize();
+  else if (event.key === "+" || event.key === "=") zoomBy(1.25);
+  else if (event.key === "-") zoomBy(1 / 1.25);
+  else if (event.key === "Escape") {
+    // Escape closes what is open first; with nothing open it turns notes off.
+    if (!noteWindow && !tuneItemId && !document.getElementById("buildPreview")) setAnnotate(false);
+    closeNoteWindow();
+    closeBuildPreview();
+    closeTune();
+  }
+}
+
+/** Keys let go where the board could not hear them: another app took focus. */
+function releaseHeldKeys() {
+  metaReleased(true);
+  if (!spaceHeld && !altHeld) return;
+  spaceHeld = false;
+  altHeld = false;
+  updateGestureMode();
+}
+
 window.addEventListener("keydown", (event) => {
+  if (event.key === "Meta") {
+    metaPressed();
+    return;
+  }
+  noteChord();
   if (event.key === "Alt") {
     if (!altHeld) {
       altHeld = true;
-      updateGestureMode();
-    }
-    return;
-  }
-  if (event.key === "Meta") {
-    if (!metaHeld) {
-      metaHeld = true;
       updateGestureMode();
     }
     return;
@@ -4153,35 +4325,14 @@ window.addEventListener("keydown", (event) => {
     }
     return;
   }
-  if ((event.metaKey || event.ctrlKey) && ["+", "=", "-", "0"].includes(event.key)) {
-    event.preventDefault();
-    if (event.key === "0") {
-      userAdjustedCamera = true;
-      fit();
-    } else zoomBy(event.key === "-" ? 1 / 1.25 : 1.25);
-    return;
-  }
-  if (event.metaKey || event.ctrlKey || event.altKey || isTextTarget(event.target)) return;
-  if (event.key === "0") {
-    userAdjustedCamera = true;
-    fit();
-  } else if (event.key === "1") actualSize();
-  else if (event.key === "+" || event.key === "=") zoomBy(1.25);
-  else if (event.key === "-") zoomBy(1 / 1.25);
-  else if (event.key === "Escape") {
-    closeNoteWindow();
-    closeBuildPreview();
-    closeTune();
-  }
+  if (event.altKey || (isTextTarget(event.target) && !event.metaKey && !event.ctrlKey)) return;
+  boardKey(event, () => event.preventDefault());
 });
 
 window.addEventListener("keyup", (event) => {
+  if (event.key === "Meta") metaReleased();
   if (event.key === "Alt" && altHeld) {
     altHeld = false;
-    updateGestureMode();
-  }
-  if (event.key === "Meta" && metaHeld) {
-    metaHeld = false;
     updateGestureMode();
   }
   if (event.code === "Space" && spaceHeld) {
@@ -4190,15 +4341,15 @@ window.addEventListener("keyup", (event) => {
   }
 });
 
-document.addEventListener("pointerover", (event) => hintAnnotateOnce(event.target), true);
+window.addEventListener("blur", releaseHeldKeys);
 
-window.addEventListener("blur", () => {
-  if (!metaHeld && !spaceHeld && !altHeld) return;
-  metaHeld = false;
-  spaceHeld = false;
-  altHeld = false;
-  updateGestureMode();
-});
+document.addEventListener(
+  "pointermove",
+  (event) => {
+    lastPointer = { x: event.clientX, y: event.clientY };
+  },
+  { capture: true, passive: true },
+);
 
 document.addEventListener("pointerover", (event) => hintAnnotateOnce(event.target), true);
 

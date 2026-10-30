@@ -164,10 +164,18 @@
     return layer;
   }
 
+  let reportedParked = "";
   function renderPins() {
     const layer = pinLayer();
     const seen = new Set();
+    const parked = [];
     for (const pin of state.pins) {
+      // An answered pin is never drawn on the design: the board parks it in its gutter,
+      // so the frame only reports where its anchor sits in this window now.
+      if (pin.state === "done") {
+        parked.push({ id: pin.id, number: pin.number, y: Math.round(resolution(pin).y - window.scrollY) });
+        continue;
+      }
       seen.add(pin.id);
       /** @type {HTMLElement | null} */
       let element = layer.querySelector(`[data-pin="${CSS.escape(pin.id)}"]`);
@@ -219,6 +227,11 @@
     }
     for (const node of Array.from(layer.children)) {
       if (!(node instanceof HTMLElement) || !seen.has(node.dataset.pin)) node.remove();
+    }
+    const report = JSON.stringify(parked);
+    if (report !== reportedParked) {
+      reportedParked = report;
+      post({ type: "parked", pins: parked });
     }
   }
 
@@ -872,14 +885,17 @@
   // into this frame. So the board is told what is held here too: without that, Space,
   // Cmd and Option stop arming as soon as the reviewer touches the design itself.
   const held = { space: false, alt: false, meta: false };
-  function reportHeld() {
-    post({ type: "held", space: held.space, alt: held.alt, meta: held.meta });
+  /** @param {boolean} [blur] focus left the frame: what was held was let go somewhere else */
+  function reportHeld(blur = false) {
+    post({ type: "held", space: held.space, alt: held.alt, meta: held.meta, blur });
   }
   function readHeld(event, down) {
+    // A space typed into a field is a space, never the hand.
+    const space = event.code === "Space" && !editable(event.target);
     const next = {
       alt: Boolean(event.altKey),
       meta: Boolean(event.metaKey),
-      space: down ? event.code === "Space" : event.code === "Space" ? false : held.space,
+      space: space ? down : held.space,
     };
     if (next.alt === held.alt && next.meta === held.meta && next.space === held.space) return;
     Object.assign(held, next);
@@ -890,12 +906,29 @@
       target instanceof HTMLElement && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))
     );
   }
+  // The board's own keys - 0, 1, +, - and Escape, and Cmd +/-/0 - reach it from here
+  // too, so the camera answers whichever document has focus. Any other key pressed with
+  // Cmd held is a shortcut, which the board must hear so a lone Cmd stays a toggle.
+  const BOARD_KEYS = new Set(["0", "1", "+", "=", "-", "Escape"]);
+  const MODIFIER_KEYS = new Set(["Meta", "Alt", "Control", "Shift"]);
+  function forwardKey(event) {
+    if (MODIFIER_KEYS.has(event.key) || event.code === "Space") return;
+    const ours = BOARD_KEYS.has(event.key) && !event.altKey && !editable(event.target);
+    if (!ours) {
+      if (event.metaKey) post({ type: "chord" });
+      return;
+    }
+    // Cmd +/-/0 would zoom the browser window instead of the board.
+    if (event.metaKey || event.ctrlKey) event.preventDefault();
+    post({ type: "key", key: event.key, metaKey: event.metaKey, ctrlKey: event.ctrlKey });
+  }
   document.addEventListener(
     "keydown",
     (event) => {
-      // Space is the board's hand, so the page never scrolls under it.
+      // Space is the board's hand, so the page never scrolls or presses a button under it.
       if (event.code === "Space" && !editable(event.target)) event.preventDefault();
       readHeld(event, true);
+      forwardKey(event);
     },
     true,
   );
@@ -905,8 +938,35 @@
     held.space = false;
     held.alt = false;
     held.meta = false;
-    reportHeld();
+    reportHeld(true);
   });
+  // Cmd held through a click or a scroll was a shortcut, never the notes toggle.
+  for (const type of ["pointerdown", "wheel"])
+    window.addEventListener(
+      type,
+      (event) => {
+        if (/** @type {MouseEvent} */ (event).metaKey) post({ type: "chord" });
+      },
+      { capture: true, passive: true },
+    );
+
+  // Where the pointer rests, so a gesture armed by a key outlines its target at once
+  // instead of waiting for the next move. At most one report a frame.
+  let pointerFrame = 0;
+  /** @type {null | { x: number, y: number }} */
+  let pointerAt = null;
+  window.addEventListener(
+    "pointermove",
+    (event) => {
+      pointerAt = { x: event.clientX, y: event.clientY };
+      if (pointerFrame) return;
+      pointerFrame = window.requestAnimationFrame(() => {
+        pointerFrame = 0;
+        if (pointerAt) post({ type: "pointer", ...pointerAt });
+      });
+    },
+    { capture: true, passive: true },
+  );
 
   // Option is the tune gesture: inside a frame the browser would otherwise start a text
   // selection, follow a link clicked with Option, or download it. None of that belongs
