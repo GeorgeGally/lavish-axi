@@ -283,3 +283,42 @@ test("normalizeBoard keeps what a pin points at", () => {
   assert.equal("box" in bare, false);
   assert.equal("crop" in bare, false);
 });
+
+test("board keeps an image drop, an element tune and a line of builds", () => {
+  const file = `assets/drops/${"a".repeat(64)}.png`;
+  const board = normalizeBoard(
+    {
+      items: [
+        {
+          file: "hero.html",
+          imageDrops: [
+            { selector: "#hero", kind: "img", oldSource: "old.jpg", file },
+            { selector: "#hero", kind: "img", oldSource: "old.jpg", file: "../../etc/passwd" },
+            { selector: "#card", kind: "background", oldSource: "", file },
+          ],
+          elementTune: { "body > main > h1": { "font-size": "62px", "bad key": "1" } },
+          builds: [
+            { at: "2026-10-30T10:00:00.000Z", hash: "abcdef1234", label: "" },
+            { at: "2026-10-30T11:00:00.000Z", hash: "0123456789", label: "Round 2" },
+            { at: "2026-10-30T11:00:00.000Z", hash: "0123456789", label: "Round 2" },
+          ],
+        },
+      ],
+    },
+    "b",
+  );
+  const item = board.items[0];
+  // A file outside assets/drops never becomes a drop.
+  assert.deepEqual(
+    item.imageDrops.map((drop) => [drop.selector, drop.kind, drop.file]),
+    [
+      ["#hero", "img", file],
+      ["#card", "background", file],
+    ],
+  );
+  assert.deepEqual(item.elementTune, { "body > main > h1": { "font-size": "62px" } });
+  assert.deepEqual(
+    item.builds.map((build) => build.label),
+    ["", "Round 2"],
+  );
+});

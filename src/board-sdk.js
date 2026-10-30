@@ -1,4 +1,4 @@
-/* global CSS, Element, HTMLElement, SVGElement, ResizeObserver, document, getComputedStyle, parent, window */
+/* global CSS, Element, HTMLElement, HTMLImageElement, SVGElement, ResizeObserver, document, getComputedStyle, parent, window */
 // The board item SDK. It is deliberately small: the board owns the notes, the pins and
 // the composer, so an item only reports a clicked element, draws the pins it is told
 // about, and applies tune values as CSS custom properties.
@@ -202,11 +202,6 @@
         element.style.background = "#ffffff";
         element.style.color = "#16181d";
         element.style.border = "2px solid #16181d";
-      } else if (pin.state === "done") {
-        // Answered: struck back to a dull grey so the design reads as it is now.
-        element.style.background = "#bcc3cf";
-        element.style.color = "#333a45";
-        element.style.border = "2px solid #ffffff";
       } else {
         element.style.background = "#16181d";
         element.style.color = "#ffffff";
@@ -218,12 +213,9 @@
         continue;
       }
       element.style.display = "grid";
-      // An answered pin slides to the page's left edge and half out of it: it stays
-      // findable and it no longer sits on the design.
-      element.style.left = pin.state === "done" ? "0px" : `${anchor.x}px`;
+      element.style.left = `${anchor.x}px`;
       element.style.top = `${anchor.y}px`;
       element.style.transform = "translate(-50%,-50%)";
-      element.style.opacity = pin.state === "done" ? "0.6" : "1";
     }
     for (const node of Array.from(layer.children)) {
       if (!(node instanceof HTMLElement) || !seen.has(node.dataset.pin)) node.remove();
@@ -692,7 +684,7 @@
     elementStyles.clear();
   }
 
-  /** What the board tunes when Alt-Ctrl clicks a point in the page. */
+  /** What the board tunes when an Option click lands on a point in the page. */
   function reportTuneTarget(x, y) {
     const leaf = document.elementFromPoint(x, y);
     const element = leaf instanceof Element && !leaf.closest("[data-easel-ui]") ? leaf : document.body;
@@ -756,6 +748,10 @@
         schedulePins();
         return;
       }
+      if (data.type === "image-drops") {
+        applyImageDrops(data.drops);
+        return;
+      }
       if (data.type === "focus") {
         const pin = state.pins.find((entry) => entry.id === String(data.id || ""));
         if (pin && data.reveal) {
@@ -770,6 +766,18 @@
       }
       if (data.type === "tune") {
         applyTune(data.values);
+        return;
+      }
+      if (data.type === "element-tune") {
+        // What an Option click tuned and the board saved: applied again on every load,
+        // so the design reads the way the reviewer left it rather than as the file is.
+        const values = data.values && typeof data.values === "object" ? data.values : {};
+        for (const [selector, css] of Object.entries(values)) {
+          if (!css || typeof css !== "object") continue;
+          for (const [property, value] of Object.entries(css)) {
+            applyElementStyle(String(selector), String(property), String(value));
+          }
+        }
         return;
       }
       if (data.type === "scroll") {
@@ -860,8 +868,273 @@
     { capture: true, passive: false },
   );
 
+  // Keys go to whichever document holds focus, and one click into a page moves focus
+  // into this frame. So the board is told what is held here too: without that, Space,
+  // Cmd and Option stop arming as soon as the reviewer touches the design itself.
+  const held = { space: false, alt: false, meta: false };
+  function reportHeld() {
+    post({ type: "held", space: held.space, alt: held.alt, meta: held.meta });
+  }
+  function readHeld(event, down) {
+    const next = {
+      alt: Boolean(event.altKey),
+      meta: Boolean(event.metaKey),
+      space: down ? event.code === "Space" : event.code === "Space" ? false : held.space,
+    };
+    if (next.alt === held.alt && next.meta === held.meta && next.space === held.space) return;
+    Object.assign(held, next);
+    reportHeld();
+  }
+  function editable(target) {
+    return (
+      target instanceof HTMLElement && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))
+    );
+  }
+  document.addEventListener(
+    "keydown",
+    (event) => {
+      // Space is the board's hand, so the page never scrolls under it.
+      if (event.code === "Space" && !editable(event.target)) event.preventDefault();
+      readHeld(event, true);
+    },
+    true,
+  );
+  document.addEventListener("keyup", (event) => readHeld(event, false), true);
+  window.addEventListener("blur", () => {
+    if (!held.space && !held.alt && !held.meta) return;
+    held.space = false;
+    held.alt = false;
+    held.meta = false;
+    reportHeld();
+  });
+
+  // Option is the tune gesture: inside a frame the browser would otherwise start a text
+  // selection, follow a link clicked with Option, or download it. None of that belongs
+  // to the board, so an Option press never reaches the page's own defaults.
+  function swallowOption(event) {
+    if (!event.altKey && !held.alt) return;
+    event.preventDefault();
+    event.stopPropagation();
+  }
+  for (const type of ["pointerdown", "mousedown", "pointerup", "click", "auxclick", "dblclick"])
+    document.addEventListener(type, swallowOption, true);
+  for (const type of ["selectstart", "dragstart"])
+    document.addEventListener(
+      type,
+      (event) => {
+        if (/** @type {MouseEvent} */ (event).altKey || held.alt) event.preventDefault();
+      },
+      true,
+    );
+
   for (const type of ["scroll", "resize"])
     window.addEventListener(type, schedulePins, { capture: true, passive: true });
+
+  /* ----------------------------------------------------------- image drops */
+
+  // A file dragged off the desktop can replace the picture it lands on. The frame only
+  // finds the element and hands the file up; the board writes it into its own folder
+  // and tells every frame what to show, so the swap survives a reload.
+  const IMAGE_FILE = /^image\/(png|jpeg|webp)$/;
+  /** @type {Map<string, { kind: string, original: string }>} */
+  const imageDrops = new Map();
+
+  function imageFileOf(transfer) {
+    for (const entry of Array.from(transfer?.items || [])) {
+      if (entry.kind !== "file") continue;
+      const file = entry.getAsFile();
+      if (file && IMAGE_FILE.test(file.type)) return file;
+    }
+    for (const file of Array.from(transfer?.files || [])) if (IMAGE_FILE.test(file.type)) return file;
+    return null;
+  }
+
+  /** @param {Element} element */
+  function backgroundSource(element) {
+    const value = String(getComputedStyle(element).backgroundImage || "").trim();
+    if (!value || value === "none") return "";
+    const match = /^url\(["']?([^"')]+)["']?\)/.exec(value);
+    return match ? match[1] : "";
+  }
+
+  /** @param {Element} node */
+  function imageTargetAt(node) {
+    const inside = node.closest("img");
+    if (inside instanceof HTMLImageElement) {
+      return { element: inside, kind: "img", source: inside.getAttribute("src") || "" };
+    }
+    // A picture often sits under a link or a figure: the image is still the thing the
+    // pointer is on.
+    const wrapped = node.closest("a, picture, figure, button")?.querySelector("img");
+    if (wrapped instanceof HTMLImageElement) {
+      return { element: wrapped, kind: "img", source: wrapped.getAttribute("src") || "" };
+    }
+    for (let element = node; element && element !== document.documentElement; element = element.parentElement) {
+      const source = backgroundSource(element);
+      if (source) return { element, kind: "background", source };
+    }
+    return null;
+  }
+
+  function dropTargetAt(x, y) {
+    const node = document.elementFromPoint(x, y);
+    if (!(node instanceof Element) || node.closest("[data-easel-ui]") || node === document.documentElement) return null;
+    return imageTargetAt(node);
+  }
+
+  function dropBoxLayer() {
+    let layer = document.getElementById("easel-drop");
+    if (layer) return layer;
+    layer = document.createElement("div");
+    layer.id = "easel-drop";
+    layer.setAttribute("data-easel-ui", "drop");
+    layer.style.cssText = [
+      "position:fixed",
+      "display:none",
+      "pointer-events:none",
+      "z-index:2147483001",
+      "border:2px solid #2563eb",
+      "border-radius:4px",
+      "box-shadow:0 0 0 4px rgba(37,99,235,.16)",
+      "transition:opacity .12s ease",
+    ].join(";");
+    document.body.appendChild(layer);
+    return layer;
+  }
+
+  /** @param {Element | null} element */
+  function showDropBox(element) {
+    const layer = dropBoxLayer();
+    if (!element) {
+      layer.style.display = "none";
+      return;
+    }
+    const rect = element.getBoundingClientRect();
+    Object.assign(layer.style, {
+      display: "block",
+      left: `${Math.round(rect.left)}px`,
+      top: `${Math.round(rect.top)}px`,
+      width: `${Math.round(rect.width)}px`,
+      height: `${Math.round(rect.height)}px`,
+    });
+  }
+
+  /** @param {HTMLElement | SVGElement} element @param {string} src */
+  function swapImage(element, src) {
+    if (!(element instanceof HTMLImageElement)) {
+      element.setAttribute("src", src);
+      return;
+    }
+    // Keep the box the design gave the old picture: a square swap into a wide crop
+    // must not move the layout.
+    const before = element.getBoundingClientRect();
+    element.src = src;
+    element.addEventListener(
+      "load",
+      () => {
+        const after = element.getBoundingClientRect();
+        if (Math.abs(after.width - before.width) > 1 || Math.abs(after.height - before.height) > 1) {
+          element.style.width = `${before.width}px`;
+          element.style.height = `${before.height}px`;
+        }
+      },
+      { once: true },
+    );
+  }
+
+  /** @param {{ selector?: string, kind?: string, src?: string }} drop */
+  function applyImageDrop(drop) {
+    const selector = String(drop.selector || "");
+    if (!selector) return;
+    /** @type {Element | null} */
+    let element;
+    try {
+      element = document.querySelector(selector);
+    } catch {
+      element = null;
+    }
+    if (!(element instanceof HTMLElement || element instanceof SVGElement)) return;
+    const kind = drop.kind === "background" ? "background" : "img";
+    if (!imageDrops.has(selector)) {
+      imageDrops.set(selector, {
+        kind,
+        original: kind === "img" ? element.getAttribute("src") || "" : String(element.style.backgroundImage || ""),
+      });
+    }
+    const src = String(drop.src || "");
+    if (!src) return;
+    if (kind === "img") swapImage(element, src);
+    else element.style.backgroundImage = `url("${src}")`;
+  }
+
+  /** @param {Array<{ selector?: string, kind?: string, src?: string }>} drops */
+  function applyImageDrops(drops) {
+    const wanted = new Set();
+    for (const drop of Array.isArray(drops) ? drops : []) {
+      if (!drop || !drop.selector) continue;
+      wanted.add(String(drop.selector));
+      applyImageDrop(drop);
+    }
+    // Undo is the absence of a drop: put back what the file itself had.
+    for (const [selector, held] of imageDrops) {
+      if (wanted.has(selector)) continue;
+      /** @type {Element | null} */
+      let element;
+      try {
+        element = document.querySelector(selector);
+      } catch {
+        element = null;
+      }
+      if (element) {
+        if (held.kind === "img") element.setAttribute("src", held.original);
+        else /** @type {HTMLElement} */ (element).style.backgroundImage = held.original;
+      }
+      imageDrops.delete(selector);
+    }
+  }
+
+  document.addEventListener(
+    "dragover",
+    (event) => {
+      if (!event.dataTransfer || !Array.from(event.dataTransfer.types).includes("Files")) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const target = dropTargetAt(event.clientX, event.clientY);
+      event.dataTransfer.dropEffect = target ? "copy" : "none";
+      showDropBox(target ? target.element : null);
+    },
+    true,
+  );
+
+  document.addEventListener(
+    "drop",
+    (event) => {
+      if (!event.dataTransfer || !Array.from(event.dataTransfer.types).includes("Files")) return;
+      // A file that misses an image changes nothing, and never navigates the frame.
+      event.preventDefault();
+      event.stopPropagation();
+      showDropBox(null);
+      const target = dropTargetAt(event.clientX, event.clientY);
+      const file = imageFileOf(event.dataTransfer);
+      if (!target || !file) return;
+      post({
+        type: "image-drop",
+        selector: selectorFor(target.element),
+        kind: target.kind,
+        oldSource: target.source || "",
+        file,
+      });
+    },
+    true,
+  );
+
+  document.addEventListener(
+    "dragleave",
+    (event) => {
+      if (event.target === document.documentElement) showDropBox(null);
+    },
+    true,
+  );
 
   // The board sizes each artboard to its content, so the height reported here must
   // be the content's own, never the frame's: scrollHeight can only grow with the

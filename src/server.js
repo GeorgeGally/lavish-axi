@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import { EventEmitter } from "node:events";
 import { existsSync } from "node:fs";
-import { readFile, realpath, stat } from "node:fs/promises";
+import { mkdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
 import { createServer, get as httpGet } from "node:http";
 import { isIP } from "node:net";
 import { homedir } from "node:os";
@@ -75,6 +75,7 @@ import {
   tuneInstruction,
   writeBoard,
 } from "./board.js";
+import { missingHistory, readBoardHistory, writeBoardHistory } from "./board-history.js";
 import { createBoardHtml } from "./board-page.js";
 import { captureCrop, cropBox, cropFrameHtml, findChrome } from "./board-crop.js";
 import { newSubmissionId, runNotifyCommand } from "./board-notify.js";
@@ -890,6 +891,29 @@ export async function serve({
   // A board is a directory of HTML files with positions. It registers as a session
   // under its own board.json, so polling, receipts, presence and the agent reply all
   // work on a board without a second copy of any of that machinery.
+  /**
+   * A board's transcript lives in its own folder as well as in the session store: a
+   * restart, a wiped state directory or another machine must still show what was
+   * asked and what was answered.
+   */
+  async function boardChat(dir, session) {
+    const stored = await readBoardHistory(dir).catch(() => []);
+    const live = Array.isArray(session.chat) ? session.chat : [];
+    const missing = missingHistory(stored, live);
+    let chat = live;
+    if (missing.length > 0) {
+      const adopted = await store.adoptChatHistory(session.key, missing).catch(() => null);
+      chat = adopted?.chat || [...live, ...missing];
+    }
+    await writeBoardHistory(dir, chat).catch(() => {});
+    return chat;
+  }
+
+  async function mirrorBoardChat(session) {
+    if (!session || path.basename(String(session.file || "")) !== BOARD_FILE_NAME) return;
+    await writeBoardHistory(path.dirname(session.file), session.chat || []).catch(() => {});
+  }
+
   async function boardForRequest(requestKey) {
     const session = await store.findByKey(String(requestKey || ""));
     if (!session || path.basename(session.file) !== BOARD_FILE_NAME) return null;
@@ -938,6 +962,40 @@ export async function serve({
     if (!file) return null;
     const info = await stat(file).catch(() => null);
     return info?.isFile() ? file : null;
+  }
+
+  /**
+   * Every build of an item's file leaves a snapshot behind, so the board can show one
+   * item as a timeline: a dot per change, a labelled tick when the build names itself
+   * with `<meta name="easel-build">`.
+   */
+  const BOARD_BUILD_DIR = ".easel-builds";
+
+  async function recordBuilds(dir, board) {
+    let changed = false;
+    for (const item of board.items) {
+      const file = await itemFileFor(dir, item).catch(() => null);
+      if (!file) continue;
+      const html = await readFile(file, "utf8").catch(() => "");
+      const hash = crypto.createHash("sha1").update(html).digest("hex");
+      if (item.builds.some((build) => build.hash === hash)) continue;
+      const label = /<meta[^>]+name=["']easel-build["'][^>]*content=(?:"([^"]*)"|'([^']*)')/i.exec(html);
+      const folder = path.join(dir, BOARD_BUILD_DIR, item.id);
+      await mkdir(folder, { recursive: true });
+      await writeFile(path.join(folder, `${hash}.html`), html, { flag: "wx" }).catch((error) => {
+        if (error?.code !== "EEXIST") throw error;
+      });
+      item.builds.push({
+        at: new Date().toISOString(),
+        hash,
+        label: String(label?.[1] || label?.[2] || "")
+          .trim()
+          .slice(0, 40),
+      });
+      if (item.builds.length > 60) item.builds = item.builds.slice(-60);
+      changed = true;
+    }
+    return changed ? writeBoard(dir, board) : board;
   }
 
   async function boardTuneSpecs(dir, board) {
@@ -1029,8 +1087,11 @@ export async function serve({
       }
       const name = String(req.body?.name || "").trim();
       const opened = await readOrCreateBoard(dirInput, { name });
-      const board = await scanBoardFiles(dirInput, opened);
       const dir = await realpath(boardDirPath(dirInput)).catch(() => boardDirPath(dirInput));
+      const scanned = await scanBoardFiles(dir, opened);
+      // The first build of every item is the start of its timeline, before anyone
+      // even looks at the board.
+      const board = await recordBuilds(dir, scanned);
       const file = await canonicalFile(boardFilePath(dir));
       const boardKey = sessionKey(file);
       const existing = await store.findByKey(boardKey);
@@ -1057,11 +1118,12 @@ export async function serve({
         res.status(404).json({ status: "error", error: "board not found" });
         return;
       }
-      const board = await scanBoardFiles(resolved.dir, resolved.board);
+      const scanned = await scanBoardFiles(resolved.dir, resolved.board);
+      const board = await recordBuilds(resolved.dir, scanned);
       const { specs, captions } = await boardItemMeta(resolved.dir, board);
       res.json({
         ...publicBoard(board, specs, captions),
-        chat: serializeChat(resolved.session.chat || []),
+        chat: serializeChat(await boardChat(resolved.dir, resolved.session)),
         ended: resolved.session.status === "ended",
         endedBy: resolved.session.ended_by || null,
         pending_prompts: resolved.session.pending_prompts || 0,
@@ -1115,14 +1177,30 @@ export async function serve({
       if (!boardWriteGuard(req, res)) return;
       const itemId = String(req.body?.item || "");
       const values = req.body?.values && typeof req.body.values === "object" ? req.body.values : {};
+      // A tuned element keeps what it was given: the selector and only the properties
+      // that changed, so closing the panel and coming back shows the tuned design.
+      const selector = String(req.body?.selector || "").slice(0, 500);
+      const element = req.body?.element && typeof req.body.element === "object" ? req.body.element : {};
       await withBoardWrite(req.params.key, res, async (resolved) => {
         const specs = await boardTuneSpecs(resolved.dir, resolved.board);
         const item = await savedBoardItem(resolved.dir, resolved.board, itemId, (entry) => {
-          entry.tune = values;
+          if (selector && req.body?.reset) {
+            const rest = { ...entry.elementTune };
+            delete rest[selector];
+            entry.elementTune = rest;
+          } else if (selector) {
+            entry.elementTune = {
+              ...entry.elementTune,
+              [selector]: { ...(entry.elementTune?.[selector] || {}), ...element },
+            };
+          } else {
+            entry.tune = values;
+          }
         });
         res.json({
           status: "ok",
           tune: item.tune,
+          elementTune: item.elementTune,
           css: tuneCssValues(resolved.board, itemId, specs[itemId] || [], item.tune),
         });
       });
@@ -1160,7 +1238,8 @@ export async function serve({
         res.status(404).type("text").send("Board not found");
         return;
       }
-      const board = await scanBoardFiles(resolved.dir, resolved.board);
+      const scanned = await scanBoardFiles(resolved.dir, resolved.board);
+      const board = await recordBuilds(resolved.dir, scanned);
       const { specs, captions } = await boardItemMeta(resolved.dir, board);
       // Nothing frames the board itself: it is a top-level page, and framing it would
       // hand an attacker a clickjacking surface over the composer.
@@ -1170,11 +1249,12 @@ export async function serve({
       // copy must never survive a server update: that is exactly how an old client
       // can sit behind a fresh page and make the buttons look dead.
       res.setHeader("cache-control", "no-store");
+      const chat = await boardChat(resolved.dir, resolved.session);
       res.type("html").send(
         createBoardHtml(resolved.session, board, {
           tuneSpecs: specs,
           captions,
-          chat: serializeChat(resolved.session.chat || []),
+          chat: serializeChat(chat),
           ended: resolved.session.status === "ended",
           endedBy: resolved.session.ended_by || null,
           assetVersion: version,
@@ -1204,6 +1284,34 @@ export async function serve({
       res.setHeader("content-security-policy", ARTIFACT_CONTENT_SECURITY_POLICY);
       res.setHeader("cache-control", "no-store");
       res.type("html").send(injectBoardSdk(await readFile(file, "utf8"), src));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/board/:key/item/:id/build/:hash", async (req, res, next) => {
+    try {
+      const hash = String(req.params.hash || "");
+      if (!/^[0-9a-f]{8,64}$/.test(hash)) {
+        res.status(404).type("text").send("Build not found");
+        return;
+      }
+      const resolved = await boardForRequest(req.params.key);
+      const item = resolved?.board.items.find((entry) => entry.id === String(req.params.id || ""));
+      if (!resolved || !item || !item.builds.some((build) => build.hash === hash)) {
+        res.status(404).type("text").send("Build not found");
+        return;
+      }
+      const file = path.join(resolved.dir, BOARD_BUILD_DIR, item.id, `${hash}.html`);
+      const info = await stat(file).catch(() => null);
+      if (!info?.isFile()) {
+        res.status(404).type("text").send("Build not found");
+        return;
+      }
+      // A saved build is the file as it was: no SDK, and sandboxed like any other page.
+      res.setHeader("content-security-policy", ARTIFACT_CONTENT_SECURITY_POLICY);
+      res.setHeader("cache-control", "no-store");
+      res.type("html").send(await readFile(file, "utf8"));
     } catch (error) {
       next(error);
     }
@@ -1241,6 +1349,93 @@ export async function serve({
 
   // The page headless Chrome photographs for a pin's picture: the item, shifted so the
   // pinned spot fills the window. It frames only an item of this board, sandboxed.
+  // An image dropped from the desktop replaces the one under the pointer: the bytes
+  // are copied into the board folder so the swap survives a reload, and the item
+  // records which selector now points at which file.
+  app.post("/api/boards/:key/image-drop", async (req, res, next) => {
+    try {
+      if (!boardWriteGuard(req, res)) return;
+      const itemId = String(req.body?.item || "");
+      const selector = String(req.body?.selector || "").slice(0, 1000);
+      if (!selector) throw new BoardError("An image drop needs a selector");
+      const undo = Boolean(req.body?.undo);
+      await withBoardWrite(req.params.key, res, async ({ dir, board }) => {
+        const known = board.items.find((entry) => entry.id === itemId);
+        if (!known) throw new BoardError(`Unknown board item: ${itemId}`);
+        let drop = null;
+        if (!undo) {
+          const kind = req.body?.kind === "background" ? "background" : req.body?.kind === "img" ? "img" : "";
+          if (!kind) throw new BoardError("An image drop needs an image");
+          const attachment = await resolveAttachment(
+            attachmentStateRoot,
+            req.params.key,
+            String(req.body?.attachment || ""),
+          );
+          if (!attachment) throw new BoardError("That image is no longer available");
+          const extension = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp" }[attachment.mime];
+          if (!extension) throw new BoardError("Only PNG, JPEG and WebP images can replace one");
+          const bytes = await readFile(attachment.path);
+          const directory = path.join(await realpath(dir), "assets", "drops");
+          await mkdir(directory, { recursive: true });
+          const canonical = await realpath(directory);
+          if (!canonical.startsWith(`${await realpath(dir)}${path.sep}`)) {
+            throw new BoardError("The board's image folder is outside it");
+          }
+          const name = `${crypto.createHash("sha256").update(bytes).digest("hex")}.${extension}`;
+          await writeFile(path.join(canonical, name), bytes, { flag: "wx" }).catch((error) => {
+            if (error?.code !== "EEXIST") throw error;
+          });
+          drop = {
+            selector,
+            kind,
+            oldSource: String(req.body?.oldSource || "").slice(0, 2000),
+            file: `assets/drops/${name}`,
+          };
+        }
+        const item = await savedBoardItem(dir, board, itemId, (entry) => {
+          entry.imageDrops = (entry.imageDrops || []).filter((entry) => entry.selector !== selector);
+          if (drop) entry.imageDrops.push(drop);
+        });
+        res.json({ status: "ok", drop, imageDrops: item.imageDrops });
+      });
+    } catch (error) {
+      if (boardErrorResponse(error, res)) return;
+      next(error);
+    }
+  });
+
+  // The frame loads a dropped image by the board's own key, not by a path: the file
+  // lives in the board folder and nothing outside it can be named.
+  app.get("/board/:key/drop/:file", async (req, res, next) => {
+    try {
+      const file = String(req.params.file || "");
+      if (!/^[a-f0-9]{64}\.(png|jpg|webp)$/.test(file)) {
+        res.status(404).type("text").send("Image not found");
+        return;
+      }
+      const resolved = await boardForRequest(req.params.key);
+      if (!resolved) {
+        res.status(404).type("text").send("Board not found");
+        return;
+      }
+      const directory = await realpath(path.join(resolved.dir, "assets", "drops")).catch(() => null);
+      const target = directory ? await realpath(path.join(directory, file)).catch(() => null) : null;
+      if (!directory || !target || !target.startsWith(`${directory}${path.sep}`)) {
+        res.status(404).type("text").send("Image not found");
+        return;
+      }
+      const info = await stat(target).catch(() => null);
+      if (!info?.isFile()) {
+        res.status(404).type("text").send("Image not found");
+        return;
+      }
+      res.setHeader("cache-control", "private, max-age=300");
+      res.sendFile(target);
+    } catch (error) {
+      next(error);
+    }
+  });
+
   app.get("/board/:key/crop-frame", async (req, res, next) => {
     try {
       const resolved = await boardForRequest(req.params.key);
@@ -1331,6 +1526,7 @@ export async function serve({
     const entry = serializeChat([
       lastEntry?.role === "agent" ? lastEntry : { role: "agent", text, at: session.updated_at },
     ])[0];
+    mirrorBoardChat(session);
     events.emit("agent-reply", key, entry);
     events.emit("chat-sync", key, session);
     // The reply concludes the delivered-feedback "working" state. Human sends remain available
@@ -1683,6 +1879,7 @@ export async function serve({
       // The accepted batch is part of the conversation now: answer with the transcript so the
       // sending chrome can settle its queued bubbles in place, and sync every other tab of this
       // session at send time rather than when a poll happens to take the batch.
+      await mirrorBoardChat(publishedSession);
       events.emit("chat-sync", req.params.key, publishedSession);
       res.json({
         status: "queued",

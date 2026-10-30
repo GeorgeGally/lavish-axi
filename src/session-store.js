@@ -733,6 +733,34 @@ export class SessionStore {
   // Working (docs/delivery-acks.md): the artifact changed after a delivery, so the agent is acting on
   // what it was handed. Returns the session when a stamp landed and null when there was nothing to
   // stamp, in which case state.json is not rewritten - the watcher fires on every save.
+  /**
+   * A board keeps its own transcript beside board.json, so a session that lost its chat
+   * (a restart, a wiped state directory) takes the stored entries back.
+   * @param {string} key
+   * @param {any[]} entries
+   */
+  async adoptChatHistory(key, entries) {
+    if (!Array.isArray(entries) || entries.length === 0) return null;
+    return this.runExclusive(async () => {
+      const state = await this.readState();
+      const session = state.sessions[key];
+      if (!session) return null;
+      const name = (entry) =>
+        `${entry.role}\u0000${entry.at || ""}\u0000${entry.prompt_id || ""}\u0000${entry.text || ""}`;
+      const known = new Set((session.chat || []).map(name));
+      const added = entries.filter((entry) => entry && !known.has(name(entry)));
+      if (added.length === 0) return session;
+      session.chat = [...(session.chat || []), ...added].sort((left, right) =>
+        String(left.at || "").localeCompare(String(right.at || "")),
+      );
+      applyTranscriptBound(session);
+      session.chat_revision = normalizeRevision(session.chat_revision) + 1;
+      session.updated_at = new Date().toISOString();
+      await this.writeState(state);
+      return session;
+    });
+  }
+
   async markWorking(key) {
     return this.runExclusive(async () => {
       const state = await this.readState();

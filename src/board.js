@@ -11,6 +11,9 @@ const MAX_ITEMS = 400;
 const MAX_NOTES_PER_ITEM = 300;
 const MAX_VERSIONS_PER_ITEM = 30;
 const MAX_TUNE_CONTROLS = 24;
+const MAX_ELEMENT_TUNES = 60;
+const MAX_IMAGE_DROPS = 120;
+const MAX_BUILDS = 60;
 const MAX_NOTE_IMAGES = 8;
 
 /**
@@ -26,7 +29,10 @@ const MAX_NOTE_IMAGES = 8;
  * @typedef {{
  *   id: string, label: string, file: string, tab: string, x: number, y: number,
  *   w: number, h: number, status: string, notes: BoardNote[],
- *   tune: Record<string, string>, versions: TuneVersion[], tuneSpec?: TuneControl[],
+ *   tune: Record<string, string>, elementTune: Record<string, Record<string, string>>,
+ *   imageDrops: Array<{ selector: string, kind: "img" | "background", oldSource: string, file: string }>,
+ *   builds: Array<{ at: string, hash: string, label: string }>,
+ *   versions: TuneVersion[], tuneSpec?: TuneControl[],
  * }} BoardItem
  */
 /** @typedef {{ format: number, name: string, tabs: BoardTab[], items: BoardItem[], pairs: Array<{ a: string, b: string, locked: boolean }> }} Board */
@@ -189,6 +195,15 @@ function normalizeItems(value, tabIds, fallbackTab) {
       status: text(entry.status, 40) || "open",
       notes: normalizeNotes(entry.notes),
       tune: normalizeTuneValues(entry.tune),
+      // What an Option click tuned on one element: kept per selector so a reload shows
+      // the design the reviewer tuned, not the one the file still holds.
+      elementTune: normalizeElementTune(entry.elementTune),
+      // An image dropped onto the design: which selector, what it replaced, and the
+      // file in the board folder that holds the new bytes.
+      imageDrops: normalizeImageDrops(entry.imageDrops),
+      // One snapshot per build of the file: a dot for a change, a labelled tick when
+      // the build names itself, so a round is a point on a line, not a new object.
+      builds: normalizeBuilds(entry.builds),
       versions: normalizeVersions(entry.versions),
     });
   }
@@ -270,6 +285,57 @@ function normalizeTuneValues(value) {
 }
 
 /** @param {unknown} value */
+function normalizeBuilds(value) {
+  /** @type {Array<{ at: string, hash: string, label: string }>} */
+  const builds = [];
+  const seen = new Set();
+  for (const entry of Array.isArray(value) ? value.slice(-MAX_BUILDS) : []) {
+    if (!entry || typeof entry !== "object") continue;
+    const hash = text(entry.hash, 64);
+    if (!/^[0-9a-f]{8,64}$/.test(hash) || seen.has(hash)) continue;
+    seen.add(hash);
+    builds.push({ at: text(entry.at, 40), hash, label: text(entry.label, 40) });
+  }
+  return builds;
+}
+
+/** @param {unknown} value */
+function normalizeImageDrops(value) {
+  /** @type {Array<{ selector: string, kind: "img" | "background", oldSource: string, file: string }>} */
+  const drops = [];
+  for (const entry of Array.isArray(value) ? value.slice(0, MAX_IMAGE_DROPS) : []) {
+    if (!entry || typeof entry !== "object") continue;
+    const selector = text(entry.selector, 500);
+    const kind = entry.kind === "img" || entry.kind === "background" ? entry.kind : "";
+    const file = text(entry.file, 200);
+    if (!selector || !kind) continue;
+    if (!/^assets\/drops\/[a-f0-9]{64}\.(png|jpg|webp)$/.test(file)) continue;
+    drops.push({ selector, kind, oldSource: text(entry.oldSource, 2000), file });
+  }
+  return drops;
+}
+
+/** @param {unknown} value */
+function normalizeElementTune(value) {
+  /** @type {Record<string, Record<string, string>>} */
+  const tunes = {};
+  if (!value || typeof value !== "object" || Array.isArray(value)) return tunes;
+  for (const [selector, raw] of Object.entries(value).slice(0, MAX_ELEMENT_TUNES)) {
+    const name = text(selector, 500);
+    if (!name || !raw || typeof raw !== "object" || Array.isArray(raw)) continue;
+    /** @type {Record<string, string>} */
+    const css = {};
+    for (const [property, value] of Object.entries(raw).slice(0, 40)) {
+      if (!/^[a-z][a-z-]{0,40}$/.test(String(property))) continue;
+      const resolved = text(value, 120);
+      if (resolved) css[String(property)] = resolved;
+    }
+    if (Object.keys(css).length > 0) tunes[name] = css;
+  }
+  return tunes;
+}
+
+/** @param {unknown} value */
 function normalizeVersions(value) {
   /** @type {TuneVersion[]} */
   const versions = [];
@@ -330,6 +396,9 @@ export function addItem(board, { file, label, tab, w, h }) {
     status: "open",
     notes: [],
     tune: {},
+    elementTune: {},
+    imageDrops: [],
+    builds: [],
     versions: [],
   };
   board.items.push(item);

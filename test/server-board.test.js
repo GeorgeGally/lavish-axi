@@ -430,3 +430,107 @@ test("a board submission runs EASEL_NOTIFY_CMD once and leaves the feedback for 
   assert.equal(polled.status, "feedback");
   assert.equal(polled.prompts.length, 2);
 });
+
+const DROP_PNG = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAIAAAABCAYAAAD0In+KAAAAEUlEQVR42mP8z8BQz0BkYGAAADAAA/8W1p0AAAAASUVORK5CYII=",
+  "base64",
+);
+
+test("a dropped image is written into the board folder, recorded, served and undone", async (t) => {
+  const { base, boardDirectory } = await setup(t);
+  const registered = await register(base, boardDirectory);
+  const upload = await fetch(`${base}/api/${registered.key}/attachments`, {
+    method: "POST",
+    headers: { origin: base, "content-type": "application/octet-stream" },
+    body: DROP_PNG,
+  }).then((response) => response.json());
+
+  const dropped = await fetch(`${base}/api/boards/${registered.key}/image-drop`, {
+    method: "POST",
+    headers: write(base),
+    body: JSON.stringify({
+      item: "v1",
+      selector: "#hero",
+      kind: "img",
+      oldSource: "original.jpg",
+      attachment: upload.attachment.id,
+    }),
+  });
+  assert.equal(dropped.status, 200);
+  const result = await dropped.json();
+  assert.match(result.drop.file, /^assets\/drops\/[0-9a-f]{64}\.png$/);
+  assert.deepEqual(await readFile(path.join(boardDirectory, result.drop.file)), DROP_PNG);
+
+  const saved = await readBoard(boardDirectory);
+  assert.deepEqual(saved.items.find((item) => item.id === "v1").imageDrops, [
+    { selector: "#hero", kind: "img", oldSource: "original.jpg", file: result.drop.file },
+  ]);
+
+  const served = await fetch(`${base}/board/${registered.key}/drop/${path.basename(result.drop.file)}`);
+  assert.equal(served.status, 200);
+  assert.deepEqual(Buffer.from(await served.arrayBuffer()), DROP_PNG);
+  assert.equal((await fetch(`${base}/board/${registered.key}/drop/..%2Fstate.json`)).status, 404);
+  assert.equal((await fetch(`${base}/board/${registered.key}/drop/nope.png`)).status, 404);
+
+  // Another origin may not swap an image on this board.
+  const foreign = await fetch(`${base}/api/boards/${registered.key}/image-drop`, {
+    method: "POST",
+    headers: { "content-type": "application/json", origin: "http://evil.example" },
+    body: JSON.stringify({ item: "v1", selector: "#hero", kind: "img", attachment: upload.attachment.id }),
+  });
+  assert.equal(foreign.status, 403);
+
+  const undone = await fetch(`${base}/api/boards/${registered.key}/image-drop`, {
+    method: "POST",
+    headers: write(base),
+    body: JSON.stringify({ item: "v1", selector: "#hero", undo: true }),
+  });
+  assert.equal(undone.status, 200);
+  assert.deepEqual((await readBoard(boardDirectory)).items.find((item) => item.id === "v1").imageDrops, []);
+});
+
+test("a board's conversation survives losing the session transcript", async (t) => {
+  const { base, boardDirectory, dir } = await setup(t);
+  const registered = await register(base, boardDirectory);
+  const queued = await fetch(`${base}/api/${registered.key}/prompts`, {
+    method: "POST",
+    headers: write(base),
+    body: JSON.stringify({
+      prompts: [{ uid: "1", prompt_id: "p-1", prompt: "Tighten the headline", tag: "message", thread: "item:v1" }],
+      domSnapshot: "",
+    }),
+  });
+  assert.equal(queued.status, 200);
+
+  const history = JSON.parse(await readFile(path.join(boardDirectory, ".easel-history.json"), "utf8"));
+  assert.equal(history.chat.length, 1);
+  assert.equal(history.chat[0].text, "Tighten the headline");
+
+  // A restart that lost the session's chat still shows the thread.
+  const stateFile = path.join(dir, "state.json");
+  const state = JSON.parse(await readFile(stateFile, "utf8"));
+  state.sessions[registered.key].chat = [];
+  await writeFile(stateFile, JSON.stringify(state));
+
+  const page = await fetch(`${base}/api/boards/${registered.key}`).then((response) => response.json());
+  assert.deepEqual(
+    page.chat.map((entry) => entry.text),
+    ["Tighten the headline"],
+  );
+});
+
+test("a changed item file leaves a build on its timeline", async (t) => {
+  const { base, boardDirectory } = await setup(t);
+  const registered = await register(base, boardDirectory);
+  await writeFile(
+    path.join(boardDirectory, "v1.html"),
+    ITEM_HTML.replace("<h1>The whole fleet</h1>", '<meta name="easel-build" content="Round 2"><h1>Second round</h1>'),
+  );
+  const page = await fetch(`${base}/api/boards/${registered.key}`).then((response) => response.json());
+  const item = page.items.find((entry) => entry.id === "v1");
+  assert.equal(item.builds.length, 2);
+  assert.equal(item.builds.at(-1).label, "Round 2");
+  const build = await fetch(`${base}/board/${registered.key}/item/v1/build/${item.builds.at(-1).hash}`);
+  assert.equal(build.status, 200);
+  assert.match(await build.text(), /Second round/);
+});

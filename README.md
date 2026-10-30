@@ -145,17 +145,21 @@ A new version grown from an existing one sits in a row directly under it: name i
 `<meta name="easel-changed" content="...">` adds a **What changed** line under the explanation.
 
 The board follows the folder while you look at it: when a file changes, only that design's frames reload, the camera stays put, and the design is marked **Updated just now** until it has been on screen for a moment. The file's own bytes decide that, so a rewrite that puts the old modification time back still reloads. An agent reply links to the designs that changed since the previous reply, and clicking a link frames that design.
+Each item carries a line of builds under its name: one dot per change to its file, and a labelled tick when the file declares `<meta name="easel-build" content="Round 2">`. Clicking one shows that build as it was saved; **Continue from here** hands the agent the snapshot to build on, so a round is a point on one item's line rather than another object on the board. Snapshots live in `.easel-builds/` inside the board folder.
+
+The board's conversation is part of the folder too: every note and every agent reply is mirrored into `.easel-history.json` beside `board.json`, so reopening a board days later still shows the full thread and the answered state that retires its pins, even after a restart.
+
 An agent that is about to make a new version can say so with `easel reply <board> --agent-reply "On it." --pending <item-id>` (or a `[[pending: <item-id>]]` line in the reply, which never shows): a holder with a loader and your note appears under that item until a file with that parent appears, and `[[pending-cancel: <item-id>]]` removes it.
 
 A pin note tells the agent what it points at: the element's visible text, the heading of its section, and a picture of that spot (the element plus a 40px margin, at the device's width) delivered as an image attachment path. The picture needs a local Chrome (found in the usual places, or set `EASEL_CHROME`); without one, notes go out without it.
 
 The notes panel is a conversation. Each note is a thread headed by its pin number, design and a small picture of the spot; the agent's answers sit under the note they answer, a "replying" line shows until one arrives, and replies appear without a reload (with a count on **Notes** while the panel is closed). A note's stage reads **Sent**, **Received**, **Applied** in that order, and **Applied** only once the item's file has changed since the agent read it - a reply alone is an answer, not a fix. In a thread, **Reply** adds to the note, **Edit note** corrects it and **Delete note** withdraws it after one confirmation; deleting removes the instruction from the board and never reverts the change it asked for, which the confirmation says. Each reaches the agent as a prompt carrying the thread id and `followup: reply | edit | deleted`, and the same actions open from a sent note's pin. Accept and Keep today form a thread per design. An agent reply joins the threads of the notes it settles; to answer one thread, `easel reply <board> --agent-reply "..." --thread <thread>` (also on `poll`). Set `EASEL_AGENT_NAME` to name the agent in the panel.
 
-A note the agent has answered leaves the design: its pin slides to the page's left edge, half of it still visible, and dulls to a grey that no longer sits on the work or takes clicks. It stays in the thread list, so what was answered and where is still findable.
+A note the agent has answered leaves the design entirely: its pin moves out of the artwork into the board gutter beside the frame, dimmed to a grey that no longer covers the work. It stays in the thread list and still opens its thread from the gutter, so what was answered and where is still findable.
 
 To hear about board feedback without keeping a poll open, start the server with `EASEL_NOTIFY_CMD` set to a command. Each submission on a board (a note sent, the queue sent, Accept or Keep today) runs it once, after the feedback is queued, with the board name, the `board.json` path and a submission id as its three arguments and as `EASEL_BOARD`, `EASEL_BOARD_JSON` and `EASEL_SUBMISSION_ID`. The board never waits for it, a failure only reaches `server.log`, and `easel poll` still collects the feedback.
 
-Moving around: two-finger scroll pans, pinch or Cmd+scroll zooms around the pointer, holding Space or Cmd turns the pointer into a hand that drags the board from anywhere, and double-clicking a design zooms to 100% there (again to fit). **Fit** (`0`) and **100%** (`1`) sit in the top bar.
+Four gestures own the pointer over a design, and only one at a time: hold **Space** for the hand and drag the board, hold **Option** and click to tune the element under the pointer, hold **Cmd** and click to leave a note, and with nothing held the click belongs to the page itself. Two-finger scroll pans, pinch or Cmd+scroll zooms around the pointer, and double-clicking a design zooms to 100% there (again to fit). **Fit** (`0`) and **100%** (`1`) sit in the top bar.
 
 ```sh
 easel board open hero-directions --name "Hero directions"
@@ -165,7 +169,7 @@ easel board pair hero-directions v1 v3     # locked: they move together
 easel poll hero-directions                 # the agent waits here
 ```
 
-`board.json` carries only where an item sits, which tab it is on, what you said about it, and its tune values - never markup or a copy of an item's file:
+`board.json` carries only where an item sits, which tab it is on, what you said about it, its tune values, the images dropped onto it, and the line of builds of its file - never markup or a copy of an item's file:
 
 ```json
 {
@@ -185,6 +189,9 @@ easel poll hero-directions                 # the agent waits here
       "status": "open",
       "notes": [],
       "tune": { "radius": "12" },
+      "elementTune": {},
+      "imageDrops": [],
+      "builds": [{ "at": "2026-10-31T09:12:00.000Z", "hash": "41bfbf6b2c61", "label": "" }],
       "versions": []
     }
   ],
@@ -192,7 +199,9 @@ easel poll hero-directions                 # the agent waits here
 }
 ```
 
-Annotation is always on: hovering a design outlines the element under the pointer, and clicking drops a numbered pin there with a note card. **Send now** (Enter) sends that note at once, **Queue** keeps it as a draft in the notes panel to send later with **Send**, and clicking away keeps a written note as a draft and discards an empty one. **Remove** appears only on a note that was already saved. Paste (Cmd+V) or drop PNG, JPEG or WebP images into a note or the message box; they show as thumbnails and reach the agent as local file paths with the note.
+Hold **Cmd** to annotate: hovering a design outlines the element under the pointer, and a click drops a numbered pin there with a note card. **Send now** (Enter) sends that note at once, **Queue** keeps it as a draft in the notes panel to send later with **Send**, and clicking away keeps a written note as a draft and discards an empty one. **Remove** appears only on a note that was already saved. Paste (Cmd+V) or drop PNG, JPEG or WebP images into a note or the message box; they show as thumbnails and reach the agent as local file paths with the note.
+Drag an image file from Finder straight onto a picture in a design and it replaces that picture: an `<img>`, an `<img>` inside a card, carousel or link, or an element painting a CSS background. The element keeps its size, crop and object-position, so nothing on the design moves. The file is copied into the board folder under `assets/drops/` and recorded on the item in `board.json`, so the swap survives a reload; **Undo** in the line that appears puts the original source back in one click, and the agent gets a note naming the item, the selector, the old source and the new file so it can carry the change into the real build. A file dropped where there is no image changes nothing.
+
 The notes panel down the right lists what you sent, grouped under the design it is about, with the agent's replies in between. A note reads **Not read yet** until the agent's poll has taken it, then nothing. Each note reaches the agent with the item, the pin number, and the viewport width it was made at; a sent pin is filled, a draft pin is an outline.
 
 ### Tuning
@@ -213,13 +222,13 @@ An item declares its own controls in a `application/easel-tune` JSON array, bind
 </script>
 ```
 
-The tune panel writes those properties live, saves named versions with thumbnails, and **Copy for agent** produces the values plus the instruction that bakes them into the item's file.
+The tune panel writes those properties live, saves named versions with thumbnails, and **Send** hands the agent only the properties you changed, as a note on that design - the same channel annotations use. **Copy** still produces the CSS itself. The panel is a near-black card that names the element in small caps, with hairline sliders, right-aligned tabular values, and a colour swatch that opens the picker.
 The spring and XY pad write JSON objects to their custom properties; page scripts can parse them from `getComputedStyle(document.documentElement).getPropertyValue(...)`. The board dispatches an `easel:tune` event on the item window after applying values, so scripts can respond live; its `detail` maps CSS property names to values. The easing editor writes a CSS `cubic-bezier(...)` value. The timeline plays or scrubs a linear value from `min` to `max` over `duration` seconds and writes the current value, with an optional `unit`. These controls use DialKit's vanilla editors and timeline engine locally.
 Every item has a tune button. When it declares no controls, the panel is built from the page's own CSS custom properties: colours become swatches and pickers, lengths, radii, spacing and font sizes become sliders, grouped and labelled from the property names.
 
-Hold Alt and Ctrl, then click any element in a design, to tune that element itself: colour, background, type size, weight, tracking, line height, padding, margin, width, height, radius, border and shadow, read from the page and written back as inline style. Only properties that can show on that element are offered, one click steps up to the element it sits in, and **Copy** returns only the values that differ from the page's own. Closing the panel puts the design back as the file has it.
+Hold **Option** and click any element in a design to tune that element itself: colour, background, type size, weight, tracking, line height, padding, margin, width, height, radius, border and shadow, read from the page and written back as inline style. Only properties that can show on that element are offered, one click steps up to the element it sits in, and **Copy** returns only the values that differ from the page's own. What you tune is saved on the item per selector, so closing the panel or reloading the board keeps the design as you left it; **Reset** puts the element back to the file's own values, and **Send** notes the agent with only the properties that changed.
 
-Alt-Ctrl is read from the press itself, not from a click: on macOS a Ctrl-click opens a context menu and never sends a click, so the gesture works the same on every platform.
+The gesture is read from the press itself, and the frame swallows an Option press outright: a link is never followed, downloaded or selected instead of tuned.
 
 ## How It Works
 

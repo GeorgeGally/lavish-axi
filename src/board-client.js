@@ -37,7 +37,7 @@ const DEVICE_GAP = MEMBER_GAP.all;
 // An ultrawide artboard is as wide as the other three together, so the All view leaves
 // it out until it is switched on.
 const ultrawideStorageKey = `easel:ultrawide:${key}`;
-const annotateHintStorageKey = `easel:alt-hint:${key}`;
+const annotateHintStorageKey = `easel:gesture-hint:${key}`;
 
 const state = {
   tabs: Array.isArray(bootstrap.tabs) ? bootstrap.tabs : [],
@@ -665,10 +665,13 @@ function createArtboard(item, device) {
     }
     postPins(item.id, device.id);
     postTune(item.id, device.id);
+    postElementTune(item.id, device.id);
+    postImageDrops(item.id, device.id);
   });
   const shield = element("div", { class: "shield", "data-key": id });
   screen.append(iframe, shield);
-  root.append(screen);
+  const gutter = element("div", { class: "pin-gutter" });
+  root.append(screen, gutter);
   const label = element("div", { class: "artboard-label" });
   const name = element("span", { class: "name" });
   const width = element("span", { class: "width" });
@@ -691,6 +694,7 @@ function createArtboard(item, device) {
     screen,
     iframe,
     shield,
+    gutter,
     label,
     name,
     width,
@@ -736,6 +740,8 @@ function render() {
         record.root.hidden = false;
         record.label.hidden = false;
         record.root.dataset.framed = String(framed);
+        record.pad = board.pad;
+        renderGutterPins(record);
         record.root.style.left = `${board.x}px`;
         record.root.style.top = `${board.y}px`;
         record.root.style.width = `${board.width}px`;
@@ -751,6 +757,8 @@ function render() {
         record.label.style.width = `${board.width}px`;
         record.label.style.height = `${layout.labelReserve}px`;
         record.name.textContent = index === 0 ? member.label : "";
+        if (index === 0) renderBuilds(record, member.item);
+        else record.buildsEl?.remove();
         record.updated.hidden = !(index === 0 && updatedItems.has(member.item.id));
         if (updatedItems.has(member.item.id)) record.root.dataset.updated = "true";
         else delete record.root.dataset.updated;
@@ -803,6 +811,128 @@ function render() {
     state.explains.delete(id);
   }
   emptyElement.hidden = layout.groups.length > 0;
+}
+
+/**
+ * One item, one line: a dot per build of its file and a labelled tick when the build
+ * named itself. Clicking one shows that build as it was, and offers to carry on from it
+ * rather than growing a new object every round.
+ */
+function renderBuilds(record, item) {
+  const builds = item.builds || [];
+  if (!record.buildsEl) {
+    record.buildsEl = element("div", { class: "builds" });
+    record.label.append(record.buildsEl);
+  }
+  if (builds.length === 0) {
+    record.buildsEl.replaceChildren();
+    return;
+  }
+  record.buildsEl.replaceChildren(
+    ...builds.map((build, index) => {
+      const node = element("button", {
+        class: "build",
+        type: "button",
+        title: build.label || build.at || "",
+        "aria-label": build.label || `Build ${index + 1}`,
+      });
+      node.dataset.major = String(Boolean(build.label));
+      if (index === builds.length - 1) node.dataset.current = "true";
+      if (build.label) node.append(element("span", { class: "build-name", text: build.label }));
+      node.addEventListener("click", (event) => {
+        event.stopPropagation();
+        previewBuild(item, build);
+      });
+      return node;
+    }),
+  );
+}
+
+function closeBuildPreview() {
+  document.getElementById("buildPreview")?.remove();
+}
+
+/** The build as it was, and the one action that continues from it. */
+function previewBuild(item, build) {
+  closeBuildPreview();
+  const panel = element("div", { class: "build-preview", id: "buildPreview", role: "dialog" });
+  const head = element("div", { class: "build-preview-head" });
+  const stamp = build.at ? new Date(build.at) : null;
+  head.append(
+    element("span", {
+      class: "build-preview-title",
+      text:
+        build.label || `${item.label} · ${stamp && !Number.isNaN(stamp.getTime()) ? stamp.toLocaleString() : "build"}`,
+    }),
+  );
+  const close = element("button", { class: "icon-button", type: "button", text: "×", "aria-label": "Close" });
+  close.addEventListener("click", closeBuildPreview);
+  head.append(close);
+  const frame = element("iframe", {
+    sandbox: "allow-scripts allow-forms",
+    title: build.label || `Build of ${item.label}`,
+    src: `/board/${encodeURIComponent(key)}/item/${encodeURIComponent(item.id)}/build/${encodeURIComponent(build.hash)}`,
+  });
+  const actions = element("div", { class: "build-preview-actions" });
+  const carry = element("button", { class: "button button-primary", type: "button", text: "Continue from here" });
+  carry.addEventListener("click", () => {
+    sendItemNote(
+      item,
+      [
+        `Continue ${item.label} (${item.file}) from the build saved at ${build.at || "an earlier round"}`,
+        build.label ? `(${build.label})` : "",
+        `— its snapshot is .easel-builds/${item.id}/${build.hash}.html in the board folder.`,
+        "Build the next version from that, not from a fresh page.",
+      ]
+        .filter(Boolean)
+        .join(" "),
+      "",
+      "build",
+    );
+    closeBuildPreview();
+  });
+  actions.append(carry);
+  panel.append(head, frame, actions);
+  document.body.append(panel);
+  panel.addEventListener("click", (event) => {
+    if (event.target === panel) closeBuildPreview();
+  });
+}
+
+/**
+ * An answered note leaves the artwork: its pin sits in the board gutter beside the
+ * frame, still findable and still opening its thread, but never on the design.
+ */
+function renderGutterPins(record) {
+  if (!record.gutter) return;
+  const pad = record.pad || { side: 0, top: 0 };
+  const seen = new Set();
+  for (const note of itemById(record.itemId)?.notes || []) {
+    if (noteDevice(note) !== record.device.id || !note.prompt_id || !answeredNote(note)) continue;
+    seen.add(note.id);
+    /** @type {HTMLElement | null} */
+    let pin = record.gutter.querySelector(`[data-note="${CSS.escape(note.id)}"]`);
+    if (!pin) {
+      pin = element("button", { class: "gutter-pin", type: "button" });
+      pin.dataset.note = note.id;
+      pin.addEventListener("click", () => {
+        const live = liveNote(note.id);
+        if (live) showNoteWindow(live.item, live.note);
+        flashEntry(note.id);
+      });
+      record.gutter.append(pin);
+    }
+    pin.textContent = String(note.number);
+    pin.setAttribute("aria-label", `Note ${note.number}, answered`);
+    pin.style.top = `${Math.round(pad.top + (Number(note.y) || 0))}px`;
+  }
+  for (const node of Array.from(record.gutter.children)) {
+    if (!(node instanceof HTMLElement) || !seen.has(node.dataset.note || "")) node.remove();
+  }
+}
+
+function renderAllGutterPins() {
+  for (const record of state.artboards.values()) renderGutterPins(record);
 }
 
 /** A device-sized holder where a version the agent is making will appear. */
@@ -1245,28 +1375,38 @@ function toggleActual(clientX, clientY) {
 let metaHeld = false;
 let spaceHeld = false;
 let altHeld = false;
-let ctrlHeld = false;
 let lastHoverKey = "";
 let hoverFrame = 0;
 let panWheelAt = 0;
 
+// Four gestures own the pointer over a design, one at a time: Space pans, Option
+// tunes, Cmd annotates, and with none of them the click belongs to the page. The
+// shield is the only surface the board has over a frame, so every one of the three
+// armed gestures raises it, and none of them can leak into another.
+function gestureMode() {
+  if (spaceHeld) return "hand";
+  if (altHeld) return "tune";
+  if (metaHeld) return "annotate";
+  return "";
+}
+
 function panModeActive() {
-  return metaHeld || spaceHeld;
+  return gestureMode() === "hand";
 }
 
-// Annotation is armed only while Alt is down, so a plain click belongs to the page.
 function annotateArmed() {
-  return altHeld;
+  return gestureMode() === "annotate";
 }
 
-function updateAnnotateMode() {
-  document.body.dataset.annotate = String(annotateArmed());
-  if (!annotateArmed()) clearHover();
+function tuneArmed() {
+  return gestureMode() === "tune";
 }
 
-function updatePanMode() {
-  document.body.dataset.pan = String(panModeActive());
-  if (panModeActive()) clearHover();
+function updateGestureMode() {
+  const mode = gestureMode();
+  document.body.dataset.gesture = mode;
+  document.body.dataset.pan = String(mode === "hand");
+  if (mode !== "annotate") clearHover();
 }
 
 function isTextTarget(target) {
@@ -1299,11 +1439,9 @@ function recordForTarget(target) {
  */
 function hintAnnotateOnce(target) {
   if (readStorage(annotateHintStorageKey)) return;
-  // Alt-Ctrl tunes the element, so that gesture teaches itself and stays quiet.
-  if (ctrlHeld) return;
   if (!recordForTarget(target)) return;
   writeStorage(annotateHintStorageKey, "seen");
-  const hint = element("div", { class: "annotate-hint", text: "Hold Alt and click to leave a note" });
+  const hint = element("div", { class: "annotate-hint", text: "⌘ click to note · ⌥ click to tune" });
   document.body.append(hint);
   window.requestAnimationFrame(() => {
     hint.dataset.shown = "true";
@@ -1338,22 +1476,15 @@ function bindNavigation() {
   /** @type {null | { x: number, y: number, cameraX: number, cameraY: number, id: number, moved: boolean }} */
   let drag = null;
   let suppressClick = false;
-  let tuneGestureAt = 0;
-  const altDown = (event) => annotateArmed() || event.altKey;
-  const ctrlDown = (event) => ctrlHeld || event.ctrlKey;
 
   plane.addEventListener("pointerdown", (event) => {
     if (event.target instanceof Element && event.target.closest("button")) return;
     const record = recordForShield(event.target);
-    if (
-      record &&
-      altDown(event) &&
-      (event.button === 2 || ctrlDown(event)) &&
-      !panModeActive() &&
-      (event.button === 0 || event.button === 2)
-    ) {
+    // Tune owns the press: the panel opens on the point under the pointer, and the
+    // click that follows is consumed so it can never turn into a note.
+    if (record && tuneArmed() && event.button === 0) {
       event.preventDefault();
-      tuneGestureAt = performance.now();
+      suppressClick = true;
       openTargetTune(record, pointInFrame(record, event.clientX, event.clientY));
       return;
     }
@@ -1422,12 +1553,6 @@ function bindNavigation() {
     const record = recordForShield(event.target);
     if (!record || suppressClick || panModeActive() || !annotateArmed()) return;
     const point = pointInFrame(record, event.clientX, event.clientY);
-    // Alt-Ctrl tunes what was clicked; Alt alone leaves a note.
-    if (ctrlHeld || event.ctrlKey) {
-      clearTimeout(clickTimer);
-      if (performance.now() - tuneGestureAt > 600) openTargetTune(record, point);
-      return;
-    }
     const at = { x: event.clientX, y: event.clientY };
     // A double-click means zoom, so the note waits out the double-click window.
     clearTimeout(clickTimer);
@@ -1437,20 +1562,19 @@ function bindNavigation() {
     }, 220);
   });
 
-  // On a Mac a Ctrl click is a right click; while arming, that gesture is ours.
+  // While a gesture owns the pointer, the browser's own right-click menu is not one of
+  // the four: on a Mac a Ctrl-click arrives here as a right click.
   plane.addEventListener("contextmenu", (event) => {
-    const record = recordForShield(event.target);
-    if (!altDown(event)) return;
+    if (gestureMode() === "") return;
     event.preventDefault();
-    if (!record || (!ctrlDown(event) && event.button !== 2) || panModeActive()) return;
-    if (performance.now() - tuneGestureAt < 600) return;
-    tuneGestureAt = performance.now();
-    openTargetTune(record, pointInFrame(record, event.clientX, event.clientY));
   });
 
   plane.addEventListener("dblclick", (event) => {
     if (event.target instanceof Element && event.target.closest("button")) return;
     clearTimeout(clickTimer);
+    // A drag or a tune click is not a zoom, and swallowing the double-click keeps the
+    // four gestures exclusive.
+    if (gestureMode() === "hand" || gestureMode() === "tune") return;
     event.preventDefault();
     if (annotateArmed() && recordForShield(event.target)) toggleActual(event.clientX, event.clientY);
     else {
@@ -1596,18 +1720,23 @@ function answeredNote(note) {
 }
 
 function pinsFor(item, deviceId) {
-  return (item.notes || [])
-    .filter((note) => noteDevice(note) === deviceId)
-    .map((note) => ({
-      id: note.id,
-      number: note.number,
-      selector: note.selector,
-      x: note.x,
-      y: note.y,
-      ox: note.ox,
-      oy: note.oy,
-      state: note.prompt_id ? (answeredNote(note) ? "done" : "sent") : "draft",
-    }));
+  return (
+    (item.notes || [])
+      .filter((note) => noteDevice(note) === deviceId)
+      .map((note) => ({
+        id: note.id,
+        number: note.number,
+        selector: note.selector,
+        x: note.x,
+        y: note.y,
+        ox: note.ox,
+        oy: note.oy,
+        state: note.prompt_id ? (answeredNote(note) ? "done" : "sent") : "draft",
+      }))
+      // An answered pin leaves the design: it is drawn in the board gutter instead, so
+      // the frame never paints anything the design does not have.
+      .filter((pin) => pin.state !== "done")
+  );
 }
 
 function postPins(itemId, deviceId) {
@@ -1768,6 +1897,169 @@ function renderComposerImages() {
   holder.hidden = composerImages.length === 0;
 }
 
+/* ------------------------------------------------------------ image drops */
+
+// A file dropped onto a picture in a design replaces it. The frame finds the element,
+// the board uploads the bytes the same way a pasted note does, and the file is copied
+// into the board folder so the swap survives a reload.
+
+function dropUrl(file) {
+  const name = String(file || "")
+    .split("/")
+    .pop();
+  return `/board/${encodeURIComponent(key)}/drop/${encodeURIComponent(name)}`;
+}
+
+function postImageDrops(itemId, deviceId) {
+  const item = itemById(itemId);
+  if (!item) return;
+  const drops = (item.imageDrops || []).map((drop) => ({
+    selector: drop.selector,
+    kind: drop.kind,
+    src: dropUrl(drop.file),
+  }));
+  postToArtboard(itemId, deviceId, { type: "image-drops", drops });
+}
+
+function postAllImageDrops(itemId) {
+  for (const device of DEVICES) postImageDrops(itemId, device.id);
+}
+
+/** @type {any} */
+let dropToastTimer;
+
+function hideDropToast() {
+  clearTimeout(dropToastTimer);
+  document.getElementById("dropToast")?.remove();
+}
+
+/**
+ * The changed image, in the words the agent needs to carry it into the build: which
+ * item, which selector, what it replaced, and the file now standing in for it.
+ */
+function imageDropPrompt(item, drop) {
+  const old = String(drop.oldSource || "");
+  const replaced = old.startsWith("data:")
+    ? "the original inline image"
+    : old.length > 80
+      ? `${old.slice(0, 80)}…`
+      : old;
+  return [
+    `Replace the image at ${drop.selector} in ${item.label} (${item.file}) with ${drop.file}.`,
+    replaced ? `It replaced ${replaced}.` : "",
+    `The file is in the board folder, and board.json records it on item ${item.id}.`,
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
+function sendItemNote(item, text, selector, tag = "image") {
+  if (state.ended) return;
+  fetch(`/api/${encodeURIComponent(key)}/prompts`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      prompts: [
+        {
+          uid: randomId(),
+          prompt_id: randomId(),
+          prompt: text,
+          tag,
+          thread: `item:${item.id}`,
+          selector: selector || "",
+          item: { id: item.id, label: item.label },
+        },
+      ],
+      domSnapshot: "",
+    }),
+  })
+    .then((response) => {
+      if (!response.ok) throw new Error("not accepted");
+      refreshBoard();
+    })
+    .catch(() => {
+      dockStatus.textContent = "Could not reach Easel. The image is still swapped.";
+    });
+}
+
+function showDropToast(item, drop) {
+  hideDropToast();
+  const toast = element("div", { class: "drop-toast", id: "dropToast", role: "status" });
+  toast.append(
+    element("span", { class: "drop-toast-text", text: `Replaced ${drop.selector}` }),
+    element("span", {
+      class: "drop-toast-file",
+      text: String(drop.file || "")
+        .split("/")
+        .pop(),
+    }),
+  );
+  const undo = element("button", { class: "drop-toast-undo", type: "button", text: "Undo" });
+  undo.addEventListener("click", () => undoImageDrop(item.id, drop.selector));
+  toast.append(undo);
+  document.body.append(toast);
+  dropToastTimer = window.setTimeout(hideDropToast, 10000);
+}
+
+function undoImageDrop(itemId, selector) {
+  fetch(`/api/boards/${encodeURIComponent(key)}/image-drop`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ item: itemId, selector, undo: true }),
+  })
+    .then((response) => (response.ok ? response.json() : Promise.reject(new Error("not accepted"))))
+    .then((payload) => {
+      const live = itemById(itemId);
+      if (live && payload?.imageDrops) live.imageDrops = payload.imageDrops;
+      postAllImageDrops(itemId);
+      hideDropToast();
+      if (live)
+        sendItemNote(live, `Put the original image back at ${selector} in ${live.file}; the drop is undone.`, selector);
+    })
+    .catch(() => {
+      dockStatus.textContent = "Could not undo that image drop.";
+    });
+}
+
+/** @param {any} record @param {any} data */
+function dropImageOn(record, data) {
+  const item = itemById(record.itemId);
+  const selector = String(data.selector || "");
+  const file = data.file;
+  if (!item || !selector || state.ended) return;
+  if (!(file instanceof File) || !IMAGE_TYPES.has(file.type)) {
+    dockStatus.textContent = "Only PNG, JPEG and WebP images can replace one.";
+    return;
+  }
+  const kind = data.kind === "background" ? "background" : "img";
+  uploadImage(file)
+    .then(({ id }) =>
+      fetch(`/api/boards/${encodeURIComponent(key)}/image-drop`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          item: item.id,
+          selector,
+          kind,
+          oldSource: String(data.oldSource || ""),
+          attachment: id,
+        }),
+      }).then((response) => (response.ok ? response.json() : Promise.reject(new Error("not accepted")))),
+    )
+    .then((payload) => {
+      const live = itemById(item.id);
+      const drop = payload?.drop;
+      if (!live || !drop) return;
+      live.imageDrops = payload.imageDrops || live.imageDrops || [];
+      postAllImageDrops(live.id);
+      showDropToast(live, drop);
+      sendItemNote(live, imageDropPrompt(live, drop), drop.selector);
+    })
+    .catch(() => {
+      dockStatus.textContent = "That image could not replace the one on the design.";
+    });
+}
+
 // A file dropped anywhere else on the board must never navigate the page away.
 /** @param {DragEvent} event */
 function refuseStrayFileDrop(event) {
@@ -1775,6 +2067,15 @@ function refuseStrayFileDrop(event) {
 }
 window.addEventListener("dragover", refuseStrayFileDrop);
 window.addEventListener("drop", refuseStrayFileDrop);
+window.addEventListener("dragenter", (event) => {
+  if (event.dataTransfer?.types.includes("Files")) document.body.dataset.dragging = "true";
+});
+window.addEventListener("dragleave", (event) => {
+  if (!event.relatedTarget) delete document.body.dataset.dragging;
+});
+window.addEventListener("drop", () => {
+  delete document.body.dataset.dragging;
+});
 
 /* ------------------------------------------------------------------ notes */
 
@@ -2371,7 +2672,7 @@ function renderChatPanel() {
   const ordered = [...threads.values()].sort((left, right) => left.last.localeCompare(right.last));
   const rows = ordered.map((thread) => renderThread(thread, previousReply));
   if (rows.length === 0) {
-    rows.push(element("p", { class: "chat-empty", text: "Hold Alt and click a design to leave a note." }));
+    rows.push(element("p", { class: "chat-empty", text: "⌘ click to note · ⌥ click to tune" }));
   }
   const focused = threadComposer && document.activeElement === threadComposer.field;
   const selection =
@@ -2844,7 +3145,7 @@ function setChatCollapsed(collapsed) {
 let tuneItemId = "";
 let tuneDeviceId = "";
 /**
- * What Alt-Ctrl last clicked: its selectors, its own controls and their live values.
+ * What an Option click last landed on: its selectors, its own controls and their live values.
  * @type {null | { itemId: string, deviceId: string, selector?: string, sectionSelector?: string, label?: string, sectionLabel?: string, parentSelector?: string, parentLabel?: string, controls?: any[], values?: Record<string, string>, pending?: boolean }}
  */
 let tuneTarget = null;
@@ -2883,6 +3184,13 @@ function postTuneAll(itemId) {
   for (const device of DEVICES) postTune(itemId, device.id);
 }
 
+function postElementTune(itemId, deviceId) {
+  const item = itemById(itemId);
+  const values = item?.elementTune || {};
+  if (!values || Object.keys(values).length === 0) return;
+  postToArtboard(itemId, deviceId, { type: "element-tune", values });
+}
+
 function openTune(itemId, deviceId) {
   const item = itemById(itemId);
   if (!item) return;
@@ -2896,6 +3204,7 @@ function openTune(itemId, deviceId) {
   }
   const panel = document.getElementById("tune");
   if (panel) panel.hidden = false;
+  markTuneSent(false);
   renderTune();
   if (tuneSpecFor(itemId).length === 0) postToArtboard(itemId, deviceId, { type: "tune-spec" });
 }
@@ -2903,8 +3212,12 @@ function openTune(itemId, deviceId) {
 function closeTune() {
   for (const cleanup of tuneCleanup) cleanup();
   tuneCleanup = [];
-  // Closing the panel takes its inline overrides back off: the frame returns to its file.
-  if (tuneTarget) postToArtboard(tuneTarget.itemId, tuneTarget.deviceId, { type: "style-reset" });
+  // Closing the panel keeps what was tuned on the item and drops the preview-only
+  // changes: the frame returns to the file plus its saved element tunes.
+  if (tuneTarget) {
+    postToArtboard(tuneTarget.itemId, tuneTarget.deviceId, { type: "style-reset" });
+    postElementTune(tuneTarget.itemId, tuneTarget.deviceId);
+  }
   const panel = document.getElementById("tune");
   if (panel) panel.hidden = true;
   tuneItemId = "";
@@ -2921,6 +3234,7 @@ function openTargetTune(record, point) {
   tuneDeviceId = record.device.id;
   const panel = document.getElementById("tune");
   if (panel) panel.hidden = false;
+  markTuneSent(false);
   renderTune();
   postToArtboard(record.itemId, record.device.id, {
     type: "tune-target",
@@ -2948,20 +3262,63 @@ function applyTargetValue(control, raw) {
   if (!tuneTarget) return;
   tuneTarget.values = tuneTarget.values || {};
   tuneTarget.values[control.id] = String(raw);
+  const selector = targetSelector(control.scope);
+  const value = tuneValue(control, raw);
   postToArtboard(tuneTarget.itemId, tuneTarget.deviceId, {
     type: "style",
-    selector: targetSelector(control.scope),
+    selector,
     css: control.css,
-    value:
-      (control.type === "number" || control.type === "timeline") && control.unit
-        ? `${raw}${control.unit}`
-        : String(raw),
+    value,
   });
+  persistElementTune({ itemId: tuneTarget.itemId, selector, css: control.css, value });
+}
+
+/** @type {null | { itemId: string, selector: string, css: Record<string, string> }} */
+let elementTunePending = null;
+/** @type {ReturnType<typeof setTimeout> | undefined} */
+let elementTuneTimer;
+
+/**
+ * What an Option click tuned is saved on the item, per selector, so the panel can be
+ * closed, the board reloaded and the design still looks the way it was tuned.
+ */
+/**
+ * @param {{ itemId: string, selector: string, css?: string, value?: string, reset?: boolean }} change
+ */
+function persistElementTune({ itemId, selector, css, value, reset = false }) {
+  if (!selector) return;
+  if (!elementTunePending || elementTunePending.itemId !== itemId || elementTunePending.selector !== selector) {
+    elementTunePending = { itemId, selector, css: {} };
+  }
+  if (!reset && css) elementTunePending.css[css] = String(value);
+  clearTimeout(elementTuneTimer);
+  elementTuneTimer = setTimeout(() => {
+    const pending = elementTunePending;
+    elementTunePending = null;
+    if (!pending) return;
+    fetch(`/api/boards/${encodeURIComponent(key)}/tune`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        item: pending.itemId,
+        selector: pending.selector,
+        element: pending.css,
+        ...(reset ? { reset: true } : {}),
+      }),
+    })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((payload) => {
+        const item = itemById(pending.itemId);
+        if (item && payload?.elementTune) item.elementTune = payload.elementTune;
+      })
+      .catch(() => {});
+  }, 250);
 }
 
 function resetTargetTune() {
   if (!tuneTarget) return;
   postToArtboard(tuneTarget.itemId, tuneTarget.deviceId, { type: "style-reset" });
+  persistElementTune({ itemId: tuneTarget.itemId, selector: tuneTarget.selector || "", reset: true });
   for (const control of tuneTarget.controls || []) {
     tuneTarget.values = tuneTarget.values || {};
     tuneTarget.values[control.id] = String(control.value ?? "");
@@ -2979,24 +3336,123 @@ function copyTargetTune() {
     })
     .map((control) => {
       const raw = (tuneTarget?.values || {})[control.id];
-      const value =
-        (control.type === "number" || control.type === "timeline") && control.unit
-          ? `${raw}${control.unit}`
-          : String(raw);
-      return `${targetSelector(control.scope)} { ${control.css}: ${value}; }`;
+      return `${targetSelector(control.scope)} { ${control.css}: ${tuneValue(control, raw)}; }`;
     });
   return lines.join("\n");
+}
+
+/** A control's value as CSS: a number control carries its unit. */
+function tuneValue(control, raw) {
+  return (control.type === "number" || control.type === "timeline") && control.unit
+    ? `${raw}${control.unit}`
+    : String(raw);
+}
+
+/** The only properties that differ from what the file has, as CSS. */
+function tuneChanges() {
+  if (tuneTarget) {
+    return (tuneTarget.controls || [])
+      .filter((control) => {
+        const value = (tuneTarget?.values || {})[control.id];
+        return value !== undefined && String(value) !== String(control.value ?? "");
+      })
+      .map((control) => ({
+        selector: targetSelector(control.scope),
+        line: `${targetSelector(control.scope)} { ${control.css}: ${tuneValue(control, (tuneTarget?.values || {})[control.id])}; }`,
+      }));
+  }
+  const item = itemById(tuneItemId);
+  if (!item) return [];
+  return tuneSpecFor(item.id)
+    .filter(
+      (control) =>
+        item.tune[control.id] !== undefined &&
+        item.tune[control.id] !== "" &&
+        String(item.tune[control.id]) !== String(control.value ?? ""),
+    )
+    .map((control) => ({
+      selector: ":root",
+      line: `:root { ${control.css}: ${tuneValue(control, item.tune[control.id])}; }`,
+    }));
+}
+
+/** After Send the panel says so; a further change makes it a Send again. */
+function markTuneSent(sent) {
+  const send = /** @type {any} */ (document.getElementById("tuneSend"));
+  if (!send) return;
+  if (send.dataset) send.dataset.sent = String(Boolean(sent));
+  send.textContent = sent ? "Sent" : "Send";
+  send.disabled = Boolean(sent);
+}
+
+/** Send is live only when there is something to send: the properties that differ. */
+function syncTuneSend() {
+  const send = /** @type {any} */ (document.getElementById("tuneSend"));
+  if (!send || send.dataset?.sent === "true") return;
+  const pending = Boolean(tuneTarget?.pending);
+  send.disabled = pending || tuneChanges().length === 0;
+  send.textContent = "Send";
+}
+
+function markTuneDirty() {
+  const send = /** @type {any} */ (document.getElementById("tuneSend"));
+  if (send?.dataset?.sent === "true") markTuneSent(false);
+  syncTuneSend();
+}
+
+/**
+ * The panel's primary action: hand only the properties that changed to the agent, as
+ * a note on that design, in the same channel annotations use. Copy stays for anyone
+ * who wants the CSS itself.
+ */
+function sendTune() {
+  const itemId = tuneTarget ? tuneTarget.itemId : tuneItemId;
+  const item = itemById(itemId);
+  if (!item || state.ended) return;
+  const changes = tuneChanges();
+  if (changes.length === 0) return;
+  if (!tuneTarget) flushTune(item);
+  const where = tuneTarget
+    ? `${item.label} (${item.file}), element ${tuneTarget.selector || ""}`
+    : `${item.label} (${item.file})`;
+  const prompt = `Tune ${where}. Only these differ from the file:\n${changes.map((change) => change.line).join("\n")}`;
+  markTuneSent(true);
+  fetch(`/api/${encodeURIComponent(key)}/prompts`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      prompts: [
+        {
+          uid: randomId(),
+          prompt_id: randomId(),
+          prompt,
+          tag: "tune",
+          thread: `item:${item.id}`,
+          selector: changes[0]?.selector || "",
+          item: { id: item.id, label: item.label },
+        },
+      ],
+      domSnapshot: "",
+    }),
+  })
+    .then((response) => {
+      if (!response.ok) throw new Error("not accepted");
+      dockStatus.textContent = "";
+      refreshBoard();
+    })
+    .catch(() => {
+      markTuneSent(false);
+      dockStatus.textContent = "Could not reach Easel. Your values are still here.";
+    });
 }
 
 function renderTargetTune() {
   const sub = document.getElementById("tuneSub");
   const body = document.getElementById("tuneBody");
   if (!body || !tuneTarget) return;
-  if (sub)
-    sub.textContent =
-      tuneTarget.sectionLabel && tuneTarget.sectionLabel !== tuneTarget.label ? tuneTarget.sectionLabel : "";
+  if (sub) sub.textContent = "";
   const title = document.getElementById("tuneTitle");
-  if (title) title.textContent = tuneTarget.label || "Tune";
+  if (title) title.textContent = tuneTitleText(tuneTarget.label || "Tune");
   const parent = tuneTarget.parentSelector
     ? element("button", {
         class: "tune-parent",
@@ -3037,6 +3493,16 @@ function renderTargetTune() {
     const button = /** @type {any} */ (document.getElementById(id));
     if (button) button.disabled = tuneTarget.pending || (tuneTarget.controls || []).length === 0;
   }
+  syncTuneSend();
+}
+
+/** The panel names what it tunes, in one all-caps line: `H1 · THE EVERYDAY COLLECTION`. */
+function tuneTitleText(label) {
+  return String(label || "")
+    .replace(/[“”"]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toUpperCase();
 }
 
 function renderTune() {
@@ -3051,9 +3517,9 @@ function renderTune() {
     return;
   }
   if (save) save.hidden = false;
-  if (title) title.textContent = "Tune";
+  if (title) title.textContent = tuneTitleText(`Design · ${designName(item, tuneDeviceId)}`);
   const sub = document.getElementById("tuneSub");
-  if (sub) sub.textContent = designName(item, tuneDeviceId);
+  if (sub) sub.textContent = "";
   const body = document.getElementById("tuneBody");
   if (!body) return;
   const spec = tuneSpecFor(tuneItemId);
@@ -3075,6 +3541,7 @@ function renderTune() {
     const button = /** @type {any} */ (document.getElementById(id));
     if (button) button.disabled = spec.length === 0;
   }
+  syncTuneSend();
   renderVersions(item, spec);
 }
 
@@ -3083,10 +3550,12 @@ function createTuneControl(item, control, onChange) {
   const valueLabel = element("span", { class: "tune-control-value", text: String(item.tune[control.id] ?? "") });
   const label = element("label", { class: "tune-control-label" });
   label.append(element("span", { text: control.label }), valueLabel);
+  if (control.type === "color") valueLabel.hidden = true;
   if (control.type !== "spring" && control.type !== "pad") wrapper.append(label);
   const apply = (raw) => {
     item.tune[control.id] = raw;
     valueLabel.textContent = String(raw);
+    markTuneDirty();
     if (onChange) {
       onChange(raw);
       return;
@@ -3106,7 +3575,7 @@ function createTuneControl(item, control, onChange) {
     }
     if (!spring || typeof spring !== "object" || Array.isArray(spring)) spring = {};
     spring = { type: "spring", stiffness: 180, damping: 20, mass: 1, ...spring };
-    const host = element("div", { class: "dialkit-root", "data-theme": "light" });
+    const host = element("div", { class: "dialkit-root", "data-theme": "dark" });
     wrapper.append(host);
     const panelId = `easel-${item.id}-${control.id}`;
     const kit = dial.createDialKit(control.label, { motion: spring }, { id: panelId });
@@ -3164,7 +3633,7 @@ function createTuneControl(item, control, onChange) {
     const match = String(item.tune[control.id]).match(/cubic-bezier\(([^)]+)\)/);
     let ease = match ? match[1].split(",").map(Number) : presets.Ease;
     if (ease.length !== 4 || ease.some((n) => !Number.isFinite(n))) ease = presets.Ease;
-    const host = element("div", { class: "dialkit-root", "data-theme": "light" });
+    const host = element("div", { class: "dialkit-root", "data-theme": "dark" });
     const select = element("select", { "aria-label": `${control.label} preset` });
     select.append(element("option", { value: "", text: "Custom curve" }));
     for (const name of Object.keys(presets)) select.append(element("option", { value: name, text: name }));
@@ -3198,7 +3667,7 @@ function createTuneControl(item, control, onChange) {
     }
     if (!value || typeof value !== "object" || Array.isArray(value)) value = {};
     value = { x: Number(value.x) || 0, y: Number(value.y) || 0 };
-    const host = element("div", { class: "dialkit-root", "data-theme": "light" });
+    const host = element("div", { class: "dialkit-root", "data-theme": "dark" });
     wrapper.append(host);
     let mounted;
     const props = () => ({
@@ -3262,10 +3731,28 @@ function createTuneControl(item, control, onChange) {
       timeline.destroy();
     });
   } else if (control.type === "color") {
-    const input = element("input", { type: "color" });
+    const row = element("div", { class: "tune-colour" });
+    const swatch = element("button", {
+      class: "tune-swatch",
+      type: "button",
+      "aria-label": `${control.label} colour`,
+      title: "Pick a colour",
+    });
+    const hex = element("span", { class: "tune-hex" });
+    const input = element("input", { type: "color", class: "tune-colour-input" });
     input.value = item.tune[control.id] || "#000000";
-    input.addEventListener("input", () => apply(input.value));
-    wrapper.append(input);
+    const paint = () => {
+      swatch.style.background = input.value;
+      hex.textContent = input.value;
+    };
+    swatch.addEventListener("click", () => input.click());
+    input.addEventListener("input", () => {
+      paint();
+      apply(input.value);
+    });
+    row.append(swatch, input, hex);
+    paint();
+    wrapper.append(row);
   } else if (control.type === "select") {
     const select = element("select", {});
     for (const option of control.options || [])
@@ -3283,7 +3770,15 @@ function createTuneControl(item, control, onChange) {
       step: String(control.step ?? 1),
     });
     input.value = String(value);
+    const paint = () => {
+      const low = Number(input.min) || 0;
+      const high = Number(input.max) || 100;
+      const percent = ((Number(input.value) - low) / (high - low || 1)) * 100;
+      input.style.setProperty("--fill", `${Math.max(0, Math.min(100, percent))}%`);
+    };
+    input.addEventListener("input", paint);
     input.addEventListener("input", () => apply(input.value));
+    paint();
     wrapper.append(input);
   }
   return wrapper;
@@ -3476,6 +3971,7 @@ function refreshBoard() {
       ensureUniqueNumbers();
       renderChatPanel();
       postAllPins();
+      renderAllGutterPins();
       if (payload.ended) markEnded();
     })
     .catch(() => {});
@@ -3539,6 +4035,19 @@ function onArtboardMessage(event) {
   if (data.type === "ready") {
     postPins(itemId, deviceId);
     postTune(itemId, deviceId);
+    postElementTune(itemId, deviceId);
+    postImageDrops(itemId, deviceId);
+    return;
+  }
+  // The frame owns key events while it has focus, so it reports what is held: the four
+  // gestures must arm no matter which document the reviewer last touched.
+  if (data.type === "held") {
+    const next = { space: Boolean(data.space), alt: Boolean(data.alt), meta: Boolean(data.meta) };
+    if (next.space === spaceHeld && next.alt === altHeld && next.meta === metaHeld) return;
+    spaceHeld = next.space;
+    altHeld = next.alt;
+    metaHeld = next.meta;
+    updateGestureMode();
     return;
   }
   if (data.type === "stylesheet") {
@@ -3548,6 +4057,10 @@ function onArtboardMessage(event) {
   if (data.type === "select") {
     const item = itemById(itemId);
     if (item && !state.ended) addNote(item, data, deviceId);
+    return;
+  }
+  if (data.type === "image-drop") {
+    dropImageOn(record, data);
     return;
   }
   if (data.type === "pin") {
@@ -3621,18 +4134,14 @@ window.addEventListener("keydown", (event) => {
   if (event.key === "Alt") {
     if (!altHeld) {
       altHeld = true;
-      updateAnnotateMode();
+      updateGestureMode();
     }
-    return;
-  }
-  if (event.key === "Control") {
-    ctrlHeld = true;
     return;
   }
   if (event.key === "Meta") {
     if (!metaHeld) {
       metaHeld = true;
-      updatePanMode();
+      updateGestureMode();
     }
     return;
   }
@@ -3640,7 +4149,7 @@ window.addEventListener("keydown", (event) => {
     event.preventDefault();
     if (!spaceHeld) {
       spaceHeld = true;
-      updatePanMode();
+      updateGestureMode();
     }
     return;
   }
@@ -3661,6 +4170,7 @@ window.addEventListener("keydown", (event) => {
   else if (event.key === "-") zoomBy(1 / 1.25);
   else if (event.key === "Escape") {
     closeNoteWindow();
+    closeBuildPreview();
     closeTune();
   }
 });
@@ -3668,33 +4178,29 @@ window.addEventListener("keydown", (event) => {
 window.addEventListener("keyup", (event) => {
   if (event.key === "Alt" && altHeld) {
     altHeld = false;
-    updateAnnotateMode();
-  }
-  if (event.key === "Control") {
-    ctrlHeld = false;
-    return;
+    updateGestureMode();
   }
   if (event.key === "Meta" && metaHeld) {
     metaHeld = false;
-    updatePanMode();
+    updateGestureMode();
   }
   if (event.code === "Space" && spaceHeld) {
     spaceHeld = false;
-    updatePanMode();
+    updateGestureMode();
   }
 });
 
 document.addEventListener("pointerover", (event) => hintAnnotateOnce(event.target), true);
 
 window.addEventListener("blur", () => {
-  if (!metaHeld && !spaceHeld && !altHeld && !ctrlHeld) return;
+  if (!metaHeld && !spaceHeld && !altHeld) return;
   metaHeld = false;
   spaceHeld = false;
   altHeld = false;
-  ctrlHeld = false;
-  updatePanMode();
-  updateAnnotateMode();
+  updateGestureMode();
 });
+
+document.addEventListener("pointerover", (event) => hintAnnotateOnce(event.target), true);
 
 let resizeTimer = 0;
 window.addEventListener("resize", () => {
@@ -3708,6 +4214,7 @@ window.addEventListener("resize", () => {
 document.getElementById("tuneClose")?.addEventListener("click", closeTune);
 document.getElementById("tuneSave")?.addEventListener("click", saveTuneVersion);
 document.getElementById("tuneCopy")?.addEventListener("click", copyTune);
+document.getElementById("tuneSend")?.addEventListener("click", sendTune);
 document.getElementById("tuneReset")?.addEventListener("click", resetTune);
 document.getElementById("zoomIn")?.addEventListener("click", () => zoomBy(1.25));
 document.getElementById("zoomOut")?.addEventListener("click", () => zoomBy(1 / 1.25));

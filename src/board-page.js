@@ -96,9 +96,10 @@ export function createBoardHtml(
   </div>
   <div class="tune-body" id="tuneBody"></div>
   <div class="tune-actions">
-    <button class="button" id="tuneReset" type="button">Reset</button>
-    <button class="button" id="tuneCopy" type="button">Copy</button>
-    <button class="button button-primary" id="tuneSave" type="button">Save version</button>
+    <button class="button tune-primary" id="tuneSend" type="button">Send</button>
+    <button class="tune-link" id="tuneSave" type="button">Save version</button>
+    <button class="tune-link" id="tuneCopy" type="button">Copy</button>
+    <button class="tune-link" id="tuneReset" type="button">Reset</button>
   </div>
   <div class="versions" id="tuneVersions"></div>
 </aside>
