@@ -789,13 +789,38 @@ body[data-annotate="true"] .shield {
 
 .note-pop-actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   margin-top: 18px;
 }
 
 .note-pop-actions .spacer {
-  flex: 1;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.note-pop-actions .button {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+/* The state and the two buttons travel together, so the row wraps as two blocks. */
+.note-pop-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* The consequence takes its own row, so the buttons always sit inside the card. */
+.note-ask-consequence {
+  flex: 1 1 100%;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--ink-3);
 }
 
 .note-state {
@@ -1152,6 +1177,16 @@ body[data-annotate="true"] .shield {
   cursor: default;
 }
 
+/* Sent, received, applied: the note's stage, beside the note it belongs to. */
+.thread-state {
+  margin-left: auto;
+  padding-left: 8px;
+  flex: none;
+  color: var(--ink-3);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
 .thread-thumb {
   flex: none;
   width: 40px;
@@ -1267,9 +1302,14 @@ body[data-annotate="true"] .shield {
 
 .thread-foot {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 14px;
+  gap: 10px 14px;
   margin-top: 6px;
+}
+
+.thread-foot .note-ask-consequence {
+  flex: 1 1 100%;
 }
 
 .thread-action {
@@ -1383,6 +1423,28 @@ body[data-panel="closed"] .tune {
   gap: 12px;
   min-width: 0;
   grid-template-columns: minmax(0, 1fr);
+}
+
+/* The way back up the page: one click tunes the element this one sits in. */
+.tune-parent {
+  justify-self: start;
+  max-width: 100%;
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-strong);
+  color: var(--ink-2);
+  font: inherit;
+  font-size: 12.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.tune-parent:hover {
+  border-color: var(--line-strong);
+  color: var(--ink);
 }
 
 .tune-group-name {
