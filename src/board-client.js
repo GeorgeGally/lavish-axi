@@ -1789,11 +1789,8 @@ function toggleActual(clientX, clientY) {
 
 let spaceHeld = false;
 let altHeld = false;
-// Cmd toggles notes: a lone press and release turns them on, the next one off. Cmd
-// used in a shortcut (Cmd+C, Cmd+click, Cmd+scroll) is a chord and never flips it.
+// Notes are on only while Cmd is held, and off the moment it is let go.
 let annotateOn = false;
-let metaDown = false;
-let metaChord = false;
 let lastHoverKey = "";
 let hoverFrame = 0;
 let panWheelAt = 0;
@@ -1802,7 +1799,7 @@ let panWheelAt = 0;
 let lastPointer = null;
 
 // Four gestures own the pointer over a design, one at a time: Space pans, Option
-// tunes, notes (Cmd toggles them) annotate, and with none of them the click belongs to
+// tunes, Cmd held annotates, and with none of them the click belongs to
 // the page. The shield is the only surface the board has over a frame, so every one of
 // the three armed gestures raises it, and none of them can leak into another.
 function gestureMode() {
@@ -1835,10 +1832,8 @@ function updateGestureMode() {
 
 /** @type {HTMLElement | null} */
 let notesState = null;
-/** @type {number | undefined} */
-let notesStateTimer;
 
-/** Notes on or off, said once where the hint sits; while on, the line stays. */
+/** Notes on while Cmd is held, said where the hint sits; let go, the line fades. */
 function setAnnotate(on) {
   if (annotateOn === on) return;
   annotateOn = on;
@@ -1848,34 +1843,12 @@ function setAnnotate(on) {
     notesState = element("div", { class: "annotate-hint notes-state", role: "status" });
     document.body.append(notesState);
   }
-  notesState.textContent = on ? "Notes on · click to leave a note · ⌘ to turn off" : "Notes off";
-  window.requestAnimationFrame(() => {
-    if (notesState) notesState.dataset.shown = "true";
-  });
-  clearTimeout(notesStateTimer);
-  if (!on)
-    notesStateTimer = window.setTimeout(() => {
-      if (notesState) delete notesState.dataset.shown;
-    }, 1200);
-}
-
-/** Cmd held through a click, a scroll or another key was a shortcut, not the toggle. */
-function noteChord() {
-  if (metaDown) metaChord = true;
-}
-
-function metaPressed() {
-  if (metaDown) return;
-  metaDown = true;
-  metaChord = false;
-}
-
-/** @param {boolean} lost the release happened somewhere else, so it toggles nothing */
-function metaReleased(lost = false) {
-  const lone = metaDown && !metaChord && !lost;
-  metaDown = false;
-  metaChord = false;
-  if (lone) setAnnotate(!annotateOn);
+  if (on) {
+    notesState.textContent = "Notes on · click to leave a note · let go of ⌘ to stop";
+    window.requestAnimationFrame(() => {
+      if (notesState && annotateOn) notesState.dataset.shown = "true";
+    });
+  } else delete notesState.dataset.shown;
 }
 
 /** Outline what sits under a resting pointer the moment notes turn on, with no move needed. */
@@ -1932,7 +1905,7 @@ function hintAnnotateOnce(target) {
   writeStorage(annotateHintStorageKey, "seen");
   const hint = element("div", {
     class: "annotate-hint",
-    text: "⌘ turns notes on and off · ⌥ click to tune · hold Space to pan",
+    text: "Hold ⌘ and click to leave a note · ⌥ click to tune · hold Space to pan",
   });
   document.body.append(hint);
   window.requestAnimationFrame(() => {
@@ -1970,7 +1943,6 @@ function bindNavigation() {
   let suppressClick = false;
 
   plane.addEventListener("pointerdown", (event) => {
-    if (event.metaKey) noteChord();
     if (event.target instanceof Element && event.target.closest("button")) return;
     const record = recordForShield(event.target);
     // Tune owns the press: the panel opens on the point under the pointer, and the
@@ -2110,7 +2082,6 @@ function bindNavigation() {
     "wheel",
     (event) => {
       if (!event.ctrlKey && !event.metaKey) return;
-      if (event.metaKey) noteChord();
       event.preventDefault();
       event.stopPropagation();
       zoomWithWheel(event.clientX, event.clientY, event);
@@ -4591,8 +4562,7 @@ function onArtboardMessage(event) {
       }, 0);
       return;
     }
-    if (data.meta === true) metaPressed();
-    else if (metaDown) metaReleased();
+    setAnnotate(data.meta === true);
     const next = { space: Boolean(data.space), alt: Boolean(data.alt) };
     if (next.space === spaceHeld && next.alt === altHeld) return;
     spaceHeld = next.space;
@@ -4601,7 +4571,6 @@ function onArtboardMessage(event) {
     return;
   }
   if (data.type === "key") {
-    if (data.metaKey === true) noteChord();
     boardKey(
       {
         key: String(data.key || ""),
@@ -4611,10 +4580,6 @@ function onArtboardMessage(event) {
       },
       () => {},
     );
-    return;
-  }
-  if (data.type === "chord") {
-    noteChord();
     return;
   }
   if (data.type === "pointer") {
@@ -4737,8 +4702,7 @@ function boardKey(event, preventDefault) {
   else if (event.key === "+" || event.key === "=") zoomBy(1.25);
   else if (event.key === "-") zoomBy(1 / 1.25);
   else if (event.key === "Escape") {
-    // Escape closes what is open first; with nothing open it turns notes off.
-    if (!noteWindow && !tuneItemId && !historyItem && !compare) setAnnotate(false);
+    // Escape closes what is open.
     closeNoteWindow();
     closeBuildPreview();
     closeTune();
@@ -4747,7 +4711,7 @@ function boardKey(event, preventDefault) {
 
 /** Keys let go where the board could not hear them: another app took focus. */
 function releaseHeldKeys() {
-  metaReleased(true);
+  setAnnotate(false);
   if (!spaceHeld && !altHeld) return;
   spaceHeld = false;
   altHeld = false;
@@ -4756,10 +4720,9 @@ function releaseHeldKeys() {
 
 window.addEventListener("keydown", (event) => {
   if (event.key === "Meta") {
-    metaPressed();
+    setAnnotate(true);
     return;
   }
-  noteChord();
   if (event.key === "Alt") {
     if (!altHeld) {
       altHeld = true;
@@ -4782,7 +4745,7 @@ window.addEventListener("keydown", (event) => {
 });
 
 window.addEventListener("keyup", (event) => {
-  if (event.key === "Meta") metaReleased();
+  if (event.key === "Meta") setAnnotate(false);
   if (event.key === "Alt" && altHeld) {
     altHeld = false;
     updateGestureMode();

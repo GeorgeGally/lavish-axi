@@ -796,7 +796,9 @@
       if (data.type === "scroll") {
         const dx = Number(data.dx) || 0;
         const dy = Number(data.dy) || 0;
-        window.scrollBy(dx, dy);
+        // Instant, or a page with scroll-behavior: smooth restarts its animation on
+        // every wheel event and the scroll crawls.
+        window.scrollBy({ left: dx, top: dy, behavior: "instant" });
         schedulePins();
         return;
       }
@@ -907,18 +909,14 @@
     );
   }
   // The board's own keys - 0, 1, +, - and Escape, and Cmd +/-/0 - reach it from here
-  // too, so the camera answers whichever document has focus. Any other key pressed with
-  // Cmd held is a shortcut, which the board must hear so a lone Cmd stays a toggle.
+  // too, so the camera answers whichever document has focus.
   // Cmd-Z and Cmd-Shift-Z step the tune panel's changes.
   const BOARD_KEYS = new Set(["0", "1", "+", "=", "-", "Escape", "z", "Z"]);
   const MODIFIER_KEYS = new Set(["Meta", "Alt", "Control", "Shift"]);
   function forwardKey(event) {
     if (MODIFIER_KEYS.has(event.key) || event.code === "Space") return;
     const ours = BOARD_KEYS.has(event.key) && !event.altKey && !editable(event.target);
-    if (!ours) {
-      if (event.metaKey) post({ type: "chord" });
-      return;
-    }
+    if (!ours) return;
     // Cmd +/-/0 would zoom the browser window instead of the board.
     if ((event.metaKey || event.ctrlKey) && !/^z$/i.test(event.key)) event.preventDefault();
     post({ type: "key", key: event.key, metaKey: event.metaKey, ctrlKey: event.ctrlKey, shiftKey: event.shiftKey });
@@ -941,15 +939,6 @@
     held.meta = false;
     reportHeld(true);
   });
-  // Cmd held through a click or a scroll was a shortcut, never the notes toggle.
-  for (const type of ["pointerdown", "wheel"])
-    window.addEventListener(
-      type,
-      (event) => {
-        if (/** @type {MouseEvent} */ (event).metaKey) post({ type: "chord" });
-      },
-      { capture: true, passive: true },
-    );
 
   // Where the pointer rests, so a gesture armed by a key outlines its target at once
   // instead of waiting for the next move. At most one report a frame.

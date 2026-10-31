@@ -39,8 +39,8 @@ const ITEM_HTML = `<!doctype html>
 <body><h1 id="title">Gestures</h1><input id="field"></body></html>
 `;
 
-// Cmd is a toggle: a lone press and release turns notes on, the next turns them off,
-// and Cmd used in a shortcut, or lost to another app, flips nothing. The keys are
+// Cmd is held, not toggled: notes are on while it is down, through a shortcut chord
+// too, and off the moment it is let go or lost to another app. The keys are
 // dispatched on the board window, which is where the frame's reports land too.
 const GESTURE_SCRIPT = `(() => {
   const key = (type, value, extra = {}) =>
@@ -48,27 +48,24 @@ const GESTURE_SCRIPT = `(() => {
   const notes = () => document.body.dataset.notes;
   const out = [];
   key("keydown", "Meta", { metaKey: true });
-  key("keyup", "Meta");
-  out.push("lone:" + notes());
-  key("keydown", "Meta", { metaKey: true });
+  out.push("held:" + notes());
   key("keydown", "c", { code: "KeyC", metaKey: true });
-  key("keyup", "Meta");
   out.push("chord:" + notes());
-  key("keydown", "Escape", { code: "Escape" });
-  out.push("escape:" + notes());
+  key("keyup", "Meta");
+  out.push("released:" + notes());
   key("keydown", "Meta", { metaKey: true });
   window.dispatchEvent(new Event("blur"));
-  key("keyup", "Meta");
   out.push("lost:" + notes());
+  key("keyup", "Meta");
   key("keydown", " ", { code: "Space" });
   out.push("space:" + document.body.dataset.gesture);
   key("keyup", " ", { code: "Space" });
-  out.push("released:" + (document.body.dataset.gesture || "none"));
+  out.push("hand:" + (document.body.dataset.gesture || "none"));
   return out.join(" ");
 })()`;
 
 test(
-  "Cmd toggles board notes, a chord or a lost release never flips it, and Space holds the hand",
+  "Cmd held turns board notes on, release or a lost key turns them off, and Space holds the hand",
   { skip: !runBrowserE2e, timeout: 180_000 },
   async () => {
     const temp = await mkdtemp(path.join(tmpdir(), "easel-gestures-e2e-"));
@@ -98,7 +95,7 @@ test(
       browser("open", url);
       browser("wait", "1500");
       const result = browser("eval", GESTURE_SCRIPT);
-      assert.match(result, /lone:true chord:true escape:false lost:false space:hand released:none/, result);
+      assert.match(result, /held:true chord:true released:false lost:false space:hand hand:none/, result);
 
       browser("open", `http://127.0.0.1:${port}/`);
       const home = browser("snapshot");
