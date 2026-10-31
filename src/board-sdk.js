@@ -909,7 +909,8 @@
   // The board's own keys - 0, 1, +, - and Escape, and Cmd +/-/0 - reach it from here
   // too, so the camera answers whichever document has focus. Any other key pressed with
   // Cmd held is a shortcut, which the board must hear so a lone Cmd stays a toggle.
-  const BOARD_KEYS = new Set(["0", "1", "+", "=", "-", "Escape"]);
+  // Cmd-Z and Cmd-Shift-Z step the tune panel's changes.
+  const BOARD_KEYS = new Set(["0", "1", "+", "=", "-", "Escape", "z", "Z"]);
   const MODIFIER_KEYS = new Set(["Meta", "Alt", "Control", "Shift"]);
   function forwardKey(event) {
     if (MODIFIER_KEYS.has(event.key) || event.code === "Space") return;
@@ -919,8 +920,8 @@
       return;
     }
     // Cmd +/-/0 would zoom the browser window instead of the board.
-    if (event.metaKey || event.ctrlKey) event.preventDefault();
-    post({ type: "key", key: event.key, metaKey: event.metaKey, ctrlKey: event.ctrlKey });
+    if ((event.metaKey || event.ctrlKey) && !/^z$/i.test(event.key)) event.preventDefault();
+    post({ type: "key", key: event.key, metaKey: event.metaKey, ctrlKey: event.ctrlKey, shiftKey: event.shiftKey });
   }
   document.addEventListener(
     "keydown",

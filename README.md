@@ -233,6 +233,8 @@ The gesture is read from the press itself, and the frame swallows an Option pres
 ## How It Works
 
 ```
+
+With the tune panel open, **Cmd-Z** undoes the last tune change and **Cmd-Shift-Z** redoes it, one step per finished drag, colour pick or select change, from the panel, the board or inside a design; a text field keeps its own undo.
 ┌───────────────┐
 │ Agent writes  │
 │ artifact.html │

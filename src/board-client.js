@@ -1899,6 +1899,15 @@ function isTextTarget(target) {
   );
 }
 
+/** A field that takes typed text, unlike a slider, swatch or select. */
+function isTypingTarget(target) {
+  if (!(target instanceof HTMLElement)) return false;
+  if (target.isContentEditable || target.tagName === "TEXTAREA") return true;
+  if (target.tagName !== "INPUT") return false;
+  const type = String(target.getAttribute("type") || "text").toLowerCase();
+  return !["range", "color", "checkbox", "radio", "button"].includes(type);
+}
+
 function recordForShield(target) {
   if (!(target instanceof Element)) return null;
   const shield = target.closest(".shield");
@@ -3653,6 +3662,51 @@ function tuneSpecFor(itemId) {
   return state.autoSpecs.get(itemId) || [];
 }
 
+// Tune undo: one step per finished change, so a slider drag is one step however
+// many values it passed through. A change opens with the values before it and
+// closes when the pointer lets go, the control commits, or input goes quiet.
+let tuneUndo = [];
+let tuneRedo = [];
+/** @type {null | { itemId: string, before: Record<string, any> }} */
+let tuneEdit = null;
+let tuneEditTimer;
+
+function beginTuneEdit(item) {
+  if (!tuneEdit || tuneEdit.itemId !== item.id) {
+    endTuneEdit();
+    tuneEdit = { itemId: item.id, before: { ...item.tune } };
+  }
+  clearTimeout(tuneEditTimer);
+  tuneEditTimer = setTimeout(endTuneEdit, 800);
+}
+
+function endTuneEdit() {
+  clearTimeout(tuneEditTimer);
+  const edit = tuneEdit;
+  tuneEdit = null;
+  const item = edit && itemById(edit.itemId);
+  if (!edit || !item || JSON.stringify(edit.before) === JSON.stringify(item.tune)) return;
+  tuneUndo.push({ itemId: edit.itemId, before: edit.before, after: { ...item.tune } });
+  tuneRedo = [];
+}
+
+/** Undo (-1) or redo (1) one tune change, live in the frames and saved. */
+function stepTune(direction) {
+  endTuneEdit();
+  const step = (direction < 0 ? tuneUndo : tuneRedo).pop();
+  if (!step) return;
+  (direction < 0 ? tuneRedo : tuneUndo).push(step);
+  const item = itemById(step.itemId);
+  if (!item) return;
+  clearTimeout(tuneSaveTimer);
+  item.tune = { ...(direction < 0 ? step.before : step.after) };
+  postTuneAll(item.id);
+  flushTune(item);
+  if (tuneItemId === item.id) renderTune();
+}
+
+window.addEventListener("pointerup", () => setTimeout(endTuneEdit), true);
+
 function postTune(itemId, deviceId) {
   const item = itemById(itemId);
   const spec = tuneSpecFor(itemId);
@@ -3690,6 +3744,7 @@ function openTune(itemId, deviceId) {
 }
 
 function closeTune() {
+  endTuneEdit();
   for (const cleanup of tuneCleanup) cleanup();
   tuneCleanup = [];
   // Closing the panel keeps what was tuned on the item and drops the preview-only
@@ -4033,6 +4088,7 @@ function createTuneControl(item, control, onChange) {
   if (control.type === "color") valueLabel.hidden = true;
   if (control.type !== "spring" && control.type !== "pad") wrapper.append(label);
   const apply = (raw) => {
+    beginTuneEdit(item);
     item.tune[control.id] = raw;
     valueLabel.textContent = String(raw);
     markTuneDirty();
@@ -4230,6 +4286,7 @@ function createTuneControl(item, control, onChange) {
       paint();
       apply(input.value);
     });
+    input.addEventListener("change", endTuneEdit);
     row.append(swatch, input, hex);
     paint();
     wrapper.append(row);
@@ -4238,7 +4295,10 @@ function createTuneControl(item, control, onChange) {
     for (const option of control.options || [])
       select.append(element("option", { value: option.value, text: option.label }));
     select.value = String(item.tune[control.id] ?? "");
-    select.addEventListener("change", () => apply(select.value));
+    select.addEventListener("change", () => {
+      apply(select.value);
+      endTuneEdit();
+    });
     wrapper.append(select);
   } else {
     const value = Number(item.tune[control.id] ?? control.value ?? 0);
@@ -4258,6 +4318,7 @@ function createTuneControl(item, control, onChange) {
     };
     input.addEventListener("input", paint);
     input.addEventListener("input", () => apply(input.value));
+    input.addEventListener("change", endTuneEdit);
     paint();
     wrapper.append(input);
   }
@@ -4540,7 +4601,16 @@ function onArtboardMessage(event) {
     return;
   }
   if (data.type === "key") {
-    boardKey({ key: String(data.key || ""), metaKey: data.metaKey === true, ctrlKey: data.ctrlKey === true }, () => {});
+    if (data.metaKey === true) noteChord();
+    boardKey(
+      {
+        key: String(data.key || ""),
+        metaKey: data.metaKey === true,
+        ctrlKey: data.ctrlKey === true,
+        shiftKey: data.shiftKey === true,
+      },
+      () => {},
+    );
     return;
   }
   if (data.type === "chord") {
@@ -4641,10 +4711,16 @@ window.addEventListener("message", onArtboardMessage);
 
 /**
  * A camera or panel key, heard by the board itself or handed up by a focused design.
- * @param {{ key: string, metaKey: boolean, ctrlKey: boolean }} event
+ * @param {{ key: string, metaKey: boolean, ctrlKey: boolean, shiftKey?: boolean }} event
  * @param {() => void} preventDefault
  */
 function boardKey(event, preventDefault) {
+  if ((event.metaKey || event.ctrlKey) && /^z$/i.test(event.key)) {
+    if (!tuneItemId) return;
+    preventDefault();
+    stepTune(event.shiftKey ? 1 : -1);
+    return;
+  }
   if ((event.metaKey || event.ctrlKey) && ["+", "=", "-", "0"].includes(event.key)) {
     preventDefault();
     if (event.key === "0") {
@@ -4700,6 +4776,8 @@ window.addEventListener("keydown", (event) => {
     return;
   }
   if (event.altKey || (isTextTarget(event.target) && !event.metaKey && !event.ctrlKey)) return;
+  // Undo while typing belongs to the field being typed in.
+  if (/^z$/i.test(event.key) && isTypingTarget(event.target)) return;
   boardKey(event, () => event.preventDefault());
 });
 
