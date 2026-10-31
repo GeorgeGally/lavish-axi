@@ -660,29 +660,6 @@ body[data-dragging="true"] .shield {
   color: var(--ink);
 }
 
-.history-toggle {
-  height: 1.6em;
-  margin-left: 0.4em;
-  padding: 0 0.5em;
-  border: 0;
-  border-radius: 0.45em;
-  background: transparent;
-  color: var(--ink-3);
-  font: inherit;
-  font-size: 0.92em;
-  cursor: pointer;
-}
-
-.history-toggle[hidden] {
-  display: none;
-}
-
-.history-toggle:hover,
-.history-toggle[aria-expanded="true"] {
-  background: rgba(22, 24, 29, 0.06);
-  color: var(--ink);
-}
-
 /* An item's history: its builds as a strip along the foot of the board, oldest first
    and the file as it is now last. */
 .history {
@@ -840,6 +817,10 @@ body[data-dragging="true"] .shield {
 }
 
 /* Answered pins live in the board gutter, never on the artwork. */
+.old-notes-hidden .pin-gutter {
+  display: none;
+}
+
 .pin-gutter {
   position: absolute;
   inset: 0;

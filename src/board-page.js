@@ -75,6 +75,8 @@ export function createBoardHtml(
   <div class="board-name" id="boardName">${escapeHtml(board.name)}</div>
   <nav class="tabs" id="tabs" role="tablist" aria-label="Board tabs"></nav>
   <div class="bar-spacer"></div>
+  <button class="bar-toggle" id="historyToggle" type="button" hidden>History</button>
+  <button class="bar-toggle" id="oldNotesToggle" type="button">Old notes shown</button>
   <div class="segmented" id="devices" role="group" aria-label="Device"></div>
   <div class="zoom" role="group" aria-label="Zoom">
     <button id="zoomOut" type="button" title="Zoom out" aria-label="Zoom out">&minus;</button>

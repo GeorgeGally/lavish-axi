@@ -686,6 +686,10 @@ function createArtboard(item, device) {
     openTune(item.id, device.id);
   });
   label.append(name, updated, width, tune);
+  label.addEventListener("click", () => {
+    pickedItem = item.id;
+    renderHistoryToggle();
+  });
   canvas.append(root, label);
   // Every frame loads up front: the layout needs each page's real height.
   iframe.src = itemUrl(item, device.id);
@@ -830,6 +834,7 @@ function render() {
     state.heights.delete(id);
   }
   positionHistory();
+  renderHistoryToggle();
   emptyElement.hidden = layout.groups.length > 0;
 }
 
@@ -873,7 +878,6 @@ function renderBuilds(record, item) {
       });
       return node;
     }),
-    toggle,
   );
 }
 
@@ -884,6 +888,8 @@ function renderBuilds(record, item) {
 // it. Picking one lays that build out on the board beside the current version, at the
 // same device widths, as a frame the board never answers: no pins, notes or tune.
 let historyItem = "";
+// The design last picked by its label; the top bar's History opens this one.
+let pickedItem = "";
 /** @type {{ itemId: string, hash: string } | null} */
 let compare = null;
 /** @type {Map<string, any>} */
@@ -965,6 +971,7 @@ function openHistory(itemId, hash = "") {
   const item = itemById(itemId);
   if (!item) return;
   historyItem = itemId;
+  pickedItem = itemId;
   const current = historyBuilds(item).at(-1);
   setCompare(hash && hash !== current?.hash ? { itemId, hash } : null);
   requestThumbs(itemId);
@@ -977,7 +984,49 @@ function closeBuildPreview() {
   compare = null;
   document.getElementById("history")?.remove();
   if (state.layout) relayout();
+  renderHistoryToggle();
 }
+
+/** The design the top bar's History is for: the picked one, else the first on this tab. */
+function historyTarget() {
+  const items = activeItems();
+  return items.find((item) => item.id === pickedItem) || items[0];
+}
+
+function renderHistoryToggle() {
+  const toggle = document.getElementById("historyToggle");
+  if (!toggle) return;
+  const item = historyTarget();
+  toggle.hidden = !item || historyBuilds(item).length < 2;
+  toggle.setAttribute("aria-pressed", String(Boolean(historyItem)));
+  toggle.title = item ? `History of ${designName(item, "")}` : "History";
+}
+
+document.getElementById("historyToggle")?.addEventListener("click", () => {
+  if (historyItem) return closeBuildPreview();
+  const item = historyTarget();
+  if (item) openHistory(item.id);
+});
+
+// Answered notes parked in the gutter can be hidden; open notes always stay on the design.
+const oldNotesStorageKey = `easel:old-notes:${key}`;
+let showOldNotes = readStorage(oldNotesStorageKey) !== "off";
+
+function renderOldNotesToggle() {
+  const toggle = document.getElementById("oldNotesToggle");
+  document.body.classList.toggle("old-notes-hidden", !showOldNotes);
+  if (!toggle) return;
+  toggle.setAttribute("aria-pressed", String(showOldNotes));
+  toggle.textContent = showOldNotes ? "Old notes shown" : "Show old notes";
+  toggle.title = showOldNotes ? "Hide answered notes" : "Show answered notes";
+}
+
+document.getElementById("oldNotesToggle")?.addEventListener("click", () => {
+  showOldNotes = !showOldNotes;
+  writeStorage(oldNotesStorageKey, showOldNotes ? "on" : "off");
+  renderOldNotesToggle();
+});
+renderOldNotesToggle();
 
 function setCompare(next) {
   const itemId = next?.itemId || compare?.itemId || "";
