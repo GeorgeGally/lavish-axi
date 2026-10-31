@@ -4613,7 +4613,7 @@ function boardKey(event, preventDefault) {
   else if (event.key === "-") zoomBy(1 / 1.25);
   else if (event.key === "Escape") {
     // Escape closes what is open first; with nothing open it turns notes off.
-    if (!noteWindow && !tuneItemId && !document.getElementById("buildPreview")) setAnnotate(false);
+    if (!noteWindow && !tuneItemId && !historyItem && !compare) setAnnotate(false);
     closeNoteWindow();
     closeBuildPreview();
     closeTune();
