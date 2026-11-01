@@ -1871,8 +1871,9 @@ function noteChord() {
 /**
  * @param {"Meta" | "Alt"} name
  * @param {boolean} [joined] another modifier (Shift, Ctrl, Cmd or Option) was already held
+ * @param {number} [at] when the key went down, on this document's clock
  */
-function modifierPressed(name, joined = false) {
+function modifierPressed(name, joined = false, at = performance.now()) {
   const tap = modifierTaps[name];
   if (tap.down) return;
   // Cmd and Option pressed together, or either with Space held, is a chord for both.
@@ -1880,17 +1881,20 @@ function modifierPressed(name, joined = false) {
   noteChord();
   tap.down = true;
   tap.chord = others;
-  tap.at = performance.now();
+  tap.at = at;
 }
 
 /**
  * @param {"Meta" | "Alt"} name
  * @param {boolean} [lost] the release happened somewhere else, so it toggles nothing
  * @param {boolean} [joined] another modifier was still held at the release
+ * @param {number} [at] when the key came up, on this document's clock
  */
-function modifierReleased(name, lost = false, joined = false) {
+function modifierReleased(name, lost = false, joined = false, at = performance.now()) {
   const tap = modifierTaps[name];
-  const lone = tap.down && !tap.chord && !lost && !joined && performance.now() - tap.at <= TAP_MAX_MS;
+  // A tap is timed by the keys' own timestamps, never by when the board heard them: a busy
+  // focused design can hold a keyup back for hundreds of ms before reporting it.
+  const lone = tap.down && !tap.chord && !lost && !joined && at - tap.at <= TAP_MAX_MS;
   tap.down = false;
   tap.chord = false;
   if (!lone) return;
@@ -4884,13 +4888,16 @@ function onArtboardMessage(event) {
     }
     const space = Boolean(data.space);
     const joined = data.other === true;
+    // The frame stamps the key event on the shared wall clock; read it on the board's own.
+    const stamped = Number(data.at) - performance.timeOrigin;
+    const at = Number.isFinite(stamped) ? Math.min(stamped, performance.now()) : performance.now();
     if ((space && !spaceHeld) || joined) noteChord();
     for (const [name, down] of /** @type {const} */ ([
       ["Meta", data.meta === true],
       ["Alt", data.alt === true],
     ])) {
-      if (down && !modifierTaps[name].down) modifierPressed(name, joined);
-      else if (!down && modifierTaps[name].down) modifierReleased(name, false, joined);
+      if (down && !modifierTaps[name].down) modifierPressed(name, joined, at);
+      else if (!down && modifierTaps[name].down) modifierReleased(name, false, joined, at);
     }
     if (space === spaceHeld) return;
     spaceHeld = space;
@@ -5072,7 +5079,7 @@ function releaseHeldKeys() {
 
 window.addEventListener("keydown", (event) => {
   if (event.key === "Meta" || event.key === "Alt") {
-    modifierPressed(event.key, otherModifierHeld(event));
+    modifierPressed(event.key, otherModifierHeld(event), event.timeStamp);
     return;
   }
   noteChord();
@@ -5100,7 +5107,8 @@ window.addEventListener("keydown", (event) => {
 });
 
 window.addEventListener("keyup", (event) => {
-  if (event.key === "Meta" || event.key === "Alt") modifierReleased(event.key, false, otherModifierHeld(event));
+  if (event.key === "Meta" || event.key === "Alt")
+    modifierReleased(event.key, false, otherModifierHeld(event), event.timeStamp);
   if (event.code === "Space" && spaceHeld) {
     spaceHeld = false;
     updateGestureMode();

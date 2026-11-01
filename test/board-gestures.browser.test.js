@@ -327,6 +327,46 @@ test(
       await tap("Meta");
       assert.equal(await status(), off);
 
+      // Clicked into a busy design in Desktop view: the design's own work holds each keyup
+      // back past the tap limit before the frame can report it. A quick tap still toggles,
+      // because a tap is timed by the keys themselves, and a click then leaves a note.
+      const busy = await pointInDesign("#title");
+      await click(busy.x, busy.y);
+      assert.equal(await evaluate(`document.hasFocus()`, busy.sessionId), true, "the click focused the design");
+      await evaluate(
+        `document.addEventListener("keydown", () => setTimeout(() => { const t = performance.now(); while (performance.now() - t < 500) {} }))`,
+        busy.sessionId,
+      );
+      /** @param {"Meta" | "Alt"} name */
+      const quickTap = async (name) => {
+        await down(name);
+        await sleep(100);
+        await up(name);
+        await sleep(500);
+      };
+      await quickTap("Meta");
+      assert.equal(await status(), notesOn, "a quick Cmd tap from a busy focused design turns notes on");
+      await quickTap("Alt");
+      assert.equal(await status(), controlsOn, "a quick Option tap from a busy focused design swaps to the selector");
+      await quickTap("Meta");
+      assert.equal(await status(), notesOn);
+      const noted = await pointInDesign("#title");
+      await click(noted.x, noted.y);
+      assert.equal(
+        await evaluate(`document.querySelector(".note-pop") ? "note" : "none"`),
+        "note",
+        "the click leaves a note",
+      );
+      await press("Escape", "Escape");
+      await press("Escape", "Escape");
+      assert.equal(await status(), off);
+      await click(noted.x, noted.y);
+      await down("Meta");
+      await sleep(600);
+      await up("Meta");
+      await sleep(500);
+      assert.equal(await status(), off, "a long Cmd hold in a busy focused design still leaves notes off");
+
       await send("Page.navigate", { url: `http://127.0.0.1:${port}/` });
       await sleep(1000);
       const home = await evaluate(`document.body.innerText`);

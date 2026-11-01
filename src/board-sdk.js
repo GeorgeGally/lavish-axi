@@ -888,9 +888,13 @@
   // Cmd and Option stop arming as soon as the reviewer touches the design itself.
   // `other` is Shift or Ctrl: with either held, a Cmd or Option press is never a tap.
   const held = { space: false, alt: false, meta: false, other: false };
-  /** @param {boolean} [blur] focus left the frame: what was held was let go somewhere else */
-  function reportHeld(blur = false) {
-    post({ type: "held", space: held.space, alt: held.alt, meta: held.meta, other: held.other, blur });
+  /**
+   * @param {boolean} [blur] focus left the frame: what was held was let go somewhere else
+   * @param {number} [at] the key event's time on the wall clock, so the board times a tap by
+   *   the keys themselves and not by when a busy design got round to reporting them
+   */
+  function reportHeld(blur = false, at = performance.timeOrigin + performance.now()) {
+    post({ type: "held", space: held.space, alt: held.alt, meta: held.meta, other: held.other, blur, at });
   }
   function readHeld(event, down) {
     // A space typed into a field is a space, never the hand.
@@ -904,7 +908,7 @@
     if (next.alt === held.alt && next.meta === held.meta && next.space === held.space && next.other === held.other)
       return;
     Object.assign(held, next);
-    reportHeld();
+    reportHeld(false, performance.timeOrigin + event.timeStamp);
   }
   function editable(target) {
     return (
