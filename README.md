@@ -35,6 +35,15 @@ The agent opens the board (`liesel board open board`), writes HTML files into `b
 
 **Or start from the browser.** With the server running, the Liesel home page (the address `liesel board open` prints, without the `/board/...` part) shows your open boards as cards, newest first: a live preview of each board's first design, its name, its folder (shortened just enough to tell same-named boards apart), when it last changed, and how many agent replies you have not read yet. **New board** opens a small form: give it a name and a folder, typed or picked with **Browse**. A missing folder is created; a folder that already holds HTML files opens with each one on the board. Drop more HTML files onto the board to add them.
 
+**Or open a project.** **Open project** on the home page reviews a real app instead of copies of it: pick the project's folder (typed or with **Browse**), or paste a GitHub URL and Liesel clones it into `~/Liesel/<repo>`. The board lives in the project's own `.liesel/` folder (`board.json`, the chat history, dropped images and history snapshots), which Liesel keeps out of git by adding `/.liesel/` to `.git/info/exclude`; your `.gitignore` is never touched. The project shows on the home page under its repository's name, and its agent works in the repository root.
+
+A project board starts with one live page, `/`. Live pages are the project's running dev server, shown in the same device frames as any design through a local proxy, so notes, Controls, History, device sizes and the agent loop all work on the real pages:
+
+- **Start** in the top bar runs the project's dev server. Liesel finds the command in `package.json` (`dev`, then `start`, with the project's package manager) and shows it in **Settings → Project** before anything runs; nothing from the project runs until you press Start. Type another command there, or give only the port of a dev server you run yourself. **Stop** stops it, and closing Liesel stops it too.
+- **Add page** takes a URL path on the dev server, such as `/store` or `/products/x`, and adds it as its own item.
+- A note on a live page carries the page's path and the element's selector, so the agent edits the project's own source files. The page hot-reloads through the dev server as files change; a page that does not reload itself is reloaded by the board after a save. Each settled change is kept as a History round (the page as rendered, without scripts).
+- One dev server per project, on this machine only (`localhost`), with no login flows. The dev server command and port are stored on this machine, in the state folder, never in the repository.
+
 ## Reviewing a board
 
 - **Cmd** - tap to turn notes on; click any element to pin a note to it; tap again to turn notes off.

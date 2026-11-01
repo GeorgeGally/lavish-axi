@@ -14,6 +14,7 @@ import { PRODUCT_NAME } from "./brand.js";
  * @property {string} updatedAt ISO time of the last change
  * @property {number} agentReplies how many agent replies the board's chat holds
  * @property {{ kind: "image" | "frame", src: string } | null} preview
+ * @property {boolean} [project] a project board: its folder is the repository
  */
 
 /**
@@ -198,6 +199,7 @@ h1{margin:0;font-size:28px;line-height:1.15;font-weight:650;letter-spacing:-.01e
 .board-meta{display:flex;align-items:baseline;gap:12px;margin:4px 0 0;color:var(--ink-3);font-size:13px}
 .folder{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .board-meta time{flex:none;font-variant-numeric:tabular-nums}
+.kind{flex:none;padding:0 8px;border-radius:999px;background:var(--hover);color:var(--ink-2);font-size:12px;font-weight:550;line-height:20px}
 .empty{max-width:420px;margin:120px auto 0;padding-bottom:80px;text-align:center}
 .empty h2{margin:0;font-size:20px;font-weight:600;text-wrap:balance}
 .empty p{margin:8px 0 0;color:var(--ink-3);text-wrap:pretty}
@@ -282,90 +284,132 @@ const SCRIPT = `(() => {
     else load(frame);
   }
 
+  const slug = (value) => value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  const titled = (value) => value.replace(/[-_]+/g, " ").replace(/\\s+/g, " ").trim().replace(/^./, (c) => c.toUpperCase());
+
+  // A folder browser over the same-origin folder list: one per dialog.
+  const folderBrowser = (prefix, { input, error, onChoose }) => {
+    const toggle = document.getElementById("browse" + prefix[0].toUpperCase() + prefix.slice(1));
+    const pane = document.getElementById(prefix + "Browser");
+    const pathLabel = document.getElementById(prefix + "BrowserPath");
+    const count = document.getElementById(prefix + "BrowserCount");
+    const list = document.getElementById(prefix + "BrowserList");
+    const up = document.getElementById(prefix + "BrowserUp");
+    let parent = null;
+    const show = async (target, { nearest = false, choose = false } = {}) => {
+      list.setAttribute("aria-busy", "true");
+      try {
+        const response = await fetch("/api/folder-list", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ path: target, nearest }),
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(payload.error || "That folder could not be read.");
+        parent = payload.parent;
+        up.disabled = !parent;
+        pathLabel.textContent = payload.display;
+        pathLabel.title = payload.path;
+        count.textContent = payload.html > 0 ? (payload.html === 1 ? "1 design" : payload.html + " designs") : "";
+        list.replaceChildren();
+        for (const entry of payload.folders) {
+          const row = document.createElement("li");
+          const button = document.createElement("button");
+          button.type = "button";
+          button.innerHTML = ${JSON.stringify(FOLDER_ICON)};
+          const label = document.createElement("span");
+          label.textContent = entry.name;
+          button.append(label);
+          button.addEventListener("click", () => show(entry.path, { choose: true }));
+          row.append(button);
+          list.append(row);
+        }
+        if (payload.folders.length === 0) {
+          const note = document.createElement("li");
+          note.className = "browser-note";
+          note.textContent = "No folders inside.";
+          list.append(note);
+        }
+        if (choose) {
+          input.value = payload.display;
+          onChoose?.(payload);
+        }
+      } catch (failure) {
+        error.textContent = failure instanceof Error ? failure.message : String(failure);
+      } finally {
+        list.removeAttribute("aria-busy");
+      }
+    };
+    toggle.addEventListener("click", () => {
+      const opening = pane.hidden;
+      pane.hidden = !opening;
+      toggle.setAttribute("aria-expanded", String(opening));
+      if (opening) show(/^https?:|github\\.com/i.test(input.value) ? "~" : input.value, { nearest: true });
+    });
+    up.addEventListener("click", () => { if (parent) show(parent, { choose: true }); });
+  };
+
+  const modal = (dialog, cancel, opener, focus, error) => {
+    for (const button of document.querySelectorAll(opener)) {
+      button.addEventListener("click", () => {
+        error.textContent = "";
+        dialog.showModal();
+        focus.focus();
+      });
+    }
+    cancel.addEventListener("click", () => dialog.close());
+    dialog.addEventListener("click", (event) => { if (event.target === dialog) dialog.close(); });
+  };
+
+  // Open project: a repository folder on this machine, or a GitHub URL to clone.
+  const projectDialog = document.getElementById("openProjectDialog");
+  const projectForm = document.getElementById("openProject");
+  const projectPath = projectForm.elements.namedItem("path");
+  const projectError = document.getElementById("openProjectError");
+  const projectSubmit = document.getElementById("openProjectSubmit");
+  modal(projectDialog, document.getElementById("openProjectCancel"), "[data-open-project]", projectPath, projectError);
+  folderBrowser("project", { input: projectPath, error: projectError });
+  projectForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    projectError.textContent = "";
+    projectSubmit.disabled = true;
+    projectSubmit.textContent = /github\\.com\\//i.test(projectPath.value) ? "Cloning…" : "Opening…";
+    try {
+      const response = await fetch("/api/projects", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ path: projectPath.value }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.key) throw new Error(payload.error || "The project could not be opened.");
+      location.href = "/board/" + encodeURIComponent(payload.key);
+    } catch (failure) {
+      projectError.textContent = failure instanceof Error ? failure.message : String(failure);
+      projectSubmit.disabled = false;
+      projectSubmit.textContent = "Open project";
+    }
+  });
+
   const dialog = document.getElementById("newBoardDialog");
   const form = document.getElementById("newBoard");
   const name = form.elements.namedItem("name");
   const folder = form.elements.namedItem("folder");
   const error = document.getElementById("newBoardError");
   const submit = document.getElementById("newBoardSubmit");
-  const browse = document.getElementById("browseFolder");
-  const browser = document.getElementById("folderBrowser");
-  const browserPath = document.getElementById("folderBrowserPath");
-  const browserCount = document.getElementById("folderBrowserCount");
-  const browserList = document.getElementById("folderBrowserList");
-  const browserUp = document.getElementById("folderBrowserUp");
   let folderEdited = false;
-  let parent = null;
-  const slug = (value) => value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
-  const titled = (value) => value.replace(/[-_]+/g, " ").replace(/\\s+/g, " ").trim().replace(/^./, (c) => c.toUpperCase());
-
-  for (const opener of document.querySelectorAll("[data-open-new-board]")) {
-    opener.addEventListener("click", () => {
-      error.textContent = "";
-      dialog.showModal();
-      name.focus();
-    });
-  }
-  document.getElementById("newBoardCancel").addEventListener("click", () => dialog.close());
-  dialog.addEventListener("click", (event) => { if (event.target === dialog) dialog.close(); });
-
+  modal(dialog, document.getElementById("newBoardCancel"), "[data-open-new-board]", name, error);
   name.addEventListener("input", () => {
     if (!folderEdited) folder.value = "~/Liesel/" + slug(name.value);
   });
   folder.addEventListener("input", () => { folderEdited = true; });
-
-  const show = async (target, { nearest = false, choose = false } = {}) => {
-    browserList.setAttribute("aria-busy", "true");
-    try {
-      const response = await fetch("/api/folder-list", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ path: target, nearest }),
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(payload.error || "That folder could not be read.");
-      parent = payload.parent;
-      browserUp.disabled = !parent;
-      browserPath.textContent = payload.display;
-      browserPath.title = payload.path;
-      browserCount.textContent = payload.html > 0 ? (payload.html === 1 ? "1 design" : payload.html + " designs") : "";
-      browserList.replaceChildren();
-      for (const entry of payload.folders) {
-        const row = document.createElement("li");
-        const button = document.createElement("button");
-        button.type = "button";
-        button.innerHTML = ${JSON.stringify(FOLDER_ICON)};
-        const label = document.createElement("span");
-        label.textContent = entry.name;
-        button.append(label);
-        button.addEventListener("click", () => show(entry.path, { choose: true }));
-        row.append(button);
-        browserList.append(row);
-      }
-      if (payload.folders.length === 0) {
-        const note = document.createElement("li");
-        note.className = "browser-note";
-        note.textContent = "No folders inside.";
-        browserList.append(note);
-      }
-      if (choose) {
-        folder.value = payload.display;
-        folderEdited = true;
-        if (!name.value.trim()) name.value = titled(payload.display.split("/").pop() || "");
-      }
-    } catch (failure) {
-      error.textContent = failure instanceof Error ? failure.message : String(failure);
-    } finally {
-      browserList.removeAttribute("aria-busy");
-    }
-  };
-  browse.addEventListener("click", () => {
-    const opening = browser.hidden;
-    browser.hidden = !opening;
-    browse.setAttribute("aria-expanded", String(opening));
-    if (opening) show(folder.value, { nearest: true });
+  folderBrowser("folder", {
+    input: folder,
+    error,
+    onChoose: (payload) => {
+      folderEdited = true;
+      if (!name.value.trim()) name.value = titled(payload.display.split("/").pop() || "");
+    },
   });
-  browserUp.addEventListener("click", () => { if (parent) show(parent, { choose: true }); });
 
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -387,6 +431,11 @@ const SCRIPT = `(() => {
   });
 })();`;
 
+/** The folder browser under a folder field; `prefix` names its ids. @param {string} prefix */
+function browserMarkup(prefix) {
+  return `<div class="browser" id="${prefix}Browser" hidden><div class="browser-head"><button class="browser-up" id="${prefix}BrowserUp" type="button" aria-label="Up one folder" title="Up one folder">${UP_ICON}</button><span class="browser-path" id="${prefix}BrowserPath"></span><span class="browser-count" id="${prefix}BrowserCount"></span></div><ul class="browser-list" id="${prefix}BrowserList" aria-label="Folders"></ul></div>`;
+}
+
 /** @param {HomeBoard} board @param {number} now */
 function boardCard(board, now) {
   const key = escapeHtml(board.key);
@@ -405,7 +454,7 @@ function boardCard(board, now) {
   const time = when
     ? `<time datetime="${escapeHtml(board.updatedAt)}" title="${escapeHtml(full)}">${escapeHtml(when)}</time>`
     : "";
-  return `<article class="board"><div class="thumb">${preview}</div><div class="board-title"><h2 class="board-name"><a href="/board/${key}">${name}</a></h2><span class="unread" data-unread-key="${key}" data-replies="${Math.max(0, Math.trunc(Number(board.agentReplies) || 0))}" hidden></span></div><p class="board-meta"><span class="folder" title="${escapeHtml(board.folderTitle)}">${escapeHtml(board.folder)}</span>${time}</p></article>`;
+  return `<article class="board"><div class="thumb">${preview}</div><div class="board-title"><h2 class="board-name"><a href="/board/${key}">${name}</a></h2><span class="unread" data-unread-key="${key}" data-replies="${Math.max(0, Math.trunc(Number(board.agentReplies) || 0))}" hidden></span></div><p class="board-meta">${board.project ? '<span class="kind">Project</span>' : ""}<span class="folder" title="${escapeHtml(board.folderTitle)}">${escapeHtml(board.folder)}</span>${time}</p></article>`;
 }
 
 /**
@@ -417,7 +466,8 @@ export function createHomeHtml(boards, { now = Date.now() } = {}) {
   const content =
     boards.length > 0
       ? `<section class="boards" aria-label="Boards">${boards.map((board) => boardCard(board, now)).join("")}</section>`
-      : '<section class="empty"><h2>No boards open yet</h2><p>New board starts one from a folder of HTML designs.</p></section>';
-  const dialog = `<dialog id="newBoardDialog" aria-labelledby="newBoardTitle"><div class="sheet"><h2 id="newBoardTitle">New board</h2><form id="newBoard" autocomplete="off"><label>Name<input name="name" required maxlength="120" placeholder="Checkout redesign"></label><div class="field"><label class="field-label" for="newBoardFolder">Folder</label><div class="folder-row"><input id="newBoardFolder" name="folder" required value="~/Liesel/" spellcheck="false"><button class="button" id="browseFolder" type="button" aria-expanded="false" aria-controls="folderBrowser">Browse</button></div><div class="browser" id="folderBrowser" hidden><div class="browser-head"><button class="browser-up" id="folderBrowserUp" type="button" aria-label="Up one folder" title="Up one folder">${UP_ICON}</button><span class="browser-path" id="folderBrowserPath"></span><span class="browser-count" id="folderBrowserCount"></span></div><ul class="browser-list" id="folderBrowserList" aria-label="Folders"></ul></div><p class="hint">HTML files in the folder join the board.</p></div><p class="error" id="newBoardError" role="alert"></p><div class="sheet-actions"><button class="button button-quiet" id="newBoardCancel" type="button">Cancel</button><button class="button button-primary" id="newBoardSubmit" type="submit">Create board</button></div></form></div></dialog>`;
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${PRODUCT_NAME}</title><style>${STYLE}</style></head><body><div class="wrap"><header class="top"><h1>${PRODUCT_NAME}</h1><div class="actions" id="homeActions"><button class="button" type="button" data-open-new-board>${PLUS_ICON}New board</button></div></header><main>${content}</main></div>${dialog}<script>${SCRIPT}</script></body></html>`;
+      : '<section class="empty"><h2>No boards open yet</h2><p>Open project reviews a repository\'s real pages. New board starts one from a folder of HTML designs.</p></section>';
+  const dialog = `<dialog id="newBoardDialog" aria-labelledby="newBoardTitle"><div class="sheet"><h2 id="newBoardTitle">New board</h2><form id="newBoard" autocomplete="off"><label>Name<input name="name" required maxlength="120" placeholder="Checkout redesign"></label><div class="field"><label class="field-label" for="newBoardFolder">Folder</label><div class="folder-row"><input id="newBoardFolder" name="folder" required value="~/Liesel/" spellcheck="false"><button class="button" id="browseFolder" type="button" aria-expanded="false" aria-controls="folderBrowser">Browse</button></div>${browserMarkup("folder")}<p class="hint">HTML files in the folder join the board.</p></div><p class="error" id="newBoardError" role="alert"></p><div class="sheet-actions"><button class="button button-quiet" id="newBoardCancel" type="button">Cancel</button><button class="button button-primary" id="newBoardSubmit" type="submit">Create board</button></div></form></div></dialog>`;
+  const project = `<dialog id="openProjectDialog" aria-labelledby="openProjectTitle"><div class="sheet"><h2 id="openProjectTitle">Open project</h2><form id="openProject" autocomplete="off"><div class="field"><label class="field-label" for="openProjectPath">Project folder or GitHub URL</label><div class="folder-row"><input id="openProjectPath" name="path" required spellcheck="false" placeholder="~/code/shop or github.com/owner/repo"><button class="button" id="browseProject" type="button" aria-expanded="false" aria-controls="projectBrowser">Browse</button></div>${browserMarkup("project")}<p class="hint">A GitHub URL is cloned into ~/${PRODUCT_NAME}. Nothing runs until you press Start.</p></div><p class="error" id="openProjectError" role="alert"></p><div class="sheet-actions"><button class="button button-quiet" id="openProjectCancel" type="button">Cancel</button><button class="button button-primary" id="openProjectSubmit" type="submit">Open project</button></div></form></div></dialog>`;
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${PRODUCT_NAME}</title><style>${STYLE}</style></head><body><div class="wrap"><header class="top"><h1>${PRODUCT_NAME}</h1><div class="actions" id="homeActions"><button class="button" type="button" data-open-new-board>${PLUS_ICON}New board</button><button class="button button-primary" type="button" data-open-project>Open project</button></div></header><main>${content}</main></div>${dialog}${project}<script>${SCRIPT}</script></body></html>`;
 }

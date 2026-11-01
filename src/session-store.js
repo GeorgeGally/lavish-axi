@@ -904,21 +904,30 @@ function normalizePrompt(prompt) {
 
 /**
  * @param {unknown} value
- * @returns {{ id: string, label: string } | null}
+ * @returns {{ id: string, label: string, page?: string } | null}
  */
 function normalizeBoardItemRef(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-  const entry = /** @type {{ id?: unknown, label?: unknown }} */ (value);
+  const entry = /** @type {{ id?: unknown, label?: unknown, page?: unknown }} */ (value);
   const id = String(entry.id || "")
     .trim()
     .slice(0, 60);
   if (!id) return null;
-  return {
+  /** @type {{ id: string, label: string, page?: string }} */
+  const reference = {
     id,
     label: String(entry.label || "")
       .trim()
       .slice(0, 120),
   };
+  // A note on a live project page carries the URL path it was written on, so the agent
+  // can find the route that renders it.
+  const page = String(entry.page || "").trim();
+  // eslint-disable-next-line no-control-regex
+  if (page.startsWith("/") && !page.startsWith("//") && page.length <= 500 && !/[\s\u0000-\u001f\\]/.test(page)) {
+    reference.page = page;
+  }
+  return reference;
 }
 
 /**

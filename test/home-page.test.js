@@ -111,3 +111,30 @@ test("the home page has an empty state and a compact New board dialog with one s
   assert.ok(hint[1].length <= 80, `hint stays one short line: ${hint[1]}`);
   assert.match(html, /prefers-color-scheme: ?dark/);
 });
+
+test("the home page leads with Open project, and marks project boards", () => {
+  const html = createHomeHtml(
+    [
+      {
+        key: "k1",
+        name: "shop",
+        folder: "~/code/shop",
+        folderTitle: "/Users/me/code/shop",
+        updatedAt: new Date().toISOString(),
+        agentReplies: 0,
+        preview: null,
+        project: true,
+      },
+    ],
+    { now: Date.now() },
+  );
+  assert.match(html, /<button class="button button-primary" type="button" data-open-project>Open project<\/button>/);
+  assert.match(html, /<dialog[^>]*id="openProjectDialog"/);
+  assert.match(html, /<form[^>]*id="openProject"/);
+  assert.match(html, /name="path"/);
+  assert.match(html, /id="browseProject"/);
+  assert.match(html, /<span class="kind">Project<\/span>/);
+  assert.match(html, /fetch\("\/api\/projects"/);
+  const hints = [...html.matchAll(/<p class="hint"[^>]*>([^<]*)<\/p>/g)].map((match) => match[1]);
+  for (const hint of hints) assert.ok(hint.length <= 80, `hint stays one short line: ${hint}`);
+});

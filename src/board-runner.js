@@ -199,30 +199,48 @@ export function createRunnerConfigStore(stateRoot) {
  * @param {{
  *   boardDir: string,
  *   boardName: string,
- *   items: Array<{ id: string, label: string, file: string }>,
+ *   items: Array<{ id: string, label: string, file: string, page?: string }>,
  *   prompts: any[],
  *   cwd: string,
+ *   project?: { root: string, url: string } | null,
  * }} options
  */
-export function buildRunnerPrompt({ boardDir, boardName, items, prompts, cwd }) {
+export function buildRunnerPrompt({ boardDir, boardName, items, prompts, cwd, project = null }) {
   const byId = new Map(items.map((item) => [item.id, item]));
-  const lines = [
-    `You are the agent for a Liesel board: a folder of HTML designs that the user is reviewing in a browser.`,
-    `Board: ${boardName}`,
-    `Board folder: ${boardDir}`,
-    ...(cwd !== boardDir ? [`Working folder: ${cwd}`] : []),
-    "",
-    "The user sent the notes below. Apply each one by editing the HTML file of the item it names, in place; the board reloads a file as soon as it is saved. board.json holds only positions, labels and notes, never an item's content, so do not edit it. Open any image path listed under a note to see what the user means.",
+  const lines = project
+    ? [
+        `You are the agent for a Liesel project board: the user is reviewing the real, running pages of the project at ${project.root} in a browser.`,
+        `Board: ${boardName}`,
+        `Project folder: ${project.root}`,
+        ...(project.url ? [`Dev server: ${project.url}`] : []),
+        `Board folder: ${boardDir}`,
+        ...(cwd !== project.root ? [`Working folder: ${cwd}`] : []),
+        "",
+        "The user sent the notes below. A note on a live page names its URL path and the element's CSS selector: find the project source files that render that page and element (routes, components, styles) and edit them in place. The page hot-reloads through the dev server, so do not copy it into a new HTML file. A note on an HTML file item is applied by editing that file in place. Do not edit .liesel/board.json or anything under .liesel/.liesel-builds. Open any image path listed under a note to see what the user means.",
+      ]
+    : [
+        `You are the agent for a Liesel board: a folder of HTML designs that the user is reviewing in a browser.`,
+        `Board: ${boardName}`,
+        `Board folder: ${boardDir}`,
+        ...(cwd !== boardDir ? [`Working folder: ${cwd}`] : []),
+        "",
+        "The user sent the notes below. Apply each one by editing the HTML file of the item it names, in place; the board reloads a file as soon as it is saved. board.json holds only positions, labels and notes, never an item's content, so do not edit it. Open any image path listed under a note to see what the user means.",
+      ];
+  lines.push(
     "Do not run `liesel poll` or `liesel reply`: Liesel posts your final message to the user as your reply when you exit.",
     "When you are done, end with a short message to the user (one to three sentences) saying what you changed, or what you need from them.",
     "",
     "Notes:",
-  ];
+  );
   prompts.forEach((prompt, index) => {
     const itemRef = prompt?.item && typeof prompt.item === "object" ? prompt.item : null;
     const item = itemRef ? byId.get(String(itemRef.id || "")) : null;
     const header = [`${index + 1}.`];
-    if (item) header.push(`Item "${item.label}" (id ${item.id}, file ${path.join(boardDir, item.file)})`);
+    const page = String(itemRef?.page || item?.page || "");
+    if (item && page) {
+      const url = project?.url ? `, ${project.url}${page}` : "";
+      header.push(`Live page ${page} "${item.label}" (id ${item.id}${url})`);
+    } else if (item) header.push(`Item "${item.label}" (id ${item.id}, file ${path.join(boardDir, item.file)})`);
     else if (itemRef) header.push(`Item "${itemRef.label || itemRef.id}" (id ${itemRef.id})`);
     else header.push("The whole board");
     if (prompt?.followup) header.push(`[${prompt.followup} on thread ${prompt.thread || ""}]`);
@@ -230,12 +248,13 @@ export function buildRunnerPrompt({ boardDir, boardName, items, prompts, cwd }) 
     if (prompt?.pin) {
       const where = [`Pin ${prompt.pin.number ?? ""}`.trim()];
       if (prompt.selector) where.push(`on \`${prompt.selector}\``);
+      if (page) where.push(`at path ${page}`);
       if (prompt.pin.excerpt) where.push(`("${String(prompt.pin.excerpt).slice(0, 200)}")`);
       if (prompt.pin.heading) where.push(`in section "${String(prompt.pin.heading).slice(0, 120)}"`);
       if (prompt.pin.viewport) where.push(`at ${prompt.pin.viewport}px wide`);
       lines.push(`   ${where.join(" ")}`);
     } else if (prompt?.selector) {
-      lines.push(`   Element: \`${prompt.selector}\``);
+      lines.push(`   Element: \`${prompt.selector}\`${page ? ` at path ${page}` : ""}`);
     }
     const text = String(prompt?.prompt ?? "").trim();
     lines.push(`   Note: ${text ? text.replace(/\n/g, "\n   ") : "(no text)"}`);

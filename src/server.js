@@ -61,6 +61,7 @@ import { BOARD_FILE_NAME, PRODUCT_NAME, productEnv, SERVER_APP_ID } from "./bran
 import { injectLieselSdk } from "./html-transform.js";
 import {
   BoardError,
+  addLiveItem,
   boardDirPath,
   boardFilePath,
   duplicateFileName,
@@ -96,6 +97,21 @@ import {
   runnerAgentLabel,
   validateRunnerConfig,
 } from "./board-runner.js";
+import {
+  ProjectError,
+  cloneGithubRepo,
+  createDevServer,
+  createLiveProxy,
+  createProjectConfigStore,
+  detectDevServer,
+  ensureGitExclude,
+  normalizeLivePage,
+  parseGithubRepoUrl,
+  projectBoardDir,
+  projectRootForBoardDir,
+  resolveProjectFolder,
+  validateDevConfig,
+} from "./project.js";
 import {
   bindHost,
   extraAllowedHosts,
@@ -812,10 +828,13 @@ export async function serve({
         if (path.basename(session.file) !== BOARD_FILE_NAME || session.status === "ended") continue;
         const dir = path.dirname(session.file);
         const board = await readBoard(dir).catch(() => null);
+        // A project board is shown by its repository's name and folder, not .liesel.
+        const root = projectRootForBoardDir(dir);
         found.push({
           key: session.key,
-          dir,
-          name: board?.name || path.basename(dir),
+          dir: root || dir,
+          name: root ? path.basename(root) : board?.name || path.basename(dir),
+          project: Boolean(root),
           updatedAt: boardUpdatedAt(session, board),
           agentReplies: (await boardChatForReading(dir, session)).filter((entry) => entry?.role === "agent").length,
           preview: board ? await boardPreview(dir, session.key, board) : null,
@@ -975,8 +994,11 @@ export async function serve({
       ...board.items.filter((item) => item.tab !== firstTab),
     ];
     for (const item of ordered) {
-      if (!(await itemFileFor(dir, item))) continue;
       const base = `/board/${encodeURIComponent(key)}/item/${encodeURIComponent(item.id)}`;
+      // A live page previews as its last saved snapshot, script-free.
+      const snapshot = item.page ? item.builds.at(-1) : null;
+      if (snapshot) return { kind: "frame", src: `${base}/build/${snapshot.hash}` };
+      if (!(await itemFileFor(dir, item))) continue;
       const latest = item.builds.at(-1);
       if (
         latest &&
@@ -1301,6 +1323,7 @@ export async function serve({
         ended: resolved.session.status === "ended",
         endedBy: resolved.session.ended_by || null,
         pending_prompts: resolved.session.pending_prompts || 0,
+        project: await projectViewFor(req.params.key, resolved.session),
       });
     } catch (error) {
       if (boardErrorResponse(error, res)) return;
@@ -1551,6 +1574,7 @@ export async function serve({
           assetVersion: version,
           // Who answers on this board, for "<name> is replying…" (LIESEL_AGENT_NAME).
           agentName: String(productEnv("AGENT_NAME", env) || "Agent").slice(0, 40),
+          project: await projectViewFor(req.params.key, resolved.session),
         }),
       );
     } catch (error) {
@@ -1611,7 +1635,10 @@ export async function serve({
         res.type("html").send(html);
         return;
       }
-      const src = `/board-sdk.js?key=${encodeURIComponent(resolved.session.key)}&item=${encodeURIComponent(item.id)}&device=${device}&v=${encodeURIComponent(version)}`;
+      // A live page's snapshot resolves its links on the project's proxy (its <base>), so
+      // the SDK is named by this server's own address.
+      const sdkOrigin = item.page ? `http://${LOOPBACK_HOST}:${publicPort}` : "";
+      const src = `${sdkOrigin}/board-sdk.js?key=${encodeURIComponent(resolved.session.key)}&item=${encodeURIComponent(item.id)}&device=${device}&v=${encodeURIComponent(version)}`;
       res.type("html").send(injectBoardSdk(html, src));
     } catch (error) {
       next(error);
@@ -1790,9 +1817,15 @@ export async function serve({
         width: Math.max(1, Math.trunc(Number(req.query.w)) || 1),
         height: Math.max(1, Math.trunc(Number(req.query.h)) || 1),
       };
-      const src = `/board/${encodeURIComponent(resolved.session.key)}/item/${encodeURIComponent(item.id)}/index.html?device=${device}`;
+      // A live page is photographed on the project's proxy, at the path the note was on.
+      const project = item.page ? await projectFor(resolved.session.key, resolved.session).catch(() => null) : null;
+      const page = normalizeLivePage(req.query.page) || item.page || "";
+      const src = project
+        ? `${project.origin}${page}`
+        : `/board/${encodeURIComponent(resolved.session.key)}/item/${encodeURIComponent(item.id)}/index.html?device=${device}`;
+      const live = project ? `liesel:${item.id}:${device}` : "";
       res.setHeader("cache-control", "no-store");
-      res.type("html").send(cropFrameHtml({ src, deviceWidth: size.width, deviceHeight: size.height, box }));
+      res.type("html").send(cropFrameHtml({ src, deviceWidth: size.width, deviceHeight: size.height, box, live }));
     } catch (error) {
       next(error);
     }
@@ -1828,6 +1861,7 @@ export async function serve({
         y: String(box.y),
         w: String(box.width),
         h: String(box.height),
+        ...(item.page ? { page: normalizeLivePage(req.body?.page) || item.page } : {}),
       });
       const url = `http://127.0.0.1:${req.socket.localPort}/board/${encodeURIComponent(resolved.session.key)}/crop-frame?${query}`;
       const capture = cropQueue.then(() => captureCrop({ chrome, url, width: box.width, height: box.height }));
@@ -2392,12 +2426,15 @@ export async function serve({
     refreshIdleTimer();
     broadcastRun(key, { now: true });
     writeLog(`[liesel] runner start key=${key} agent=${config.agent} notes=${prompts.length} cwd=${config.cwd}`);
+    const project = await projectFor(key, resolved.session).catch(() => null);
+    const devPort = project ? project.dev.port() || project.config?.port || 0 : 0;
     const prompt = buildRunnerPrompt({
       boardDir: resolved.dir,
       boardName: resolved.board.name || path.basename(resolved.dir),
       items: resolved.board.items,
       prompts,
       cwd: config.cwd,
+      project: project ? { root: project.root, url: devPort ? `http://localhost:${devPort}` : "" } : null,
     });
     const outcome = await runAgent({
       config,
@@ -2490,7 +2527,7 @@ export async function serve({
         { id: CUSTOM_AGENT.id, label: CUSTOM_AGENT.label },
       ],
       config,
-      default_cwd: path.dirname(session.file),
+      default_cwd: projectRootOfSession(session) || path.dirname(session.file),
       run,
       pending_prompts: Number(current.pending_prompts) || 0,
       listener: activePolls.has(key),
@@ -2532,7 +2569,10 @@ export async function serve({
       }
       const installed = (await detectInstalledAgents({ env })).map((entry) => entry.id);
       const checked = await validateRunnerConfig(
-        { ...req.body, cwd: String(req.body?.cwd || "").trim() || resolved.dir },
+        {
+          ...req.body,
+          cwd: String(req.body?.cwd || "").trim() || projectRootOfSession(resolved.session) || resolved.dir,
+        },
         { installed },
       );
       if ("error" in checked) {
@@ -2571,6 +2611,356 @@ export async function serve({
         run.stop?.();
       }
       res.json({ status: "ok" });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // Project boards (src/project.js): a board kept in a repository's `.liesel/` folder. Its
+  // agent works in the repo root, and its live items show the project's own dev server
+  // through a loopback proxy on a port of its own, so the app keeps its absolute URLs and
+  // its own origin. Nothing from the repo runs until the user presses Start.
+  const projectConfigs = createProjectConfigStore(attachmentStateRoot);
+  /**
+   * @typedef {{
+   *   key: string, root: string, boardFile: string,
+   *   config: { command: string, port: number, proxyPort: number } | null,
+   *   dev: ReturnType<typeof createDevServer>, proxy: ReturnType<typeof createLiveProxy>,
+   *   origin: string, watcher: import("chokidar").FSWatcher | null,
+   *   sourceTimer: ReturnType<typeof setTimeout> | null, broadcastTimer: ReturnType<typeof setTimeout> | null,
+   *   lastStatus: string,
+   * }} LiveProject
+   */
+  /** @type {Map<string, Promise<LiveProject>>} */
+  const projects = new Map();
+  let projectsClosed = Promise.resolve();
+  const PROJECT_SOURCE_IGNORED =
+    /(^|[\\/])(node_modules|\.git|\.liesel|\.next|\.nuxt|\.output|\.svelte-kit|\.astro|\.turbo|\.cache|\.vercel|dist|build|coverage|out)([\\/]|$)/;
+
+  /** @param {any} session */
+  function projectRootOfSession(session) {
+    if (!session || path.basename(String(session.file || "")) !== BOARD_FILE_NAME) return null;
+    return projectRootForBoardDir(path.dirname(session.file));
+  }
+
+  /**
+   * The live project behind a project board, created on first use: its proxy listens from
+   * then on, but its dev server only runs once the user presses Start.
+   * @param {string} key
+   * @param {any} session
+   * @returns {Promise<LiveProject | null>}
+   */
+  function projectFor(key, session) {
+    const root = projectRootOfSession(session);
+    if (!root || shuttingDown) return Promise.resolve(null);
+    const existing = projects.get(key);
+    if (existing) return existing;
+    const created = (async () => {
+      const config = await projectConfigs.get(session.file);
+      /** @type {LiveProject} */
+      const project = {
+        key,
+        root,
+        boardFile: session.file,
+        config,
+        dev: /** @type {any} */ (null),
+        proxy: /** @type {any} */ (null),
+        origin: "",
+        watcher: null,
+        sourceTimer: null,
+        broadcastTimer: null,
+        lastStatus: "stopped",
+      };
+      project.dev = createDevServer({ cwd: root, env, onChange: () => scheduleProjectBroadcast(project) });
+      const sdkSrc = `http://${LOOPBACK_HOST}:${publicPort}/board-sdk.js?key=${encodeURIComponent(key)}&live=1&v=${encodeURIComponent(version)}`;
+      project.proxy = createLiveProxy({
+        upstreamPort: () => project.dev.port() || project.config?.port || 0,
+        sdkSrc,
+        reservedPorts: () => httpServers.map((entry) => entry.address()?.port).filter(Boolean),
+        onAnswer: () => project.dev.markAnswering(),
+        statusMessage: () => liveStatusMessage(project),
+      });
+      project.origin = await project.proxy.listen(config?.proxyPort || 0);
+      if (project.proxy.port() !== config?.proxyPort) {
+        await projectConfigs.update(session.file, { proxyPort: project.proxy.port() }).catch(() => {});
+      }
+      watchProjectSource(project);
+      writeLog(`[liesel] project proxy key=${key} root=${root} origin=${project.origin}`);
+      return project;
+    })();
+    projects.set(key, created);
+    created.catch(() => projects.delete(key));
+    return created;
+  }
+
+  /** @param {LiveProject} project */
+  function liveStatusMessage(project) {
+    const view = project.dev.view();
+    if (view.status === "starting") return { title: "Starting the dev server…", message: view.command };
+    const port = project.dev.port() || project.config?.port || 0;
+    if (view.status === "failed")
+      return { title: "The dev server stopped", message: view.error || "See its output on the board." };
+    if (!port)
+      return { title: "No dev server yet", message: "Press Start on the board to run the project's dev server." };
+    return {
+      title: "Dev server not answering",
+      message: `Nothing answered at localhost:${port}. Press Start on the board, or check the port.`,
+    };
+  }
+
+  // A saved source file is how the board knows a live page may have changed: the page
+  // itself hot-reloads through the proxy, and a page that does not is reloaded by the board.
+  /** @param {LiveProject} project */
+  function watchProjectSource(project) {
+    try {
+      const watcher = chokidar.watch(project.root, {
+        ignoreInitial: true,
+        ignored: (file) => PROJECT_SOURCE_IGNORED.test(path.relative(project.root, file)),
+        depth: 12,
+      });
+      watcher.on("all", (_event, file) => {
+        if (project.sourceTimer) clearTimeout(project.sourceTimer);
+        project.sourceTimer = setTimeout(() => {
+          project.sourceTimer = null;
+          broadcastLiveEvent("project-source", project.key, { file: path.relative(project.root, String(file || "")) });
+        }, 300);
+      });
+      watcher.on("error", (error) =>
+        logEvent?.(`project watch error key=${project.key}: ${error instanceof Error ? error.message : error}`),
+      );
+      project.watcher = watcher;
+    } catch (error) {
+      writeLog(`[liesel] project watch failed key=${project.key}: ${error instanceof Error ? error.message : error}`);
+    }
+  }
+
+  /** @param {LiveProject} project */
+  function projectView(project) {
+    return {
+      root: project.root,
+      name: path.basename(project.root),
+      proxy: project.origin,
+      config: project.config ? { command: project.config.command, port: project.config.port } : null,
+      dev: project.dev.view(),
+    };
+  }
+
+  /** @param {LiveProject} project */
+  function scheduleProjectBroadcast(project) {
+    const status = project.dev.view().status;
+    const now = status !== project.lastStatus;
+    project.lastStatus = status;
+    if (project.broadcastTimer && !now) return;
+    if (project.broadcastTimer) clearTimeout(project.broadcastTimer);
+    project.broadcastTimer = setTimeout(
+      () => {
+        project.broadcastTimer = null;
+        broadcastLiveEvent("project", project.key, projectView(project));
+      },
+      now ? 0 : 400,
+    );
+  }
+
+  /** The project view for a board, or null for an ordinary board. */
+  async function projectViewFor(key, session) {
+    const project = await projectFor(key, session).catch(() => null);
+    return project ? projectView(project) : null;
+  }
+
+  async function closeProjects() {
+    const all = [...projects.values()];
+    projects.clear();
+    await Promise.all(
+      all.map((pending) =>
+        pending
+          .then(async (project) => {
+            project.dev.stop();
+            if (project.sourceTimer) clearTimeout(project.sourceTimer);
+            if (project.broadcastTimer) clearTimeout(project.broadcastTimer);
+            await project.watcher?.close().catch(() => {});
+            await project.proxy.close();
+          })
+          .catch(() => {}),
+      ),
+    );
+  }
+
+  // Open project: a local folder, or a GitHub URL cloned into ~/Liesel/<repo>. The board
+  // lives in <repo>/.liesel/, which is kept out of git through .git/info/exclude, never
+  // .gitignore. Browser-only, like New board.
+  app.post("/api/projects", async (req, res, next) => {
+    try {
+      if (!boardWriteGuard(req, res)) return;
+      const input = String(req.body?.path || "").trim();
+      if (!input) throw new ProjectError("Choose a project folder or paste a GitHub URL");
+      const github = parseGithubRepoUrl(input);
+      const root = github
+        ? (await cloneGithubRepo(input, { parent: path.join(homedir(), PRODUCT_NAME), env })).root
+        : await resolveProjectFolder(input);
+      const excluded = await ensureGitExclude(root);
+      const dir = projectBoardDir(root);
+      await mkdir(dir, { recursive: true });
+      // A fresh project board starts on the project's home page, so there is something to
+      // look at as soon as the dev server answers.
+      if (!existsSync(boardFilePath(dir))) {
+        const board = normalizeBoard({ name: path.basename(root) }, path.basename(root));
+        addLiveItem(board, { page: "/" });
+        await writeBoard(dir, board);
+      }
+      const opened = await openBoardSession(dir, { name: path.basename(root), reopen: true });
+      writeLog(`[liesel] project opened key=${opened.key} root=${root}${github ? " (cloned)" : ""}`);
+      res.json({ ...opened, root, git_exclude: excluded.file ? (excluded.added ? "added" : "present") : "no-git" });
+    } catch (error) {
+      if (projectErrorResponse(error, res) || boardErrorResponse(error, res)) return;
+      next(error);
+    }
+  });
+
+  function projectErrorResponse(error, res) {
+    if (!(error instanceof ProjectError)) return false;
+    res.status(400).json({ status: "error", error: error.message });
+    return true;
+  }
+
+  /**
+   * @param {import("express").Request} req
+   * @param {import("express").Response} res
+   */
+  async function projectForRequest(req, res) {
+    const resolved = await boardForRequest(req.params.key);
+    const project = resolved ? await projectFor(req.params.key, resolved.session) : null;
+    if (!resolved || !project) {
+      res.status(404).json({ status: "error", error: "project board not found" });
+      return null;
+    }
+    return { resolved, project };
+  }
+
+  app.get("/api/boards/:key/project", async (req, res, next) => {
+    try {
+      if (hasPresentOriginOrReferer(req) && !isSameOriginRequest(req, allowedHostnames, allowAnyHostname)) {
+        res.status(403).json({ status: "error", error: "cross-origin project read rejected" });
+        return;
+      }
+      const found = await projectForRequest(req, res);
+      if (!found) return;
+      res.json({ ...projectView(found.project), detected: await detectDevServer(found.project.root) });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // The dev server command and port are the one thing a project board runs, so they are
+  // set only from this server's own board page and kept on this machine, never in the repo.
+  app.post("/api/boards/:key/project/dev", async (req, res, next) => {
+    try {
+      if (!boardWriteGuard(req, res)) return;
+      const found = await projectForRequest(req, res);
+      if (!found) return;
+      const reservedPorts = [
+        ...httpServers.map((entry) => entry.address()?.port).filter(Boolean),
+        found.project.proxy.port(),
+      ];
+      const checked = validateDevConfig(req.body, { reservedPorts });
+      if ("error" in checked) {
+        res.status(400).json({ status: "error", error: checked.error });
+        return;
+      }
+      await projectConfigs.update(found.project.boardFile, checked.config);
+      found.project.config = await projectConfigs.get(found.project.boardFile);
+      scheduleProjectBroadcast(found.project);
+      res.json({ ...projectView(found.project), detected: await detectDevServer(found.project.root) });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post("/api/boards/:key/project/start", async (req, res, next) => {
+    try {
+      if (!boardWriteGuard(req, res)) return;
+      const found = await projectForRequest(req, res);
+      if (!found) return;
+      const { project } = found;
+      if (!project.config?.command) {
+        res.status(400).json({ status: "error", error: "Set the dev server command first" });
+        return;
+      }
+      writeLog(`[liesel] dev server start key=${project.key} cwd=${project.root} command=${project.config.command}`);
+      project.dev.start({ command: project.config.command, port: project.config.port });
+      res.json(projectView(project));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post("/api/boards/:key/project/stop", async (req, res, next) => {
+    try {
+      if (!boardWriteGuard(req, res)) return;
+      const found = await projectForRequest(req, res);
+      if (!found) return;
+      found.project.dev.stop();
+      res.json(projectView(found.project));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // A live page joins the board by its URL path on the dev server.
+  app.post("/api/boards/:key/pages", async (req, res, next) => {
+    try {
+      if (!boardWriteGuard(req, res)) return;
+      const found = await projectForRequest(req, res);
+      if (!found) return;
+      await withBoardWrite(req.params.key, res, async ({ dir, board }) => {
+        const item = addLiveItem(board, { page: req.body?.page, label: req.body?.label, tab: req.body?.tab });
+        const saved = await writeBoard(dir, board);
+        const published = publicBoard(saved);
+        logEvent?.(`board live page added key=${req.params.key} page=${item.page}`);
+        res.json({ status: "ok", item: published.items.find((entry) => entry.id === item.id) });
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // A live page's history: the board hands over the page as the frame rendered it (no
+  // scripts, so a saved round never re-runs the app), stored like a file item's build.
+  const LIVE_SNAPSHOT_MAX = 1_900_000;
+  app.post("/api/boards/:key/live-snapshot", async (req, res, next) => {
+    try {
+      if (!boardWriteGuard(req, res)) return;
+      const itemId = String(req.body?.item || "");
+      const html = typeof req.body?.html === "string" ? req.body.html : "";
+      if (!html || html.length > LIVE_SNAPSHOT_MAX)
+        throw new BoardError("A snapshot needs the page's HTML, under 2 MB");
+      const found = await projectForRequest(req, res);
+      if (!found) return;
+      const page = normalizeLivePage(req.body?.page);
+      await withBoardWrite(req.params.key, res, async ({ dir, board }) => {
+        const item = board.items.find((entry) => entry.id === itemId);
+        if (!item?.page) throw new BoardError(`Not a live page: ${itemId}`);
+        const pathname = (page || item.page).split(/[?#]/)[0];
+        // Scripts never survive into a snapshot, and its links resolve on the proxy.
+        const stripped = html.replace(/<script\b[\s\S]*?<\/script\s*>/gi, "");
+        const base = `<base href="${escapeHtml(`${found.project.origin}${pathname}`)}">`;
+        const snapshot = /<head\b[^>]*>/i.test(stripped)
+          ? stripped.replace(/<head\b[^>]*>/i, (head) => `${head}${base}`)
+          : `${base}${stripped}`;
+        const hash = crypto.createHash("sha1").update(snapshot).digest("hex");
+        if (item.builds.at(-1)?.hash === hash || item.builds.some((build) => build.hash === hash)) {
+          res.json({ status: "ok", recorded: false, builds: item.builds });
+          return;
+        }
+        const folder = path.join(dir, BOARD_BUILD_DIR, item.id);
+        await mkdir(folder, { recursive: true });
+        await writeFile(path.join(folder, `${hash}.html`), snapshot, { flag: "wx" }).catch((error) => {
+          if (error?.code !== "EEXIST") throw error;
+        });
+        item.builds.push({ at: new Date().toISOString(), hash, label: "" });
+        const saved = await writeBoard(dir, board);
+        const builds = saved.items.find((entry) => entry.id === item.id)?.builds || [];
+        res.json({ status: "ok", recorded: true, builds });
+      });
     } catch (error) {
       next(error);
     }
@@ -3748,6 +4138,7 @@ export async function serve({
       bindRecoveryTimer = null;
     }
     boardNotifier.close();
+    projectsClosed = closeProjects();
     for (const run of boardRuns.values()) run.stop?.();
     for (const timer of runnerBroadcastTimers.values()) clearTimeout(timer);
     runnerBroadcastTimers.clear();
@@ -3891,6 +4282,7 @@ export async function serve({
     close: async () => {
       shutdown("", "", "close() called");
       await done;
+      await projectsClosed;
     },
     done,
   };

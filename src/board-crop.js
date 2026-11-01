@@ -62,9 +62,9 @@ export function cropBox(value, deviceWidth) {
  * The page Chrome photographs: the item in a sandboxed frame, shifted so the crop
  * sits at the top left of a window exactly the crop's size.
  *
- * @param {{ src: string, deviceWidth: number, deviceHeight: number, box: { x: number, y: number, width: number, height: number } }} options
+ * @param {{ src: string, deviceWidth: number, deviceHeight: number, box: { x: number, y: number, width: number, height: number }, live?: string }} options
  */
-export function cropFrameHtml({ src, deviceWidth, deviceHeight, box }) {
+export function cropFrameHtml({ src, deviceWidth, deviceHeight, box, live = "" }) {
   const frameHeight = Math.max(deviceHeight, box.y + box.height);
   const escaped = src.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
   // Like the board, this page reads the item's linked stylesheets for it (only under the
@@ -74,7 +74,7 @@ export function cropFrameHtml({ src, deviceWidth, deviceHeight, box }) {
 <html><head><meta charset="utf-8"><style>
 html, body { margin: 0; overflow: hidden; background: #ffffff; }
 iframe { position: absolute; left: ${-box.x}px; top: ${-box.y}px; width: ${deviceWidth}px; height: ${frameHeight}px; border: 0; }
-</style></head><body><iframe sandbox="allow-scripts" src="${escaped}"></iframe><script>
+</style></head><body><iframe ${live ? `sandbox="allow-scripts allow-same-origin" name="${live.replace(/[^a-z0-9:-]/g, "")}"` : 'sandbox="allow-scripts"'} src="${escaped}"></iframe><script>
 addEventListener("message", (event) => {
   const frame = document.querySelector("iframe");
   const data = event.data;

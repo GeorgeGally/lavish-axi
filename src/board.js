@@ -3,6 +3,7 @@ import { readdir, readFile, realpath, rename, stat, writeFile } from "node:fs/pr
 import path from "node:path";
 
 import { BOARD_FILE_NAME } from "./brand.js";
+import { normalizeLivePage } from "./project.js";
 
 export { BOARD_FILE_NAME };
 export const BOARD_FORMAT_VERSION = 1;
@@ -22,7 +23,7 @@ const MAX_NOTE_IMAGES = 8;
  * markup or a copy of an item's content.
  */
 /** @typedef {{ id: string, label: string }} BoardTab */
-/** @typedef {{ id: string, number: number, label: string, selector: string, tag: string, text: string, x: number, y: number, ox?: number, oy?: number, attachments?: Array<{ id: string, name?: string }>, prompt_id?: string, at?: string, device?: string, excerpt?: string, heading?: string, box?: { x: number, y: number, w: number, h: number }, crop?: { id: string } }} BoardNote */
+/** @typedef {{ id: string, number: number, label: string, selector: string, tag: string, text: string, x: number, y: number, ox?: number, oy?: number, page?: string, attachments?: Array<{ id: string, name?: string }>, prompt_id?: string, at?: string, device?: string, excerpt?: string, heading?: string, box?: { x: number, y: number, w: number, h: number }, crop?: { id: string } }} BoardNote */
 /** @typedef {{ id: string, label: string, type: "number" | "color" | "select" | "spring" | "easing" | "pad" | "timeline", css: string, min?: number, max?: number, step?: number, duration?: number, unit?: string, options?: Array<{ value: string, label: string }>, value: string }} TuneControl */
 /** @typedef {{ id: string, label: string, values: Record<string, string>, at: string }} TuneVersion */
 /**
@@ -32,7 +33,7 @@ const MAX_NOTE_IMAGES = 8;
  *   tune: Record<string, string>, elementTune: Record<string, Record<string, string>>,
  *   imageDrops: Array<{ selector: string, kind: "img" | "background", oldSource: string, file: string }>,
  *   builds: Array<{ at: string, hash: string, label: string }>,
- *   versions: TuneVersion[], tuneSpec?: TuneControl[], copyOf?: string,
+ *   versions: TuneVersion[], tuneSpec?: TuneControl[], copyOf?: string, page?: string,
  * }} BoardItem
  */
 /** @typedef {{ format: number, name: string, tabs: BoardTab[], items: BoardItem[], pairs: Array<{ a: string, b: string, locked: boolean }> }} Board */
@@ -177,9 +178,12 @@ function normalizeItems(value, tabIds, fallbackTab) {
   const seen = new Set();
   for (const entry of Array.isArray(value) ? value.slice(0, MAX_ITEMS) : []) {
     if (!entry || typeof entry !== "object") continue;
-    const file = text(entry.file, 400);
-    if (!file || path.isAbsolute(file) || file.split(/[\\/]/).includes("..")) continue;
-    const id = slug(entry.id || path.basename(file, path.extname(file)), "item");
+    // A live item shows a page of the project's running dev server, by URL path, and
+    // has no file of its own; every other item is one HTML file in the board folder.
+    const page = normalizeLivePage(entry.page);
+    const file = page ? "" : text(entry.file, 400);
+    if (!page && (!file || path.isAbsolute(file) || file.split(/[\\/]/).includes(".."))) continue;
+    const id = slug(entry.id || (page ? livePageSlug(page) : path.basename(file, path.extname(file))), "item");
     if (seen.has(id)) continue;
     seen.add(id);
     const tab = tabIds.has(String(entry.tab || "")) ? String(entry.tab) : fallbackTab;
@@ -207,7 +211,8 @@ function normalizeItems(value, tabIds, fallbackTab) {
       // the build names itself, so a round is a point on a line, not a new object.
       builds: normalizeBuilds(entry.builds),
       versions: normalizeVersions(entry.versions),
-      ...(copyOf && copyOf !== id ? { copyOf } : {}),
+      ...(copyOf && copyOf !== id && !page ? { copyOf } : {}),
+      ...(page ? { page } : {}),
     });
   }
   return items;
@@ -236,6 +241,9 @@ function normalizeNotes(value) {
     };
     const device = text(entry.device, 20);
     if (device) note.device = device;
+    // The URL path a note on a live project page was written on.
+    const page = normalizeLivePage(entry.page);
+    if (page) note.page = page;
     // Where inside its element the note was dropped, so the pin follows the element.
     if (Number.isFinite(Number(entry.ox)) && Number.isFinite(Number(entry.oy))) {
       note.ox = Math.round(number(entry.ox, 0, -10_000, 10_000));
@@ -408,6 +416,52 @@ export function addItem(board, { file, label, tab, w, h }) {
   return item;
 }
 
+/**
+ * The id a live page is known by: `/` is "home", `/products/x` is "products-x".
+ * @param {string} page
+ */
+export function livePageSlug(page) {
+  const pathname = String(page || "").split(/[?#]/)[0];
+  return slug(pathname, "") || "home";
+}
+
+/**
+ * Add a live page of the project's dev server to the board, like `addItem` places a file.
+ * @param {Board} board
+ * @param {{ page: string, label?: string, tab?: string }} input
+ */
+export function addLiveItem(board, { page, label, tab }) {
+  const normalized = normalizeLivePage(page);
+  if (!normalized) throw new BoardError("A live page needs a URL path, such as / or /store");
+  const existing = board.items.find((item) => item.page === normalized);
+  if (existing) return existing;
+  if (board.items.length >= MAX_ITEMS) throw new BoardError("This board is full");
+  const id = uniqueId(board, livePageSlug(normalized));
+  const tabId = board.tabs.some((entry) => entry.id === tab) ? String(tab) : board.tabs[0].id;
+  const slot = nextSlot(board, tabId);
+  /** @type {BoardItem} */
+  const item = {
+    id,
+    label: text(label, 120) || normalized,
+    file: "",
+    page: normalized,
+    tab: tabId,
+    x: slot.x,
+    y: slot.y,
+    w: 1440,
+    h: 900,
+    status: "open",
+    notes: [],
+    tune: {},
+    elementTune: {},
+    imageDrops: [],
+    builds: [],
+    versions: [],
+  };
+  board.items.push(item);
+  return item;
+}
+
 /** "hero copy 2" back to "hero", and "hero-copy-2" back to "hero". */
 function withoutCopySuffix(value, separator) {
   const pattern = separator === " " ? /\s+copy(?:\s+\d+)?$/i : /-copy(?:-\d+)?$/i;
@@ -446,6 +500,7 @@ export function duplicateFileName(board, file, exists) {
 export function duplicateItem(board, sourceId, file) {
   const source = board.items.find((entry) => entry.id === sourceId);
   if (!source) throw new BoardError(`Unknown board item: ${sourceId}`);
+  if (source.page) throw new BoardError("A live page cannot be duplicated; ask the agent for a variant instead");
   if (board.items.length >= MAX_ITEMS) throw new BoardError("This board is full");
   const extension = path.extname(file);
   const id = uniqueId(board, slug(path.basename(file, extension), "item"));

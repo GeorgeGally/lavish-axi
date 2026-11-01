@@ -21,7 +21,7 @@ function jsonScript(value) {
 /**
  * @param {{ key: string, file: string }} session
  * @param {import("./board.js").Board} board
- * @param {{ tuneSpecs?: Record<string, import("./board.js").TuneControl[]>, captions?: Record<string, { title: string, explain: string, changed?: string, parent?: string, mtime?: number, hash?: string, created?: number }>, chat?: unknown[], ended?: boolean, endedBy?: string | null, assetVersion?: string, agentName?: string }} [options]
+ * @param {{ tuneSpecs?: Record<string, import("./board.js").TuneControl[]>, captions?: Record<string, { title: string, explain: string, changed?: string, parent?: string, mtime?: number, hash?: string, created?: number }>, chat?: unknown[], ended?: boolean, endedBy?: string | null, assetVersion?: string, agentName?: string, project?: unknown }} [options]
  */
 export function createBoardHtml(
   session,
@@ -34,6 +34,7 @@ export function createBoardHtml(
     endedBy = null,
     assetVersion = "",
     agentName = "Agent",
+    project = null,
   } = {},
 ) {
   const items = board.items.map((item) => ({
@@ -59,6 +60,7 @@ export function createBoardHtml(
     ended,
     endedBy,
     agentName,
+    project,
   });
   return `<!doctype html>
 <html lang="en">
@@ -73,6 +75,14 @@ export function createBoardHtml(
 <header class="bar">
   <div class="brand">${PRODUCT_NAME}</div>
   <div class="board-name" id="boardName">${escapeHtml(board.name)}</div>
+  <div class="project-bar" id="projectBar" hidden>
+    <span class="dev-state" id="devState" data-state="stopped" role="status" aria-live="polite"></span>
+    <button class="bar-toggle" id="devToggle" type="button" data-action="start">Start</button>
+    <form class="add-page" id="addPageForm" autocomplete="off">
+      <input class="add-page-input" id="addPageInput" type="text" placeholder="/path" spellcheck="false" aria-label="Page path on the dev server">
+      <button class="bar-toggle" type="submit">Add page</button>
+    </form>
+  </div>
   <nav class="tabs" id="tabs" role="tablist" aria-label="Board tabs"></nav>
   <div class="bar-spacer"></div>
   <span class="mode-state" id="modeState" role="status" aria-live="polite" hidden></span>
@@ -150,6 +160,27 @@ export function createBoardHtml(
         <input type="checkbox" id="ultrawideSetting">
         <span class="settings-check-text">Show ultrawide<span class="agent-hint">Adds the 3440 ultrawide to the All view.</span></span>
       </label>
+    </section>
+    <section class="settings-section agent-pane" id="projectPane" aria-labelledby="projectHeading" hidden>
+      <h3 class="settings-heading" id="projectHeading">Project</h3>
+      <p class="agent-lede"><code id="projectRoot"></code></p>
+      <form class="agent-form" id="projectForm">
+        <label class="agent-field">
+          <span class="agent-label">Dev server command</span>
+          <input class="agent-input" id="devCommand" type="text" spellcheck="false" autocomplete="off">
+          <span class="agent-hint" id="devDetected"></span>
+        </label>
+        <label class="agent-field">
+          <span class="agent-label">Port</span>
+          <input class="agent-input" id="devPort" type="text" inputmode="numeric" spellcheck="false" autocomplete="off">
+          <span class="agent-hint">Empty uses the port the server prints. For a server you run yourself, give only its port.</span>
+        </label>
+        <div class="agent-actions">
+          <button class="button button-primary" type="submit">Save</button>
+          <span class="chat-status" id="projectStatus" role="status"></span>
+        </div>
+      </form>
+      <pre class="agent-output" id="devOutput" tabindex="0" aria-label="Dev server output"></pre>
     </section>
     <section class="settings-section agent-pane" id="agentPane" aria-labelledby="agentHeading">
       <h3 class="settings-heading" id="agentHeading">Agent</h3>

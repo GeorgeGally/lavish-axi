@@ -1,4 +1,4 @@
-/* global CSS, Element, HTMLElement, HTMLImageElement, SVGElement, ResizeObserver, document, getComputedStyle, parent, window */
+/* global CSS, Element, HTMLElement, HTMLImageElement, MutationObserver, SVGElement, ResizeObserver, document, getComputedStyle, parent, window */
 // The board item SDK. It is deliberately small: the board owns the notes, the pins and
 // the composer, so an item only reports a clicked element, draws the pins it is told
 // about, and applies tune values as CSS custom properties.
@@ -6,8 +6,14 @@
   /** @type {any} */
   const script = document.currentScript;
   const url = new URL(script ? script.src : window.location.href);
-  const itemId = url.searchParams.get("item") || "";
-  const deviceId = url.searchParams.get("device") || "desktop";
+  // A live project page is served by the dev server through Liesel's proxy, which cannot
+  // know which item or device asked; the board names the frame `liesel:<item>:<device>`.
+  const live = url.searchParams.get("live") === "1";
+  const framed = live ? /^liesel:([a-z0-9-]{1,60}):([a-z]{1,20})$/.exec(String(window.name || "")) : null;
+  if (live && !framed) return;
+  const itemId = framed ? framed[1] : url.searchParams.get("item") || "";
+  const deviceId = framed ? framed[2] : url.searchParams.get("device") || "desktop";
+  const currentPage = () => window.location.pathname + window.location.search;
 
   // The board grows the frame to the page's whole height, so to the page's own scripts
   // the window must stay one screen of the device, as its vh units do: a script that
@@ -54,7 +60,10 @@
     const target = parentWindow();
     if (!target) return;
     try {
-      target.postMessage({ channel, item: itemId, device: deviceId, ...message }, "*");
+      target.postMessage(
+        { channel, item: itemId, device: deviceId, ...(live ? { page: currentPage() } : {}), ...message },
+        "*",
+      );
     } catch {
       // A parent that went away is not an item failure.
     }
@@ -1308,6 +1317,10 @@
         adoptStylesheet(String(data.href || ""), typeof data.text === "string" ? data.text : null);
         return;
       }
+      if (data.type === "source-changed") {
+        if (live) watchForUpdate();
+        return;
+      }
       if (data.type === "pins") {
         state.pins = Array.isArray(data.pins) ? data.pins : [];
         schedulePins();
@@ -2049,4 +2062,93 @@
   }
 
   post({ type: "ready", title: document.title, height: document.documentElement.scrollHeight });
+
+  /* ------------------------------------------------------------ live pages */
+
+  // The page as the frame shows it, for the board's history: no scripts (a saved round
+  // must never re-run the app) and none of the board's own drawing.
+  function liveSnapshot() {
+    // Liesel's own "no dev server" page is not a round of the project.
+    if (document.querySelector("[data-liesel-placeholder]")) return;
+    const copy = /** @type {Element} */ (document.documentElement.cloneNode(true));
+    for (const node of Array.from(copy.querySelectorAll("script, [data-liesel-ui], link[data-liesel-pinned]"))) {
+      node.remove();
+    }
+    const html = `<!doctype html>\n${copy.outerHTML}`;
+    if (html.length > 1_800_000) return;
+    post({ type: "live-snapshot", html });
+  }
+
+  // After a save in the project, the page either hot-reloads in place, reloads itself, or
+  // does nothing. In place: once it settles it is saved as a round. Nothing at all: the
+  // board reloads the frame. A reload of its own replaces this document anyway.
+  let updateWatch = /** @type {MutationObserver | null} */ (null);
+  function watchForUpdate() {
+    if (typeof MutationObserver !== "function" || updateWatch) return;
+    let quiet = 0;
+    const give = window.setTimeout(() => {
+      updateWatch?.disconnect();
+      updateWatch = null;
+      post({ type: "live-stale" });
+    }, 4000);
+    updateWatch = new MutationObserver((records) => {
+      if (records.every((record) => isBoardNode(record.target))) return;
+      window.clearTimeout(give);
+      window.clearTimeout(quiet);
+      quiet = window.setTimeout(() => {
+        updateWatch?.disconnect();
+        updateWatch = null;
+        pinViewportUnits();
+        scheduleSize();
+        liveSnapshot();
+      }, 700);
+    });
+    updateWatch.observe(document.documentElement, {
+      subtree: true,
+      childList: true,
+      characterData: true,
+      attributes: true,
+    });
+  }
+
+  /** @param {Node} node */
+  function isBoardNode(node) {
+    const element = node instanceof Element ? node : node.parentElement;
+    return Boolean(element?.closest("[data-liesel-ui], [data-liesel-pinned]"));
+  }
+
+  if (live) {
+    // A dev server adds its styles after this script runs; their viewport units are
+    // pinned as they arrive, like a file's are at load.
+    if (typeof MutationObserver === "function" && document.head) {
+      let pinTimer = 0;
+      new MutationObserver((records) => {
+        const styled = records.some((record) =>
+          Array.from(record.addedNodes).some(
+            (node) => (node.nodeName === "STYLE" || node.nodeName === "LINK") && !isBoardNode(node),
+          ),
+        );
+        if (!styled) return;
+        window.clearTimeout(pinTimer);
+        pinTimer = window.setTimeout(() => {
+          pinViewportUnits();
+          scheduleSize();
+        }, 60);
+      }).observe(document.head, { childList: true });
+    }
+    // Client-side navigation changes the path without a load; the board hears of it so the
+    // pins shown are the ones written on this path.
+    let lastPage = currentPage();
+    const checkPage = () => {
+      const page = currentPage();
+      if (page === lastPage) return;
+      lastPage = page;
+      post({ type: "ready", title: document.title, height: document.documentElement.scrollHeight });
+    };
+    window.addEventListener("popstate", checkPage);
+    window.setInterval(checkPage, 600);
+    const snapshotSoon = () => window.setTimeout(liveSnapshot, 1500);
+    if (document.readyState === "complete") snapshotSoon();
+    else window.addEventListener("load", snapshotSoon);
+  }
 })();

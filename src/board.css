@@ -273,6 +273,76 @@ textarea:focus-visible {
   display: none;
 }
 
+/* A project board's dev server and Add page: one quiet group beside the board name. */
+.project-bar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+}
+
+.project-bar[hidden] {
+  display: none;
+}
+
+.dev-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: rgba(22, 24, 29, 0.05);
+  color: var(--ink-2);
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.dev-state::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ink-4);
+}
+
+.dev-state[data-state="running"]::before {
+  background: #16a34a;
+}
+
+.dev-state[data-state="starting"]::before {
+  background: #d97706;
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+.dev-state[data-state="failed"]::before {
+  background: var(--danger);
+}
+
+.add-page {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.add-page-input {
+  width: 120px;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+}
+
+.add-page-input:focus {
+  outline: 2px solid var(--ink);
+  outline-offset: 1px;
+}
+
 /* Which tapped mode is on, notes or the controls selector, and the key that turns it
    off. Quiet by design: a dot, a word and the key, nothing while both are off. */
 .mode-state {

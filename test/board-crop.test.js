@@ -37,3 +37,25 @@ test("findChrome honours a configured path and refuses one that is missing", () 
   assert.equal(findChrome({ LIESEL_CHROME: "/nonexistent/chrome" }), "");
   assert.equal(findChrome({ LIESEL_CHROME: process.execPath }), process.execPath);
 });
+
+test("cropFrameHtml frames a live page by name on its own origin, and a file item opaque", () => {
+  const box = { x: 0, y: 10, width: 100, height: 50 };
+  const live = cropFrameHtml({
+    src: "http://127.0.0.1:5000/store",
+    deviceWidth: 390,
+    deviceHeight: 844,
+    box,
+    live: "liesel:store:phone",
+  });
+  assert.match(
+    live,
+    /<iframe sandbox="allow-scripts allow-same-origin" name="liesel:store:phone" src="http:\/\/127\.0\.0\.1:5000\/store">/,
+  );
+  const file = cropFrameHtml({
+    src: "/board/k/item/a/index.html?device=phone",
+    deviceWidth: 390,
+    deviceHeight: 844,
+    box,
+  });
+  assert.match(file, /<iframe sandbox="allow-scripts" src=/);
+});

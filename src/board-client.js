@@ -685,7 +685,28 @@ function scheduleLayout() {
 
 /* ------------------------------------------------------------------ render */
 
+/* ------------------------------------------------------------ live pages */
+
+// A project board's live items show the project's running dev server through Liesel's
+// loopback proxy, on an origin of its own (never this page's). The frame's name tells
+// the SDK the proxy added which item and device it is.
+/** @type {{ root: string, name: string, proxy: string, config: { command: string, port: number } | null, dev: any } | null} */
+let project = bootstrap.project && typeof bootstrap.project === "object" ? bootstrap.project : null;
+
+/** The URL path a live frame shows now; it can navigate away from the item's own page. */
+function livePageOf(itemId, deviceId) {
+  const record = state.artboards.get(artboardKey(itemId, deviceId));
+  return String(record?.page || itemById(itemId)?.page || "/");
+}
+
+/** What a prompt says about its item: a live page adds the path it was written on. */
+function itemRef(item, note = null) {
+  const page = item?.page ? String(note?.page || item.page) : "";
+  return { id: item.id, label: item.label, ...(page ? { page } : {}) };
+}
+
 function itemUrl(item, deviceId) {
+  if (item.page) return project?.proxy ? `${project.proxy}${item.page}` : "about:blank";
   const url = `/board/${encodeURIComponent(key)}/item/${encodeURIComponent(item.id)}/index.html?device=${encodeURIComponent(deviceId)}`;
   // The token is the file's own content, so a frame never keeps a page the file no
   // longer is - not even through a cache that ignores the server's no-store.
@@ -704,7 +725,12 @@ function createArtboard(item, device) {
   const screen = element("div", { class: "screen" });
   const iframe = element("iframe", {
     title: `${item.label} at ${device.width}`,
-    sandbox: "allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads",
+    // A live page runs on the proxy's own origin, so it keeps its storage and cookies;
+    // a file item stays opaque because it is served from this page's origin.
+    sandbox: item.page
+      ? "allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads"
+      : "allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads",
+    ...(item.page ? { name: `liesel:${item.id}:${device.id}` } : {}),
   });
   iframe.style.width = `${device.width}px`;
   // A page loads in one screen of its device, and only then grows to its content:
@@ -1012,7 +1038,8 @@ function itemActions(item) {
     });
     return node;
   };
-  actions.append(button("Duplicate", "Duplicate this design (⌘D)", () => duplicateDesign(item.id)));
+  // A live page is the running app, not a file to copy.
+  if (!item.page) actions.append(button("Duplicate", "Duplicate this design (⌘D)", () => duplicateDesign(item.id)));
   if (item.copyOf) {
     actions.append(
       button("Rename", "Rename this copy", () => startRename(item.id)),
@@ -1066,7 +1093,7 @@ function adoptItem(item, pairs) {
 let duplicating = false;
 function duplicateDesign(itemId) {
   const source = itemById(itemId);
-  if (!source || state.ended || duplicating) return;
+  if (!source || source.page || state.ended || duplicating) return;
   duplicating = true;
   boardPost("duplicate", { item: source.id })
     .then((payload) => {
@@ -1158,7 +1185,7 @@ function renderDuplicateToggle() {
   const toggle = document.getElementById("duplicateToggle");
   if (!toggle) return;
   const item = pickedDesign();
-  toggle.hidden = !item || state.ended;
+  toggle.hidden = !item || Boolean(item.page) || state.ended;
   if (item) toggle.title = `Duplicate ${item.label} (⌘D)`;
 }
 
@@ -2530,8 +2557,9 @@ function answeredNote(note) {
 }
 
 function pinsFor(item, deviceId) {
+  const page = item.page ? livePageOf(item.id, deviceId) : "";
   return (item.notes || [])
-    .filter((note) => noteDevice(note) === deviceId)
+    .filter((note) => noteDevice(note) === deviceId && (!page || (note.page || item.page) === page))
     .map((note) => ({
       id: note.id,
       number: note.number,
@@ -2772,7 +2800,7 @@ function sendItemNote(item, text, selector, tag = "image") {
           tag,
           thread: `item:${item.id}`,
           selector: selector || "",
-          item: { id: item.id, label: item.label },
+          item: itemRef(item),
         },
       ],
       domSnapshot: "",
@@ -3022,6 +3050,8 @@ function addNote(item, payload, deviceId) {
     oy: Math.round(Number(payload.oy) || 0),
     at: new Date().toISOString(),
   };
+  // A live page notes the URL path it was written on: the frame can navigate.
+  if (item.page) note.page = livePageOf(item.id, deviceId);
   const excerpt = String(payload.excerpt || "").slice(0, 120);
   if (excerpt) note.excerpt = excerpt;
   const heading = String(payload.heading || "").slice(0, 120);
@@ -3048,7 +3078,12 @@ function requestCrop(item, note) {
   const done = fetch(`/api/boards/${encodeURIComponent(key)}/crop`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ item: item.id, device: noteDevice(note), box: note.box }),
+    body: JSON.stringify({
+      item: item.id,
+      device: noteDevice(note),
+      box: note.box,
+      ...(note.page ? { page: note.page } : {}),
+    }),
   })
     .then((response) => (response.ok ? response.json() : null))
     .then((payload) => {
@@ -3124,7 +3159,7 @@ function sendPromptsNow(noteIds, message, images, context = {}) {
       tag: "pin",
       // Each note is a conversation thread; replies and edits name it too.
       thread: live.note.id,
-      item: { id: live.item.id, label: live.item.label },
+      item: itemRef(live.item, live.note),
       pin: {
         id: live.note.id,
         number: live.note.number,
@@ -3141,7 +3176,7 @@ function sendPromptsNow(noteIds, message, images, context = {}) {
       prompt: message,
       tag: "message",
       ...(context.thread ? { thread: context.thread } : {}),
-      ...(context.item ? { item: { id: context.item.id, label: context.item.label } } : {}),
+      ...(context.item ? { item: itemRef(context.item) } : {}),
       ...(images.length > 0 ? { attachments: images } : {}),
     });
   }
@@ -3762,7 +3797,9 @@ function sendFollowup(threadId, followup, text) {
   const subject = threadSubject(threadId);
   /** @type {any} */
   const prompt = { uid: randomId(), prompt_id: randomId(), prompt: text, tag: "message", thread: threadId, followup };
-  if (subject && subject.kind !== "gone") prompt.item = { id: subject.item.id, label: subject.item.label };
+  if (subject && subject.kind !== "gone") {
+    prompt.item = itemRef(subject.item, subject.kind === "note" ? subject.note : null);
+  }
   if (subject?.kind === "note") {
     const note = subject.note;
     prompt.tag = "pin";
@@ -4033,6 +4070,7 @@ function setSettingsOpen(open) {
   if (open) {
     renderUltrawideToggle();
     loadRunner();
+    loadProject();
     document.getElementById("settingsClose")?.focus({ preventScroll: true });
   } else if (settingsPanel.contains(document.activeElement)) {
     settingsToggle?.focus({ preventScroll: true });
@@ -4956,7 +4994,7 @@ function sendTune() {
           tag: "tune",
           thread: `item:${item.id}`,
           selector: changes[0]?.selector || "",
-          item: { id: item.id, label: item.label },
+          item: itemRef(item),
         },
       ],
       domSnapshot: "",
@@ -5491,6 +5529,245 @@ function copyTune() {
   else done();
 }
 
+/* --------------------------------------------------------- project boards */
+
+// A project board's top bar runs its dev server and adds live pages; Settings holds the
+// command and port. The dev server never starts on its own: only Start runs it.
+/** @type {Set<string>} items whose next settled render should be saved as a history round */
+const liveSnapshotWanted = new Set();
+/** @type {Map<string, number>} pending "did the page update?" checks, by artboard */
+const liveStaleChecks = new Map();
+
+function isProjectBoard() {
+  return Boolean(project);
+}
+
+function liveItems() {
+  return state.items.filter((item) => item.page);
+}
+
+function reloadLiveFrames() {
+  for (const item of liveItems()) reloadItem(item);
+}
+
+function onProjectEvent(view) {
+  if (!view || typeof view !== "object") return;
+  const before = project;
+  project = view;
+  const wasUp = before?.dev?.status === "running";
+  const isUp = project.dev?.status === "running";
+  // A frame that loaded the "no dev server" page comes back to the real one, and a frame
+  // whose server went away shows why.
+  if ((isUp && !wasUp) || before?.proxy !== project.proxy || (wasUp && !isUp)) reloadLiveFrames();
+  renderProjectBar();
+}
+
+function onProjectSource() {
+  for (const item of liveItems()) liveSnapshotWanted.add(item.id);
+  for (const record of state.artboards.values()) {
+    const item = itemById(record.itemId);
+    if (!item?.page) continue;
+    postToArtboard(record.itemId, record.device.id, { type: "source-changed" });
+  }
+}
+
+/** The live frame answered "nothing changed after the save": the board reloads it. */
+function onLiveStale(itemId, deviceId) {
+  const id = artboardKey(itemId, deviceId);
+  if (liveStaleChecks.has(id)) return;
+  const record = state.artboards.get(id);
+  const item = itemById(itemId);
+  if (!record || !item?.page) return;
+  liveStaleChecks.set(id, Date.now());
+  window.setTimeout(() => liveStaleChecks.delete(id), 1500);
+  record.loaded = false;
+  // The frame reloads the path it was on, not only the item's own page.
+  const page = record.page || item.page;
+  record.iframe.src = project?.proxy ? `${project.proxy}${page}` : "about:blank";
+}
+
+function onLiveSnapshot(itemId, data) {
+  const item = itemById(itemId);
+  if (!item?.page) return;
+  const html = typeof data.html === "string" ? data.html : "";
+  const wanted = liveSnapshotWanted.has(itemId) || (item.builds || []).length === 0;
+  if (!html || !wanted) return;
+  liveSnapshotWanted.delete(itemId);
+  fetch(`/api/boards/${encodeURIComponent(key)}/live-snapshot`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ item: itemId, html, page: String(data.page || item.page) }),
+  })
+    .then((response) => (response.ok ? response.json() : null))
+    .then((payload) => {
+      if (payload?.recorded) refreshBoard();
+    })
+    .catch(() => {});
+}
+
+function projectRequest(route, body) {
+  return fetch(`/api/boards/${encodeURIComponent(key)}/${route}`, {
+    method: body === undefined ? "GET" : "POST",
+    headers: body === undefined ? {} : { "content-type": "application/json" },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    cache: "no-store",
+  }).then(async (response) => {
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload?.error || `Request failed (${response.status})`);
+    return payload;
+  });
+}
+
+let detectedDev = null;
+function loadProject() {
+  if (!isProjectBoard()) return;
+  projectRequest("project")
+    .then((payload) => {
+      detectedDev = payload.detected || null;
+      onProjectEvent(payload);
+      fillProjectSettings();
+    })
+    .catch(() => {});
+}
+
+const DEV_STATUS_TEXT = {
+  stopped: "Dev server off",
+  starting: "Starting…",
+  running: "Dev server on",
+  exited: "Dev server exited",
+  failed: "Dev server failed",
+};
+
+function renderProjectBar() {
+  const bar = document.getElementById("projectBar");
+  if (!bar) return;
+  bar.hidden = !isProjectBoard();
+  if (!project) return;
+  const dev = project.dev || {};
+  const status = String(dev.status || "stopped");
+  const dot = document.getElementById("devState");
+  if (dot) {
+    dot.dataset.state = status;
+    const port = Number(dev.port || project.config?.port || 0);
+    dot.textContent = `${DEV_STATUS_TEXT[status] || status}${port && (status === "running" || status === "starting") ? ` · :${port}` : ""}`;
+    dot.title = dev.error || dev.command || "";
+  }
+  const toggle = document.getElementById("devToggle");
+  if (toggle) {
+    const running = Boolean(dev.running);
+    toggle.textContent = running ? "Stop" : "Start";
+    toggle.dataset.action = running ? "stop" : "start";
+  }
+  const output = document.getElementById("devOutput");
+  if (output) output.textContent = String(dev.output || "");
+}
+
+function fillProjectSettings() {
+  if (!project) return;
+  const root = document.getElementById("projectRoot");
+  if (root) root.textContent = project.root || "";
+  const command = /** @type {HTMLInputElement | null} */ (document.getElementById("devCommand"));
+  const port = /** @type {HTMLInputElement | null} */ (document.getElementById("devPort"));
+  if (command && document.activeElement !== command) {
+    command.value = project.config?.command || "";
+    command.placeholder = detectedDev?.command || "npm run dev";
+  }
+  if (port && document.activeElement !== port) {
+    port.value = project.config?.port ? String(project.config.port) : "";
+    port.placeholder = detectedDev?.port ? String(detectedDev.port) : "3000";
+  }
+  const hint = document.getElementById("devDetected");
+  if (hint) {
+    hint.textContent = detectedDev
+      ? `Found ${detectedDev.framework ? `${detectedDev.framework}, ` : ""}script "${detectedDev.script}". Nothing runs until you press Start.`
+      : "No dev script found in package.json. Type the command that serves the project, or just the port of a server you run yourself.";
+  }
+}
+
+function setProjectStatus(text) {
+  const status = document.getElementById("projectStatus");
+  if (status) status.textContent = text;
+}
+
+/** @param {SubmitEvent | null} [event] */
+function saveDevConfig(event) {
+  event?.preventDefault();
+  const command = /** @type {HTMLInputElement | null} */ (document.getElementById("devCommand"));
+  const port = /** @type {HTMLInputElement | null} */ (document.getElementById("devPort"));
+  const body = {
+    command: command?.value.trim() || (!project?.config && detectedDev ? detectedDev.command : ""),
+    port:
+      port?.value.trim() || (!project?.config && detectedDev && !command?.value.trim() ? String(detectedDev.port) : ""),
+  };
+  setProjectStatus("Saving…");
+  return projectRequest("project/dev", body)
+    .then((payload) => {
+      detectedDev = payload.detected || detectedDev;
+      onProjectEvent(payload);
+      fillProjectSettings();
+      setProjectStatus("Saved");
+      return true;
+    })
+    .catch((failure) => {
+      setProjectStatus(failure.message);
+      return false;
+    });
+}
+
+async function toggleDevServer() {
+  const toggle = document.getElementById("devToggle");
+  const action = toggle?.dataset.action === "stop" ? "stop" : "start";
+  if (action === "start" && !project?.config?.command) {
+    // The first Start accepts the detected command, shown in Settings beforehand.
+    if (!detectedDev) {
+      setSettingsOpen(true);
+      setProjectStatus("Type the dev server command first.");
+      return;
+    }
+    const saved = await projectRequest("project/dev", { command: detectedDev.command, port: "" })
+      .then((payload) => {
+        onProjectEvent(payload);
+        fillProjectSettings();
+        return true;
+      })
+      .catch((failure) => {
+        showBoardToast("Could not start the dev server", failure.message);
+        return false;
+      });
+    if (!saved) return;
+  }
+  projectRequest(`project/${action}`, {})
+    .then(onProjectEvent)
+    .catch((failure) => showBoardToast(`Could not ${action} the dev server`, failure.message));
+}
+
+/** @param {SubmitEvent} event */
+function addLivePage(event) {
+  event.preventDefault();
+  const input = /** @type {HTMLInputElement | null} */ (document.getElementById("addPageInput"));
+  const page = input?.value.trim() || "";
+  if (!page) return;
+  projectRequest("pages", { page, tab: state.activeTab })
+    .then((payload) => {
+      if (input) input.value = "";
+      if (payload?.item)
+        showBoardToast(`Added ${payload.item.page}`, project?.proxy ? "" : "Start the dev server to see it");
+      refreshBoard();
+    })
+    .catch((failure) => showBoardToast("Could not add that page", failure.message));
+}
+
+function setupProjectBoard() {
+  if (!isProjectBoard()) return;
+  document.getElementById("devToggle")?.addEventListener("click", () => void toggleDevServer());
+  document.getElementById("addPageForm")?.addEventListener("submit", addLivePage);
+  document.getElementById("projectForm")?.addEventListener("submit", (event) => void saveDevConfig(event));
+  const section = document.getElementById("projectPane");
+  if (section) section.hidden = false;
+  renderProjectBar();
+  loadProject();
+}
+
 /* ------------------------------------------------------------ server sync */
 
 function connectLiveEvents() {
@@ -5511,6 +5788,8 @@ function connectLiveEvents() {
       if (payload?.type === "agent-presence") setPresence(payload.data?.state);
       if (payload?.type === "runner") onRunnerEvent(payload.data);
       if (payload?.type === "agent-reply") refreshBoard();
+      if (payload?.type === "project") onProjectEvent(payload.data);
+      if (payload?.type === "project-source") onProjectSource();
       if (payload?.type === "chat-sync") {
         if (Array.isArray(payload.data?.chat)) state.chat = payload.data.chat;
         renderChatPanel();
@@ -5531,7 +5810,7 @@ function itemsSignature(items) {
   return items
     .map(
       (item) =>
-        `${item.id}|${item.file}|${item.tab}|${item.copyOf || ""}|${item.copyOf ? item.label : ""}|${item.caption || ""}|${item.title || ""}|${item.changed || ""}|${item.parent || ""}|${item.status || ""}|${(item.builds || []).map((build) => build.hash).join(",")}`,
+        `${item.id}|${item.file}|${item.page || ""}|${item.tab}|${item.copyOf || ""}|${item.copyOf ? item.label : ""}|${item.caption || ""}|${item.title || ""}|${item.changed || ""}|${item.parent || ""}|${item.status || ""}|${(item.builds || []).map((build) => build.hash).join(",")}`,
     )
     .join("\n");
 }
@@ -5572,6 +5851,7 @@ function refreshBoard() {
       postAllPins();
       renderAllGutterPins();
       if (payload.ended) markEnded();
+      if (payload.project) onProjectEvent(payload.project);
     })
     .catch(() => {});
 }
@@ -5622,6 +5902,23 @@ function onArtboardMessage(event) {
   const deviceId = String(data.device || "");
   const record = state.artboards.get(artboardKey(itemId, deviceId));
   if (!record || event.source !== record.iframe.contentWindow) return;
+  // A live frame says which path it shows on every message; its pins follow that path.
+  if (typeof data.page === "string" && data.page.startsWith("/") && itemById(itemId)?.page) {
+    const page = data.page.slice(0, 500);
+    if (record.page !== page) {
+      record.page = page;
+      postPins(itemId, deviceId);
+      renderAllGutterPins();
+    }
+  }
+  if (data.type === "live-stale") {
+    onLiveStale(itemId, deviceId);
+    return;
+  }
+  if (data.type === "live-snapshot") {
+    onLiveSnapshot(itemId, data);
+    return;
+  }
   if (data.type === "zoom-wheel") {
     const rect = record.iframe.getBoundingClientRect();
     const scale = rect.width / record.device.width || 1;
@@ -6045,5 +6342,6 @@ bindNavigation();
 if (state.ended) markEnded();
 connectLiveEvents();
 loadRunner();
+setupProjectBoard();
 setInterval(refreshBoard, 2000);
 setInterval(checkViewed, 500);
