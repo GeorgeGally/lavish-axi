@@ -101,11 +101,16 @@ import {
   ProjectError,
   cloneGithubRepo,
   createDevServer,
+  createStaticServer,
   devServerDetectIssue,
   createLiveProxy,
   createProjectConfigStore,
   detectDevServer,
   ensureGitExclude,
+  findRunningServers,
+  freePort,
+  installCommand,
+  portAnswers,
   normalizeLivePage,
   parseGithubRepoUrl,
   projectBoardDir,
@@ -113,6 +118,7 @@ import {
   resolveProjectFolder,
   validateDevConfig,
 } from "./project.js";
+import { crawlDevServer, discoverRoutes, fetchLocal, mergePages } from "./project-pages.js";
 import {
   bindHost,
   extraAllowedHosts,
@@ -834,7 +840,7 @@ export async function serve({
         found.push({
           key: session.key,
           dir: root || dir,
-          name: root ? path.basename(root) : board?.name || path.basename(dir),
+          name: board?.name || path.basename(root || dir),
           project: Boolean(root),
           updatedAt: boardUpdatedAt(session, board),
           agentReplies: (await boardChatForReading(dir, session)).filter((entry) => entry?.role === "agent").length,
@@ -1332,6 +1338,26 @@ export async function serve({
     }
   });
 
+  // The board's name, as the reviewer typed it over the old one. Its URL and key stay.
+  app.post("/api/boards/:key/name", async (req, res, next) => {
+    try {
+      if (!boardWriteGuard(req, res)) return;
+      const name = String(req.body?.name ?? "")
+        .replace(/\s+/g, " ")
+        .trim()
+        .slice(0, 120);
+      if (!name) throw new BoardError("Give the board a name");
+      await withBoardWrite(req.params.key, res, async ({ dir, board }) => {
+        const saved = await writeBoard(dir, { ...board, name });
+        logEvent?.(`board renamed key=${req.params.key}`);
+        res.json({ status: "ok", name: saved.name });
+      });
+    } catch (error) {
+      if (boardErrorResponse(error, res)) return;
+      next(error);
+    }
+  });
+
   app.post("/api/boards/:key/place", async (req, res, next) => {
     try {
       if (!boardWriteGuard(req, res)) return;
@@ -1477,6 +1503,23 @@ export async function serve({
   // Only a duplicate can be deleted from the board. Its file moves into the board's
   // trash folder with its record, so Undo puts back exactly what was there.
   const BOARD_TRASH_DIR = ".liesel-trash";
+  /**
+   * Moves an item's record (and a duplicate's file) into the board's trash.
+   * @param {string} directory the board folder, already through realpath
+   * @param {import("./board.js").Board} board
+   * @param {import("./board.js").BoardItem} item
+   * @returns {Promise<string>} the token Undo restores it by
+   */
+  async function trashItem(directory, board, item) {
+    const token = crypto.randomBytes(8).toString("hex");
+    const trash = path.join(directory, BOARD_TRASH_DIR, token);
+    await mkdir(trash, { recursive: true });
+    const pairs = board.pairs.filter((pair) => pair.a === item.id || pair.b === item.id);
+    await writeFile(path.join(trash, "record.json"), `${JSON.stringify({ item, pairs }, null, 2)}\n`);
+    const file = item.page ? null : await itemFileFor(directory, item);
+    if (file) await rename(file, path.join(trash, path.basename(item.file)));
+    return token;
+  }
   app.post("/api/boards/:key/delete", async (req, res, next) => {
     try {
       if (!boardWriteGuard(req, res)) return;
@@ -1484,15 +1527,11 @@ export async function serve({
       await withBoardWrite(req.params.key, res, async ({ dir, board }) => {
         const item = board.items.find((entry) => entry.id === itemId);
         if (!item) throw new BoardError(`Unknown board item: ${itemId}`);
-        if (!item.copyOf) throw new BoardError("Only a duplicate can be deleted from the board");
+        if (!item.copyOf && !item.page)
+          throw new BoardError("Only a duplicate or a live page can be deleted from the board");
         const directory = await realpath(dir);
-        const token = crypto.randomBytes(8).toString("hex");
-        const trash = path.join(directory, BOARD_TRASH_DIR, token);
-        await mkdir(trash, { recursive: true });
         const pairs = board.pairs.filter((pair) => pair.a === item.id || pair.b === item.id);
-        await writeFile(path.join(trash, "record.json"), `${JSON.stringify({ item, pairs }, null, 2)}\n`);
-        const file = await itemFileFor(directory, item);
-        if (file) await rename(file, path.join(trash, path.basename(item.file)));
+        const token = await trashItem(directory, board, item);
         const saved = await writeBoard(directory, {
           ...board,
           items: board.items.filter((entry) => entry.id !== item.id),
@@ -1517,19 +1556,26 @@ export async function serve({
         const record = JSON.parse(await readFile(path.join(trash, "record.json"), "utf8").catch(() => "null"));
         const restored = normalizeBoard({ tabs: board.tabs, items: [record?.item] }, board.name).items[0];
         if (!restored) throw new BoardError("Nothing to restore");
-        if (board.items.some((entry) => entry.id === restored.id || entry.file === restored.file)) {
-          throw new BoardError(`${restored.file} is already on the board`);
+        const live = Boolean(restored.page);
+        if (
+          board.items.some(
+            (entry) =>
+              entry.id === restored.id ||
+              (live ? entry.page === restored.page : !entry.page && entry.file === restored.file),
+          )
+        ) {
+          throw new BoardError(`${restored.page || restored.file} is already on the board`);
         }
-        const target = path.join(directory, restored.file);
-        if (existsSync(target)) throw new BoardError(`${restored.file} already exists`);
-        const kept = path.join(trash, path.basename(restored.file));
+        const target = live ? "" : path.join(directory, restored.file);
+        if (target && existsSync(target)) throw new BoardError(`${restored.file} already exists`);
+        const kept = live ? "" : path.join(trash, path.basename(restored.file));
         // The record first, so a scan that sees the file back already knows the item.
         const known = new Set([...board.items.map((entry) => entry.id), restored.id]);
         const pairs = (Array.isArray(record.pairs) ? record.pairs : []).filter(
           (pair) => known.has(String(pair?.a || "")) && known.has(String(pair?.b || "")),
         );
         await writeBoard(directory, { ...board, items: [...board.items, restored], pairs: [...board.pairs, ...pairs] });
-        if (existsSync(kept)) await rename(kept, target);
+        if (kept && existsSync(kept)) await rename(kept, target);
         await rm(trash, { recursive: true, force: true });
         const saved = await recordBuilds(directory, await readBoard(directory));
         const { specs, captions } = await boardItemMeta(directory, saved);
@@ -2631,6 +2677,9 @@ export async function serve({
    *   origin: string, watcher: import("chokidar").FSWatcher | null,
    *   sourceTimer: ReturnType<typeof setTimeout> | null, broadcastTimer: ReturnType<typeof setTimeout> | null,
    *   lastStatus: string, userStopped: boolean, issue: string,
+   *   staticServer: ReturnType<typeof createStaticServer> | null, reusedPort: number,
+   *   launching: Promise<void> | null, recoveryTimer: ReturnType<typeof setTimeout> | null,
+   *   crashes: number[], handledExit: string, gaveUp: boolean, answered: boolean,
    * }} LiveProject
    */
   /** @type {Map<string, Promise<LiveProject>>} */
@@ -2674,14 +2723,39 @@ export async function serve({
         lastStatus: "stopped",
         userStopped: false,
         issue: "",
+        staticServer: null,
+        reusedPort: 0,
+        launching: null,
+        recoveryTimer: null,
+        crashes: [],
+        handledExit: "",
+        gaveUp: false,
+        answered: false,
       };
-      project.dev = createDevServer({ cwd: root, env, onChange: () => scheduleProjectBroadcast(project) });
+      project.dev = createDevServer({
+        cwd: root,
+        env,
+        onChange: () => {
+          scheduleProjectBroadcast(project);
+          recoverFromCrash(project);
+        },
+      });
       const sdkSrc = `http://${LOOPBACK_HOST}:${publicPort}/board-sdk.js?key=${encodeURIComponent(key)}&live=1&v=${encodeURIComponent(version)}`;
       project.proxy = createLiveProxy({
-        upstreamPort: () => project.dev.port() || project.config?.port || 0,
+        upstreamPort: () => upstreamPortOf(project),
         sdkSrc,
         reservedPorts: () => httpServers.map((entry) => entry.address()?.port).filter(Boolean),
-        onAnswer: () => project.dev.markAnswering(),
+        onAnswer: () => {
+          project.answered = true;
+          project.dev.markAnswering();
+        },
+        // A server that was already running, and has gone, is replaced by one of our own.
+        onUnreachable: (port) => {
+          if (!project.reusedPort || port !== project.reusedPort || project.launching) return;
+          writeLog(`[liesel] reused dev server gone key=${key} port=${port}`);
+          project.reusedPort = 0;
+          void launchProject(project, { reuse: false });
+        },
         statusMessage: () => liveStatusMessage(project),
       });
       project.origin = await project.proxy.listen(config?.proxyPort || 0);
@@ -2698,35 +2772,164 @@ export async function serve({
   }
 
   /** @param {LiveProject} project */
+  function upstreamPortOf(project) {
+    return project.dev.port() || project.reusedPort || project.staticServer?.port() || project.config?.port || 0;
+  }
+
+  // The server stays out of sight: a frame waiting for it shows a quiet spinner, and only a
+  // real failure shows one plain sentence with a button. Detail lives in Settings, Advanced.
+  /** @param {LiveProject} project */
   function liveStatusMessage(project) {
     const view = project.dev.view();
-    if (view.status === "starting") return { title: "Starting the dev server", message: view.command, busy: true };
-    const port = project.dev.port() || project.config?.port || 0;
-    if (view.status === "failed")
-      return {
-        title: "The dev server stopped",
-        message: [view.error, view.last_line].filter(Boolean).join(" · ") || "See its output in Settings.",
-        action: /** @type {const} */ ("restart"),
-      };
-    if (project.issue)
-      return { title: "No dev server found", message: project.issue, action: /** @type {const} */ ("settings") };
-    // A Stop reads as stopped in every frame, even while the process is still winding down.
+    const busy = { title: "Getting the page ready", message: "", busy: true };
     if (project.userStopped)
-      return { title: "The dev server is stopped", message: "", action: /** @type {const} */ ("start") };
-    if (view.status === "exited" && !port)
+      return { title: "The project's server is stopped.", message: "", action: /** @type {const} */ ("start") };
+    if (project.gaveUp)
       return {
-        title: "The dev server exited",
-        message: view.last_line || "",
+        title: project.answered ? "The project's server stopped." : "The project's server could not start.",
+        message: "",
         action: /** @type {const} */ ("restart"),
       };
-    if (!port) return { title: "Starting the dev server", message: "", busy: true };
-    if (view.status === "running")
-      return { title: "Starting the dev server", message: `Waiting for localhost:${port}`, busy: true };
+    if (project.launching || project.recoveryTimer || view.status === "starting") return busy;
+    if (project.issue)
+      return {
+        title: "Liesel could not find how to run this project.",
+        message: "",
+        action: /** @type {const} */ ("settings"),
+      };
+    const port = upstreamPortOf(project);
+    if (!port || view.status === "running") return busy;
     return {
-      title: "Dev server not answering",
-      message: `Nothing answered at localhost:${port}.`,
+      title: `Nothing answers at localhost:${port}.`,
+      message: "",
       action: project.config?.command ? /** @type {const} */ ("restart") : /** @type {const} */ ("settings"),
     };
+  }
+
+  /**
+   * Gets the project's server going without asking: an already running server from the
+   * repo is reused; otherwise the dev command (the user's, or the detected one) runs, after
+   * installing missing dependencies and on a free port when the usual one is taken; a
+   * folder with no dev script but HTML files is served as it is. One launch at a time.
+   * @param {LiveProject} project
+   * @param {{ reuse?: boolean }} [options]
+   */
+  function launchProject(project, { reuse = true } = {}) {
+    if (project.launching) return project.launching;
+    const run = (async () => {
+      if (shuttingDown) return;
+      if (project.dev.running() && project.dev.view().status !== "stopped") return;
+      if (project.staticServer) return;
+      if (project.reusedPort && (await portAnswers(project.reusedPort))) return;
+      project.reusedPort = 0;
+      project.issue = "";
+      // A server the user runs themselves, named by its port only.
+      if (!project.config?.command && project.config?.port) return;
+      if (reuse) {
+        const port = await reusableServer(project);
+        if (port) {
+          project.reusedPort = port;
+          project.answered = true;
+          writeLog(`[liesel] dev server reused key=${project.key} port=${port}`);
+          return;
+        }
+      }
+      const detected = await detectDevServer(project.root);
+      let config = project.config?.command ? project.config : null;
+      if (!config && detected) {
+        await projectConfigs.update(project.boardFile, { command: detected.command, port: 0 });
+        project.config = await projectConfigs.get(project.boardFile);
+        config = project.config;
+      }
+      if (!config?.command) {
+        const { routes } = await discoverRoutes(project.root).catch(() => ({ routes: [] }));
+        if (routes.length > 0) {
+          const server = createStaticServer(project.root);
+          await server.listen();
+          project.staticServer = server;
+          project.answered = true;
+          writeLog(`[liesel] serving folder key=${project.key} port=${server.port()}`);
+          return;
+        }
+        project.issue = await devServerDetectIssue(project.root);
+        return;
+      }
+      const install = await installCommand(project.root, detected?.packageManager);
+      let port = config.port || 0;
+      // The usual port is taken (often by another project): hand the server a free one.
+      if (!port && detected?.port && (await portAnswers(detected.port))) port = await freePort();
+      const command = install ? `${install} && ${config.command}` : config.command;
+      writeLog(
+        `[liesel] dev server start key=${project.key} cwd=${project.root} command=${command}${port ? ` port=${port}` : ""}`,
+      );
+      project.dev.start({ command, port, label: config.command });
+    })()
+      .catch((error) => {
+        project.issue = error instanceof Error ? error.message : String(error);
+      })
+      .finally(() => {
+        if (project.launching === run) project.launching = null;
+        scheduleProjectBroadcast(project, true);
+      });
+    project.launching = run;
+    scheduleProjectBroadcast(project, true);
+    return run;
+  }
+
+  /**
+   * A server already running from inside the repo that answers HTTP, or 0.
+   * @param {LiveProject} project
+   */
+  async function reusableServer(project) {
+    const excludePorts = [...httpServers.map((entry) => entry.address()?.port).filter(Boolean), project.proxy.port()];
+    const ports = await findRunningServers(project.root, { excludePorts }).catch(() => []);
+    for (const port of ports.slice(0, 8)) {
+      const answer = await fetchLocal(port, "/", { timeoutMs: 1500, maxBytes: 256 * 1024 });
+      if (answer && answer.status > 0 && /html/i.test(answer.type)) return port;
+    }
+    return 0;
+  }
+
+  const CRASH_WINDOW_MS = 3 * 60_000;
+  const CRASH_LIMIT = 3;
+  /**
+   * A dev server that exits without being told to is started again, a few times, a little
+   * later each time. After that the frames say so, with Retry.
+   * @param {LiveProject} project
+   */
+  function recoverFromCrash(project) {
+    const view = project.dev.view();
+    if (view.status !== "failed" && view.status !== "exited") return;
+    if (project.userStopped || project.dev.running() || shuttingDown) return;
+    if (project.handledExit === view.started_at) return;
+    project.handledExit = view.started_at;
+    const now = Date.now();
+    project.crashes = project.crashes.filter((at) => now - at < CRASH_WINDOW_MS);
+    if (project.crashes.length >= CRASH_LIMIT) {
+      project.gaveUp = true;
+      writeLog(`[liesel] dev server gave up key=${project.key} after ${project.crashes.length} restarts`);
+      scheduleProjectBroadcast(project, true);
+      return;
+    }
+    project.crashes.push(now);
+    const delay = 500 * project.crashes.length;
+    writeLog(`[liesel] dev server exited key=${project.key} (${view.error || view.status}); restarting in ${delay}ms`);
+    if (project.recoveryTimer) clearTimeout(project.recoveryTimer);
+    project.recoveryTimer = setTimeout(() => {
+      project.recoveryTimer = null;
+      if (project.userStopped || shuttingDown) return;
+      void launchProject(project, { reuse: false });
+    }, delay);
+    project.recoveryTimer.unref?.();
+    scheduleProjectBroadcast(project, true);
+  }
+
+  /** @param {LiveProject} project */
+  function cancelRecovery(project) {
+    if (project.recoveryTimer) clearTimeout(project.recoveryTimer);
+    project.recoveryTimer = null;
+    project.crashes = [];
+    project.gaveUp = false;
   }
 
   // A saved source file is how the board knows a live page may have changed: the page
@@ -2765,6 +2968,10 @@ export async function serve({
       dev: project.dev.view(),
       issue: project.issue,
       user_stopped: project.userStopped,
+      mode: project.reusedPort ? "reused" : project.staticServer ? "static" : "dev",
+      port: upstreamPortOf(project),
+      busy: Boolean(project.launching || project.recoveryTimer),
+      gave_up: project.gaveUp,
     };
   }
 
@@ -2798,6 +3005,8 @@ export async function serve({
         pending
           .then(async (project) => {
             project.dev.stop();
+            cancelRecovery(project);
+            await project.staticServer?.close();
             if (project.sourceTimer) clearTimeout(project.sourceTimer);
             if (project.broadcastTimer) clearTimeout(project.broadcastTimer);
             await project.watcher?.close().catch(() => {});
@@ -2825,14 +3034,25 @@ export async function serve({
       await mkdir(dir, { recursive: true });
       // A fresh project board starts on the project's home page, so there is something to
       // look at as soon as the dev server answers.
-      if (!existsSync(boardFilePath(dir))) {
+      const created = !existsSync(boardFilePath(dir));
+      if (created) {
         const board = normalizeBoard({ name: path.basename(root) }, path.basename(root));
         addLiveItem(board, { page: "/" });
         await writeBoard(dir, board);
       }
       const opened = await openBoardSession(dir, { name: path.basename(root), reopen: true });
       writeLog(`[liesel] project opened key=${opened.key} root=${root}${github ? " (cloned)" : ""}`);
-      res.json({ ...opened, root, git_exclude: excluded.file ? (excluded.added ? "added" : "present") : "no-git" });
+      // The server gets going now, while the reviewer picks pages.
+      void boardForRequest(opened.key)
+        .then((resolved) => (resolved ? projectFor(opened.key, resolved.session) : null))
+        .then((project) => (project && !project.userStopped ? launchProject(project) : null))
+        .catch(() => {});
+      res.json({
+        ...opened,
+        root,
+        created,
+        git_exclude: excluded.file ? (excluded.added ? "added" : "present") : "no-git",
+      });
     } catch (error) {
       if (projectErrorResponse(error, res) || boardErrorResponse(error, res)) return;
       next(error);
@@ -2899,27 +3119,8 @@ export async function serve({
     }
   });
 
-  /**
-   * The command to run, accepting the detected one when the user has set none. Detection
-   * failing leaves the reason on the project, which its frames show.
-   * @param {LiveProject} project
-   */
-  async function ensureDevCommand(project) {
-    if (project.config?.command) return project.config;
-    if (project.config?.port) return null;
-    const detected = await detectDevServer(project.root);
-    if (!detected) {
-      project.issue = await devServerDetectIssue(project.root);
-      scheduleProjectBroadcast(project, true);
-      return null;
-    }
-    await projectConfigs.update(project.boardFile, { command: detected.command, port: 0 });
-    project.config = await projectConfigs.get(project.boardFile);
-    return project.config;
-  }
-
-  // Start runs the dev server. `auto` is the board asking as it opens: it starts a server
-  // that is not running unless the user stopped it, and never errors for want of a command.
+  // Start runs the project's server. `auto` is the board asking as it opens: it does
+  // nothing when a server is already up or the user stopped it.
   app.post("/api/boards/:key/project/start", async (req, res, next) => {
     try {
       if (!boardWriteGuard(req, res)) return;
@@ -2927,46 +3128,39 @@ export async function serve({
       if (!found) return;
       const { project } = found;
       const auto = req.body?.auto === true;
-      if (auto && (project.userStopped || project.dev.running())) {
+      if (auto && (project.userStopped || project.gaveUp)) {
         res.json(projectView(project));
         return;
       }
-      const config = await ensureDevCommand(project);
-      if (!config?.command) {
-        if (auto) res.json(projectView(project));
-        else res.status(400).json({ status: "error", error: "Set the dev server command first" });
-        return;
+      if (!auto) {
+        project.userStopped = false;
+        cancelRecovery(project);
       }
-      project.userStopped = false;
-      project.issue = "";
-      writeLog(
-        `[liesel] dev server start${auto ? " (on open)" : ""} key=${project.key} cwd=${project.root} command=${config.command}`,
-      );
       // A server still winding down from a Stop starts again once it has gone.
-      if (project.dev.running() && project.dev.view().status === "stopped")
-        await project.dev.restart({ command: config.command, port: config.port });
-      else project.dev.start({ command: config.command, port: config.port });
+      if (project.dev.running() && project.dev.view().status === "stopped") await project.dev.stopAndWait();
+      await launchProject(project);
       res.json(projectView(project));
     } catch (error) {
       next(error);
     }
   });
 
+  // Restart (and a frame's Retry) starts the project's own server afresh.
   app.post("/api/boards/:key/project/restart", async (req, res, next) => {
     try {
       if (!boardWriteGuard(req, res)) return;
       const found = await projectForRequest(req, res);
       if (!found) return;
       const { project } = found;
-      const config = await ensureDevCommand(project);
-      if (!config?.command) {
-        res.status(400).json({ status: "error", error: "Set the dev server command first" });
-        return;
-      }
       project.userStopped = false;
       project.issue = "";
-      writeLog(`[liesel] dev server restart key=${project.key} cwd=${project.root} command=${config.command}`);
-      await project.dev.restart({ command: config.command, port: config.port });
+      cancelRecovery(project);
+      writeLog(`[liesel] dev server restart key=${project.key} cwd=${project.root}`);
+      await project.dev.stopAndWait();
+      await project.staticServer?.close();
+      project.staticServer = null;
+      project.reusedPort = 0;
+      await launchProject(project, { reuse: false });
       res.json(projectView(project));
     } catch (error) {
       next(error);
@@ -2978,9 +3172,47 @@ export async function serve({
       if (!boardWriteGuard(req, res)) return;
       const found = await projectForRequest(req, res);
       if (!found) return;
-      found.project.userStopped = true;
-      found.project.dev.stop();
-      res.json(projectView(found.project));
+      const { project } = found;
+      project.userStopped = true;
+      cancelRecovery(project);
+      project.dev.stop();
+      // A server Liesel did not start is never stopped; the board just stops showing it.
+      project.reusedPort = 0;
+      const served = project.staticServer;
+      project.staticServer = null;
+      await served?.close();
+      scheduleProjectBroadcast(project, true);
+      res.json(projectView(project));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // The pages the picker offers: routes read from the project's files, plus the sitemap
+  // and home page links of the running site, plus the pages already on the board.
+  app.get("/api/boards/:key/project/pages", async (req, res, next) => {
+    try {
+      if (hasPresentOriginOrReferer(req) && !isSameOriginRequest(req, allowedHostnames, allowAnyHostname)) {
+        res.status(403).json({ status: "error", error: "cross-origin project read rejected" });
+        return;
+      }
+      const found = await projectForRequest(req, res);
+      if (!found) return;
+      const { project, resolved } = found;
+      const port = upstreamPortOf(project);
+      const [{ framework, routes }, crawled] = await Promise.all([
+        discoverRoutes(project.root).catch(() => ({ framework: "", routes: [] })),
+        port ? crawlDevServer(port).catch(() => []) : Promise.resolve([]),
+      ]);
+      const board = resolved.board.items.filter((item) => item.page).map((item) => String(item.page));
+      const merged = mergePages({ routes, crawled, board });
+      res.json({
+        status: "ok",
+        framework,
+        pages: merged.pages,
+        skipped: merged.skipped,
+        site_read: crawled.length > 0,
+      });
     } catch (error) {
       next(error);
     }
@@ -3000,6 +3232,53 @@ export async function serve({
         res.json({ status: "ok", item: published.items.find((entry) => entry.id === item.id) });
       });
     } catch (error) {
+      next(error);
+    }
+  });
+
+  // The page picker's choice: the board's live pages become exactly `pages`. A page left
+  // out moves to the board's trash with its notes, so Undo brings it back as it was.
+  app.post("/api/boards/:key/pages/set", async (req, res, next) => {
+    try {
+      if (!boardWriteGuard(req, res)) return;
+      const found = await projectForRequest(req, res);
+      if (!found) return;
+      const wanted = Array.isArray(req.body?.pages) ? req.body.pages.slice(0, 400) : null;
+      if (!wanted) throw new BoardError("Choose the pages to show");
+      const pages = [...new Set(wanted.map((page) => normalizeLivePage(page)).filter(Boolean))];
+      await withBoardWrite(req.params.key, res, async ({ dir, board }) => {
+        const directory = await realpath(dir);
+        const keep = new Set(pages);
+        let next = board;
+        /** @type {Array<{ id: string, page: string, token: string }>} */
+        const removed = [];
+        for (const item of board.items.filter((entry) => entry.page && !keep.has(entry.page))) {
+          const token = await trashItem(directory, next, item);
+          next = {
+            ...next,
+            items: next.items.filter((entry) => entry.id !== item.id),
+            pairs: next.pairs.filter((pair) => pair.a !== item.id && pair.b !== item.id),
+          };
+          removed.push({ id: item.id, page: String(item.page), token });
+        }
+        next = { ...next, items: [...next.items] };
+        /** @type {string[]} */
+        const added = [];
+        for (const page of pages) {
+          if (next.items.some((entry) => entry.page === page)) continue;
+          added.push(addLiveItem(next, { page, tab: req.body?.tab }).id);
+        }
+        const saved = await writeBoard(directory, next);
+        const published = publicBoard(saved);
+        logEvent?.(`board live pages set key=${req.params.key} added=${added.length} removed=${removed.length}`);
+        res.json({
+          status: "ok",
+          added: published.items.filter((entry) => added.includes(entry.id)),
+          removed,
+        });
+      });
+    } catch (error) {
+      if (boardErrorResponse(error, res)) return;
       next(error);
     }
   });

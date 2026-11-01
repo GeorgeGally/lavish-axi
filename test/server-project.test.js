@@ -46,6 +46,8 @@ async function setup(t) {
     path.join(repo, "package.json"),
     JSON.stringify({ scripts: { dev: "node fake-dev.mjs" }, devDependencies: { vite: "5" } }),
   );
+  // Installed already, so opening it never runs an install.
+  await mkdir(path.join(repo, "node_modules"), { recursive: true });
   const agentScript = path.join(dir, "fake-agent.mjs");
   await writeFile(agentScript, FAKE_AGENT);
   const marker = path.join(dir, "dev-ran");
@@ -85,7 +87,7 @@ async function waitFor(check, { tries = 200, ms = 50 } = {}) {
   throw new Error("timed out waiting");
 }
 
-test("Open project keeps the board in the repo, out of git, and runs nothing until its board opens", async (t) => {
+test("Open project keeps the board in the repo, out of git, and gets its server going by itself", async (t) => {
   const { base, repo, marker } = await setup(t);
 
   const foreign = await post(
@@ -99,6 +101,7 @@ test("Open project keeps the board in the repo, out of git, and runs nothing unt
   const opened = await post(base, "/api/projects", { path: repo });
   assert.equal(opened.status, 200, JSON.stringify(opened.body));
   assert.equal(opened.body.root, repo);
+  assert.equal(opened.body.created, true, "a first open says so, so the board asks which pages to show");
   assert.equal(opened.body.git_exclude, "added");
   assert.equal(opened.body.dir, path.join(repo, ".liesel"));
   assert.match(await readFile(path.join(repo, ".git", "info", "exclude"), "utf8"), /^\/\.liesel\/$/m);
@@ -112,31 +115,51 @@ test("Open project keeps the board in the repo, out of git, and runs nothing unt
 
   const again = await post(base, "/api/projects", { path: repo });
   assert.equal(again.body.key, opened.body.key, "opening twice opens the same board");
+  assert.equal(again.body.created, false);
   assert.equal(again.body.git_exclude, "present");
 
   const project = await fetch(`${base}/api/boards/${opened.body.key}/project`).then((response) => response.json());
   assert.equal(project.root, repo);
   assert.equal(project.name, "shop");
   assert.match(project.proxy, /^http:\/\/127\.0\.0\.1:\d+$/);
-  assert.equal(project.dev.status, "stopped");
   assert.equal(project.detected.command, "npm run dev");
-  assert.equal(project.config, null);
 
-  const idle = await fetch(`${project.proxy}/`);
-  assert.equal(idle.status, 503);
-  const idleText = await idle.text();
-  assert.match(idleText, /Starting the dev server/);
-  assert.match(idleText, /<meta http-equiv="refresh" content="2">/, "a starting frame looks again by itself");
+  // Nobody pressed anything: the server is started in the background.
+  await waitFor(() => stat(marker).catch(() => null));
+  const running = await waitFor(async () => {
+    const view = await fetch(`${base}/api/boards/${opened.body.key}/project`).then((response) => response.json());
+    return view.dev.status === "running" ? view : null;
+  });
+  assert.equal(running.mode, "dev");
+  assert.equal(running.config.command, "npm run dev");
 
   const home = await fetch(`${base}/`).then((response) => response.text());
   assert.match(home, />shop<\/a>/);
   assert.match(home, /<span class="kind">Project<\/span>/);
-
-  await new Promise((resolve) => setTimeout(resolve, 200));
-  await assert.rejects(stat(marker), "nothing from the repo ran before its board opened");
+  await post(base, `/api/boards/${opened.body.key}/project/stop`, {});
 });
 
-test("the board opening starts the detected dev server; Stop holds until Start, and Restart runs it again", async (t) => {
+test("a starting frame is a quiet spinner that says nothing of the server", async (t) => {
+  const { base, dir } = await setup(t);
+  const slow = path.join(dir, "slow");
+  await mkdir(path.join(slow, ".git", "info"), { recursive: true });
+  await writeFile(path.join(slow, "slow.mjs"), "setTimeout(() => {}, 60000);\n");
+  await writeFile(path.join(slow, "package.json"), JSON.stringify({ scripts: { dev: "node slow.mjs" } }));
+  const { body: opened } = await post(base, "/api/projects", { path: slow });
+  const view = await waitFor(async () => {
+    const current = await fetch(`${base}/api/boards/${opened.key}/project`).then((response) => response.json());
+    return current.dev.status === "starting" ? current : null;
+  });
+  const idle = await fetch(`${view.proxy}/`);
+  assert.equal(idle.status, 503);
+  const text = await idle.text();
+  assert.match(text, /Getting the page ready/);
+  assert.match(text, /<meta http-equiv="refresh" content="2">/, "a starting frame looks again by itself");
+  assert.doesNotMatch(text, /npm run dev|localhost:|dev server/i, "no command, port or server words");
+  await post(base, `/api/boards/${opened.key}/project/stop`, {});
+});
+
+test("the board opening keeps the server going; Stop holds until Start, and Restart runs it again", async (t) => {
   const { base, repo, marker } = await setup(t);
   const { body: opened } = await post(base, "/api/projects", { path: repo });
   const key = opened.key;
@@ -153,7 +176,6 @@ test("the board opening starts the detected dev server; Stop holds until Start, 
   assert.equal(auto.status, 200, JSON.stringify(auto.body));
   assert.equal(auto.body.config.command, "npm run dev", "the detected command is accepted and kept on this machine");
   assert.doesNotMatch(await readFile(path.join(repo, ".liesel", "board.json"), "utf8"), /npm run dev/);
-  assert.equal(auto.body.dev.status, "starting");
   const running = await waitFor(async () => {
     const view = await fetch(`${base}/api/boards/${key}/project`).then((response) => response.json());
     return view.dev.status === "running" ? view : null;
@@ -168,6 +190,7 @@ test("the board opening starts the detected dev server; Stop holds until Start, 
 
   const again = await post(base, `/api/boards/${key}/project/start`, { auto: true });
   assert.equal(again.body.dev.running, true, "a second board tab leaves the running server alone");
+  assert.equal(Number(await readFile(marker, "utf8")), firstPid, "and does not start another");
 
   const restarted = await post(base, `/api/boards/${key}/project/restart`, {});
   assert.equal(restarted.status, 200, JSON.stringify(restarted.body));
@@ -185,7 +208,7 @@ test("the board opening starts the detected dev server; Stop holds until Start, 
   const reopened = await post(base, `/api/boards/${key}/project/start`, { auto: true });
   assert.equal(reopened.body.dev.running, false, "reopening the board does not undo a Stop");
   const held = await fetch(`${running.proxy}/`).then((response) => response.text());
-  assert.match(held, /The dev server is stopped/);
+  assert.match(held, /The project&#39;s server is stopped\.|The project's server is stopped\./);
   assert.match(held, /<button type="button" data-liesel-dev="start">Start<\/button>/);
 
   const started = await post(base, `/api/boards/${key}/project/start`, {});
@@ -194,7 +217,166 @@ test("the board opening starts the detected dev server; Stop holds until Start, 
   await post(base, `/api/boards/${key}/project/stop`, {});
 });
 
-test("a project with nothing to run says why in its frames, and a failed start shows its last words", async (t) => {
+test("a dev server that dies is started again by itself", async (t) => {
+  const { base, repo, marker } = await setup(t);
+  const { body: opened } = await post(base, "/api/projects", { path: repo });
+  const key = opened.key;
+  await waitFor(async () => {
+    const view = await fetch(`${base}/api/boards/${key}/project`).then((response) => response.json());
+    return view.dev.status === "running" ? view : null;
+  });
+  const firstPid = Number(await readFile(marker, "utf8"));
+  process.kill(firstPid, "SIGKILL");
+  await waitFor(async () => {
+    const pid = Number(await readFile(marker, "utf8").catch(() => "0"));
+    return pid && pid !== firstPid;
+  });
+  const back = await waitFor(async () => {
+    const view = await fetch(`${base}/api/boards/${key}/project`).then((response) => response.json());
+    return view.dev.status === "running" ? view : null;
+  });
+  assert.equal(back.gave_up, false);
+  const page = await waitFor(async () => {
+    const text = await fetch(`${back.proxy}/`).then((response) => response.text());
+    return /Shop \//.test(text) ? text : null;
+  });
+  assert.match(page, /<h1 id=title>Shop \/<\/h1>/);
+  await post(base, `/api/boards/${key}/project/stop`, {});
+});
+
+test("a server already running from the repo is reused, and replaced when it goes away", async (t) => {
+  const { base, repo, marker } = await setup(t);
+  const { spawn } = await import("node:child_process");
+  const own = spawn(process.execPath, ["fake-dev.mjs"], {
+    cwd: repo,
+    env: { ...process.env, FAKE_DEV_MARKER: `${marker}.own` },
+    stdio: ["ignore", "pipe", "ignore"],
+  });
+  t.after(() => own.kill("SIGKILL"));
+  await new Promise((resolve) => own.stdout.once("data", resolve));
+  const { body: opened } = await post(base, "/api/projects", { path: repo });
+  const reused = await waitFor(async () => {
+    const view = await fetch(`${base}/api/boards/${opened.key}/project`).then((response) => response.json());
+    return view.mode === "reused" ? view : view.dev.status === "running" ? view : null;
+  });
+  if (reused.mode !== "reused") {
+    // No lsof here: reuse fails open and Liesel runs its own server instead.
+    t.diagnostic("lsof unavailable; reuse not exercised");
+    await post(base, `/api/boards/${opened.key}/project/stop`, {});
+    return;
+  }
+  await assert.rejects(stat(marker), "Liesel started nothing of its own");
+  assert.match(await fetch(`${reused.proxy}/`).then((response) => response.text()), /Shop \//);
+  own.kill("SIGKILL");
+  await new Promise((resolve) => own.once("close", resolve));
+  // The next request finds it gone, and Liesel starts the project's server itself.
+  await fetch(`${reused.proxy}/`).catch(() => null);
+  await waitFor(() => stat(marker).catch(() => null));
+  const own2 = await waitFor(async () => {
+    const view = await fetch(`${base}/api/boards/${opened.key}/project`).then((response) => response.json());
+    return view.mode === "dev" && view.dev.status === "running" ? view : null;
+  });
+  assert.match(await fetch(`${own2.proxy}/`).then((response) => response.text()), /Shop \//);
+  await post(base, `/api/boards/${opened.key}/project/stop`, {});
+});
+
+test("a folder of HTML with no dev script is served by Liesel itself, and its pages are offered", async (t) => {
+  const { base, dir } = await setup(t);
+  const site = path.join(dir, "site");
+  await mkdir(path.join(site, ".git", "info"), { recursive: true });
+  await mkdir(path.join(site, "docs"), { recursive: true });
+  await writeFile(path.join(site, "package.json"), JSON.stringify({ name: "site", dependencies: { viem: "2" } }));
+  await writeFile(path.join(site, "index.html"), '<!doctype html><h1>Home</h1><a href="flow.html">Flow</a>');
+  await writeFile(path.join(site, "flow.html"), "<!doctype html><h1>Flow</h1>");
+  await writeFile(path.join(site, "privacy.html"), "<!doctype html><h1>Privacy</h1>");
+  await writeFile(path.join(site, "docs", "index.html"), "<!doctype html><h1>Docs</h1>");
+  await writeFile(path.join(site, ".env"), "SECRET=1");
+  const { body: opened } = await post(base, "/api/projects", { path: site });
+  const view = await waitFor(async () => {
+    const current = await fetch(`${base}/api/boards/${opened.key}/project`).then((response) => response.json());
+    return current.mode === "static" ? current : null;
+  });
+  assert.equal(view.issue, "", "no command is asked for");
+  assert.match(await fetch(`${view.proxy}/flow.html`).then((response) => response.text()), /<h1>Flow<\/h1>/);
+  assert.match(await fetch(`${view.proxy}/docs/`).then((response) => response.text()), /<h1>Docs<\/h1>/);
+  assert.equal((await fetch(`${view.proxy}/.env`)).status, 404, "no dot file is served");
+  assert.equal((await fetch(`${view.proxy}/..%2F..%2Fetc%2Fpasswd`)).status, 404);
+  await assert.rejects(stat(path.join(site, "node_modules")), "nothing is installed for a static site");
+
+  const pages = await fetch(`${base}/api/boards/${opened.key}/project/pages`).then((response) => response.json());
+  assert.deepEqual(
+    pages.pages.map((page) => page.path),
+    ["/", "/docs/", "/flow.html", "/privacy.html"],
+  );
+  const foreign = await fetch(`${base}/api/boards/${opened.key}/project/pages`, {
+    headers: { origin: "http://evil.example" },
+  });
+  assert.equal(foreign.status, 403);
+});
+
+test("the page picker's choice becomes the board's live pages, and Undo brings a removed one back", async (t) => {
+  const { base, repo } = await setup(t);
+  const { body: opened } = await post(base, "/api/projects", { path: repo });
+  const key = opened.key;
+  const foreign = await post(
+    base,
+    `/api/boards/${key}/pages/set`,
+    { pages: ["/"] },
+    { "content-type": "application/json", origin: "http://evil.example" },
+  );
+  assert.equal(foreign.status, 403);
+
+  const chosen = await post(base, `/api/boards/${key}/pages/set`, { pages: ["/", "/store", "/about"] });
+  assert.equal(chosen.status, 200, JSON.stringify(chosen.body));
+  assert.deepEqual(chosen.body.added.map((item) => item.page).sort(), ["/about", "/store"]);
+  assert.deepEqual(chosen.body.removed, []);
+
+  const fewer = await post(base, `/api/boards/${key}/pages/set`, { pages: ["/store"] });
+  assert.deepEqual(fewer.body.removed.map((entry) => entry.page).sort(), ["/", "/about"]);
+  let board = await fetch(`${base}/api/boards/${key}`).then((response) => response.json());
+  assert.deepEqual(
+    board.items.map((item) => item.page),
+    ["/store"],
+  );
+  const home = fewer.body.removed.find((entry) => entry.page === "/");
+  const restored = await post(base, `/api/boards/${key}/restore`, { token: home.token });
+  assert.equal(restored.status, 200, JSON.stringify(restored.body));
+  assert.equal(restored.body.item.page, "/");
+  board = await fetch(`${base}/api/boards/${key}`).then((response) => response.json());
+  assert.deepEqual(board.items.map((item) => item.page).sort(), ["/", "/store"]);
+
+  const bad = await post(base, `/api/boards/${key}/pages/set`, { pages: "nope" });
+  assert.equal(bad.status, 400);
+  await post(base, `/api/boards/${key}/project/stop`, {});
+});
+
+test("a board is renamed by its name, and keeps its address", async (t) => {
+  const { base, repo } = await setup(t);
+  const { body: opened } = await post(base, "/api/projects", { path: repo });
+  const key = opened.key;
+  const foreign = await post(
+    base,
+    `/api/boards/${key}/name`,
+    { name: "Evil" },
+    { "content-type": "application/json", origin: "http://evil.example" },
+  );
+  assert.equal(foreign.status, 403);
+  const empty = await post(base, `/api/boards/${key}/name`, { name: "   " });
+  assert.equal(empty.status, 400);
+  const renamed = await post(base, `/api/boards/${key}/name`, { name: "  Shop   redesign " });
+  assert.equal(renamed.status, 200, JSON.stringify(renamed.body));
+  assert.equal(renamed.body.name, "Shop redesign");
+  const board = JSON.parse(await readFile(path.join(repo, ".liesel", "board.json"), "utf8"));
+  assert.equal(board.name, "Shop redesign");
+  const page = await fetch(`${base}/board/${key}`).then((response) => response.text());
+  assert.match(page, /<title>Shop redesign · Liesel<\/title>/);
+  assert.match(page, /id="boardName"[^>]*>Shop redesign<\/button>/);
+  const home = await fetch(`${base}/`).then((response) => response.text());
+  assert.match(home, />Shop redesign<\/a>/);
+  await post(base, `/api/boards/${key}/project/stop`, {});
+});
+
+test("a project with nothing to run says so in one sentence, and a server that keeps failing offers Retry", async (t) => {
   const { base, dir } = await setup(t);
   const bare = path.join(dir, "bare");
   await mkdir(path.join(bare, ".git", "info"), { recursive: true });
@@ -204,36 +386,35 @@ test("a project with nothing to run says why in its frames, and a failed start s
   assert.equal(auto.body.dev.running, false);
   assert.match(auto.body.issue, /no package\.json/);
   const frame = await fetch(`${auto.body.proxy}/`).then((response) => response.text());
-  assert.match(frame, /No dev server found/);
-  assert.match(frame, /no package\.json/);
+  assert.match(frame, /Liesel could not find how to run this project\./);
   assert.doesNotMatch(frame, /http-equiv="refresh"/);
   assert.match(frame, /data-liesel-dev="settings">Open Settings</);
-  const manual = await post(base, `/api/boards/${opened.key}/project/start`, {});
-  assert.equal(manual.status, 400);
 
-  await writeFile(
-    path.join(bare, "package.json"),
-    JSON.stringify({ scripts: { dev: "echo 'vite: not found' >&2; exit 127" } }),
-  );
   const saved = await post(base, `/api/boards/${opened.key}/project/dev`, {
     command: "echo 'vite: not found' >&2; exit 127",
     port: "",
   });
   assert.equal(saved.body.issue, "", "saving a command clears the reason");
   await post(base, `/api/boards/${opened.key}/project/start`, {});
-  const failed = await waitFor(async () => {
-    const view = await fetch(`${base}/api/boards/${opened.key}/project`).then((response) => response.json());
-    return view.dev.status === "failed" ? view : null;
-  });
-  assert.equal(failed.dev.last_line, "vite: not found");
+  const failed = await waitFor(
+    async () => {
+      const view = await fetch(`${base}/api/boards/${opened.key}/project`).then((response) => response.json());
+      return view.gave_up ? view : null;
+    },
+    { tries: 300, ms: 50 },
+  );
+  assert.equal(failed.dev.last_line, "vite: not found", "the detail stays in Settings, Advanced");
   const reason = await fetch(`${failed.proxy}/`).then((response) => response.text());
-  assert.match(reason, /The dev server stopped/);
-  assert.match(reason, /Exited with 127 · vite: not found/);
+  assert.match(reason, /The project(&#39;|')s server could not start\./);
+  assert.doesNotMatch(reason, /vite: not found|Exited with/, "one plain sentence, no detail");
   assert.match(
     reason,
-    /<button type="button" data-liesel-dev="restart">Restart<\/button>/,
-    "a quiet Restart, in the frame",
+    /<button type="button" data-liesel-dev="restart">Retry<\/button>/,
+    "a quiet Retry, in the frame",
   );
+  const retried = await post(base, `/api/boards/${opened.key}/project/restart`, {});
+  assert.equal(retried.body.gave_up, false, "Retry tries again from scratch");
+  await post(base, `/api/boards/${opened.key}/project/stop`, {});
 });
 
 test("a live page runs on the project's dev server with the SDK, and a note reaches the agent with its path and selector", async (t) => {

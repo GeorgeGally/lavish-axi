@@ -77,15 +77,9 @@ export function createBoardHtml(
   <button class="icon-button new-toggle" id="newToggle" type="button" popovertarget="newMenu" aria-label="New board or project" title="New board or project">
     <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
   </button>
-  <div class="board-name" id="boardName">${escapeHtml(board.name)}</div>
+  <button class="board-name" id="boardName" type="button" title="Rename this board">${escapeHtml(board.name)}</button>
   <div class="project-bar" id="projectBar" hidden>
-    <button class="bar-toggle add-page-toggle" id="addPageToggle" type="button" aria-expanded="false" aria-controls="addPageForm">
-      <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>
-      Add page
-    </button>
-    <form class="add-page" id="addPageForm" autocomplete="off" hidden>
-      <input class="add-page-input" id="addPageInput" type="text" placeholder="/path, then Enter" spellcheck="false" aria-label="Page path on the dev server">
-    </form>
+    <button class="bar-toggle pages-toggle" id="pagesToggle" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="pagesPicker">Pages</button>
   </div>
   <nav class="tabs" id="tabs" role="tablist" aria-label="Board tabs"></nav>
   <div class="bar-spacer"></div>
@@ -168,7 +162,7 @@ export function createBoardHtml(
   <div class="settings-body">
     <header class="settings-intro">
       <h1 class="settings-title" id="settingsTitle">Settings</h1>
-      <p class="settings-board">${escapeHtml(board.name)}</p>
+      <p class="settings-board" id="settingsBoardName">${escapeHtml(board.name)}</p>
     </header>
     <section class="settings-section" aria-labelledby="viewHeading">
       <div class="settings-section-head">
@@ -196,36 +190,40 @@ export function createBoardHtml(
         <h2 class="settings-heading" id="projectHeading">Project</h2>
         <p class="settings-path" id="projectRoot"><span class="settings-path-head"></span><span class="settings-path-tail"></span></p>
       </div>
-      <div class="settings-card">
-        <div class="settings-row dev-row">
-          <span class="settings-row-text">
-            <span class="dev-status" id="devStatus" data-state="stopped">Dev server off</span>
-            <span class="settings-hint" id="devStatusHint"></span>
-          </span>
-          <span class="settings-row-actions">
-            <button class="button" id="devRestart" type="button" hidden>Restart</button>
-            <button class="button button-stop" id="devStop" type="button" hidden>Stop</button>
-            <button class="button button-primary" id="devStart" type="button" hidden>Start</button>
-          </span>
+      <details class="settings-advanced" id="devAdvanced">
+        <summary class="settings-advanced-summary">Advanced</summary>
+        <p class="settings-lede">${PRODUCT_NAME} runs the project's server by itself. Change these only if it picks the wrong command or port.</p>
+        <div class="settings-card">
+          <div class="settings-row dev-row">
+            <span class="settings-row-text">
+              <span class="dev-status" id="devStatus" data-state="stopped">Server off</span>
+              <span class="settings-hint" id="devStatusHint"></span>
+            </span>
+            <span class="settings-row-actions">
+              <button class="button" id="devRestart" type="button" hidden>Restart</button>
+              <button class="button button-stop" id="devStop" type="button" hidden>Stop</button>
+              <button class="button button-primary" id="devStart" type="button" hidden>Start</button>
+            </span>
+          </div>
+          <form class="settings-form" id="projectForm" autocomplete="off">
+            <label class="settings-row settings-field">
+              <span class="settings-row-title">Command</span>
+              <input class="settings-input" id="devCommand" type="text" spellcheck="false" autocomplete="off">
+              <span class="settings-hint" id="devDetected"></span>
+            </label>
+            <label class="settings-row settings-field">
+              <span class="settings-row-title">Port</span>
+              <input class="settings-input settings-input-short" id="devPort" type="text" inputmode="numeric" spellcheck="false" autocomplete="off">
+              <span class="settings-hint">Leave empty to use the port the server prints. For a server you run yourself, give only its port.</span>
+            </label>
+            <p class="settings-error" id="projectStatus" role="status"></p>
+          </form>
+          <details class="settings-row settings-output" id="devOutputBox" hidden>
+            <summary>Output</summary>
+            <pre class="agent-output" id="devOutput" tabindex="0" aria-label="Server output"></pre>
+          </details>
         </div>
-        <form class="settings-form" id="projectForm" autocomplete="off">
-          <label class="settings-row settings-field">
-            <span class="settings-row-title">Command</span>
-            <input class="settings-input" id="devCommand" type="text" spellcheck="false" autocomplete="off">
-            <span class="settings-hint" id="devDetected"></span>
-          </label>
-          <label class="settings-row settings-field">
-            <span class="settings-row-title">Port</span>
-            <input class="settings-input settings-input-short" id="devPort" type="text" inputmode="numeric" spellcheck="false" autocomplete="off">
-            <span class="settings-hint">Leave empty to use the port the server prints. For a server you run yourself, give only its port.</span>
-          </label>
-          <p class="settings-error" id="projectStatus" role="status"></p>
-        </form>
-        <details class="settings-row settings-output" id="devOutputBox" hidden>
-          <summary>Output</summary>
-          <pre class="agent-output" id="devOutput" tabindex="0" aria-label="Dev server output"></pre>
-        </details>
-      </div>
+      </details>
     </section>
     <section class="settings-section agent-pane" id="agentPane" aria-labelledby="agentHeading">
       <div class="settings-section-head">
@@ -264,6 +262,39 @@ export function createBoardHtml(
   </div>
 </div>
 <!-- /settings -->
+<div class="settings pages-picker" id="pagesPicker" role="dialog" aria-modal="true" aria-labelledby="pagesTitle" hidden>
+  <div class="settings-top">
+    <div class="settings-top-inner">
+    <button class="settings-back" id="pagesClose" type="button" aria-keyshortcuts="Escape">
+      <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 18l-6-6 6-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      Back to board
+    </button>
+    <button class="button button-primary pages-apply" id="pagesApply" type="button">Show pages</button>
+    </div>
+  </div>
+  <div class="settings-body">
+    <header class="settings-intro">
+      <h1 class="settings-title" id="pagesTitle">Pages</h1>
+      <p class="settings-board">Each page you choose is a frame on the board.</p>
+    </header>
+    <input class="settings-input pages-filter" id="pagesFilter" type="search" placeholder="Find a page" spellcheck="false" autocomplete="off" aria-label="Find a page" hidden>
+    <div class="settings-card pages-list" id="pagesList">
+      <label class="settings-row pages-row pages-all">
+        <input type="checkbox" id="pagesAll">
+        <span class="pages-row-text"><span class="pages-row-title">All pages</span></span>
+        <span class="pages-count" id="pagesCount"></span>
+      </label>
+      <div id="pagesRows" role="group" aria-label="Pages"></div>
+      <p class="settings-row pages-empty" id="pagesStatus" role="status">Finding pages…</p>
+    </div>
+    <p class="pages-note" id="pagesNote" hidden></p>
+    <form class="pages-add" id="pagesAddForm" autocomplete="off">
+      <input class="settings-input" id="pagesAddInput" type="text" placeholder="Another page, such as /pricing" spellcheck="false" aria-label="Another page by its path">
+      <button class="button" id="pagesAddButton" type="submit">Add</button>
+    </form>
+    <p class="settings-error" id="pagesError" role="status"></p>
+  </div>
+</div>
 <button class="chat-open" id="chatOpen" type="button" hidden>Notes</button>
 <div class="ended" id="ended" hidden>Session ended. Run <code>liesel board open</code> when you want it reopened.</div>
 <script id="liesel-board" type="application/json">${bootstrap}</script>

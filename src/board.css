@@ -169,13 +169,54 @@ textarea:focus-visible {
   font-weight: 650;
 }
 
+/* The board's name: click it to rename the board in place. */
 .board-name {
   min-width: 0;
+  max-width: 280px;
+  height: 30px;
+  margin: 0 -6px;
+  padding: 0 6px;
   overflow: hidden;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink-3);
+  font: inherit;
+  font-size: 14px;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--ink-3);
+  cursor: text;
+  transition:
+    background-color 100ms ease,
+    color 100ms ease;
+}
+
+.board-name:hover {
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.board-name[hidden] {
+  display: none;
+}
+
+.board-name-input {
+  min-width: 8ch;
+  max-width: 320px;
+  height: 30px;
+  margin: 0 -6px;
+  padding: 0 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: var(--surface-strong);
+  color: var(--ink);
+  font: inherit;
   font-size: 14px;
+}
+
+.board-name-input:focus {
+  outline: 2px solid var(--ink);
+  outline-offset: 1px;
 }
 
 .tabs {
@@ -273,7 +314,7 @@ textarea:focus-visible {
   display: none;
 }
 
-/* A project board's dev server and Add page: one quiet group beside the board name. */
+/* A project board's Pages button, beside the board name. */
 .project-bar {
   display: flex;
   flex: none;
@@ -283,41 +324,6 @@ textarea:focus-visible {
 
 .project-bar[hidden] {
   display: none;
-}
-
-.add-page-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 0 12px 0 10px;
-}
-
-.add-page-toggle[hidden],
-.add-page[hidden] {
-  display: none;
-}
-
-.add-page {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.add-page-input {
-  width: 180px;
-  height: 34px;
-  padding: 0 10px;
-  border: 1px solid var(--line-strong);
-  border-radius: 10px;
-  background: transparent;
-  color: var(--ink);
-  font: inherit;
-  font-size: 13px;
-}
-
-.add-page-input:focus {
-  outline: 2px solid var(--ink);
-  outline-offset: 1px;
 }
 
 /* Which tapped mode is on, notes or the controls selector, and the key that turns it
@@ -3283,4 +3289,201 @@ input.agent-input {
   color: var(--ink-3);
   text-decoration: underline;
   text-underline-offset: 3px;
+}
+
+/* Advanced, in the Project section: the server's state, command and port, folded away
+   because Liesel runs the server by itself. */
+.settings-advanced {
+  margin-top: 8px;
+}
+
+.settings-advanced-summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 40px;
+  color: var(--ink-2);
+  font-size: 15px;
+  font-weight: 500;
+  cursor: pointer;
+  list-style: none;
+}
+
+.settings-advanced-summary::-webkit-details-marker {
+  display: none;
+}
+
+.settings-advanced-summary::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  margin: 0 4px 0 2px;
+  border-right: 1.6px solid currentColor;
+  border-bottom: 1.6px solid currentColor;
+  transform: rotate(-45deg);
+  transition: transform 140ms ease;
+}
+
+.settings-advanced[open] > .settings-advanced-summary::before {
+  transform: rotate(45deg);
+}
+
+.settings-advanced > .settings-lede {
+  margin: 8px 0 20px;
+}
+
+/* The page picker: a full page like Settings. Show sits in the sticky top, so it is in
+   reach however long the list is. */
+.pages-apply {
+  flex: none;
+}
+
+.pages-filter {
+  margin: 0 0 16px;
+}
+
+.pages-filter[hidden] {
+  display: none;
+}
+
+.pages-row {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding-top: 14px;
+  padding-bottom: 14px;
+  cursor: pointer;
+}
+
+#pagesRows > .pages-row:first-child {
+  border-top: 1px solid var(--line);
+}
+
+.pages-row:hover {
+  background: var(--surface);
+}
+
+.pages-row input[type="checkbox"] {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  accent-color: var(--ink);
+  cursor: pointer;
+}
+
+.pages-all {
+  padding-top: 18px;
+  padding-bottom: 18px;
+}
+
+.pages-all .pages-row-title {
+  font-weight: 600;
+}
+
+.pages-row-text {
+  display: grid;
+  flex: 1;
+  gap: 2px;
+  min-width: 0;
+}
+
+.pages-row-title {
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 16px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pages-row-hint {
+  overflow: hidden;
+  color: var(--ink-3);
+  font-size: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pages-count {
+  flex: none;
+  color: var(--ink-3);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* A small live preview: the page at 1280 wide, scaled into the slot. */
+.pages-preview {
+  position: relative;
+  flex: none;
+  width: 112px;
+  height: 70px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.pages-preview iframe {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1280px;
+  height: 800px;
+  border: 0;
+  transform: scale(0.0875);
+  transform-origin: 0 0;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 240ms ease;
+}
+
+.pages-preview.loaded iframe {
+  opacity: 1;
+}
+
+.pages-empty {
+  margin: 0;
+  color: var(--ink-3);
+}
+
+.pages-empty[hidden] {
+  display: none;
+}
+
+.pages-note {
+  margin: 16px 0 0;
+  color: var(--ink-3);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.pages-note[hidden] {
+  display: none;
+}
+
+.pages-add {
+  display: flex;
+  gap: 12px;
+  margin-top: 40px;
+}
+
+.pages-add .settings-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.pages-add .button {
+  flex: none;
+  height: 44px;
+}
+
+.pages-picker > .settings-body > .settings-error {
+  padding: 12px 0 0;
+}
+
+@media (max-width: 760px) {
+  .pages-preview {
+    display: none;
+  }
 }

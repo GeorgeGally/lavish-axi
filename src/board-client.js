@@ -1,4 +1,4 @@
-/* global CSS, document, window, location, Element, HTMLElement, requestAnimationFrame, cancelAnimationFrame */
+/* global CSS, document, window, location, Element, HTMLElement, requestAnimationFrame, cancelAnimationFrame, IntersectionObserver */
 
 const bootstrap = JSON.parse(document.getElementById("liesel-board")?.textContent || "{}");
 const key = String(bootstrap.key || "");
@@ -690,7 +690,7 @@ function scheduleLayout() {
 // A project board's live items show the project's running dev server through Liesel's
 // loopback proxy, on an origin of its own (never this page's). The frame's name tells
 // the SDK the proxy added which item and device it is.
-/** @type {{ root: string, name: string, proxy: string, config: { command: string, port: number } | null, dev: any, issue?: string, user_stopped?: boolean } | null} */
+/** @type {{ root: string, name: string, proxy: string, config: { command: string, port: number } | null, dev: any, issue?: string, user_stopped?: boolean, mode?: "dev" | "static" | "reused", port?: number, busy?: boolean, gave_up?: boolean } | null} */
 let project = bootstrap.project && typeof bootstrap.project === "object" ? bootstrap.project : null;
 
 /** The URL path a live frame shows now; it can navigate away from the item's own page. */
@@ -5567,9 +5567,10 @@ function copyTune() {
 
 /* --------------------------------------------------------- project boards */
 
-// A project board starts its dev server as it opens (unless the user stopped it). Its
-// state shows only in the frames, and only when something is wrong; Settings holds Start,
-// Stop, Restart, the command and the port. The top bar adds live pages.
+// A project board gets its server going by itself as it opens (unless the user stopped it).
+// Its state shows only in the frames, and only when something is wrong; Settings, under
+// Advanced, holds Start, Stop, Restart, the command and the port. The top bar's Pages opens
+// the page picker, which chooses the board's live pages.
 /** @type {Set<string>} items whose next settled render should be saved as a history round */
 const liveSnapshotWanted = new Set();
 /** @type {Map<string, number>} pending "did the page update?" checks, by artboard */
@@ -5596,9 +5597,22 @@ function onProjectEvent(view) {
   const changed =
     before?.dev?.status !== project.dev?.status ||
     (before?.issue || "") !== (project.issue || "") ||
-    before?.proxy !== project.proxy;
+    before?.proxy !== project.proxy ||
+    before?.mode !== project.mode ||
+    Boolean(before?.busy) !== Boolean(project.busy) ||
+    Boolean(before?.gave_up) !== Boolean(project.gave_up) ||
+    before?.port !== project.port;
   if (before && changed) reloadLiveFrames();
   renderProjectBar();
+  if (pagesOpen() && projectReady() && !pagesPicker.siteRead) void loadPickerPages();
+  if (pagesOpen()) queuePreviews();
+}
+
+/** Is the project's server up, so its pages can be read and previewed? */
+function projectReady() {
+  if (!project || project.busy || project.user_stopped || project.gave_up) return false;
+  if (project.mode === "static" || project.mode === "reused") return true;
+  return project.dev?.status === "running" && Boolean(project.port);
 }
 
 function onProjectSource() {
@@ -5680,32 +5694,38 @@ function autoStartDevServer() {
 }
 
 const DEV_STATUS_TEXT = {
-  stopped: "Dev server off",
+  stopped: "Server off",
   starting: "Starting…",
-  running: "Dev server on",
-  exited: "Dev server exited",
-  failed: "Dev server failed",
+  running: "Server on",
+  exited: "Server exited",
+  failed: "Server failed",
 };
 
-/** The dev server's state in words, for the top bar and the Project section. */
+/** The server's state in words, for Settings, Advanced. */
 function devStatusWords() {
   const dev = project?.dev || {};
   const status = String(dev.status || "stopped");
-  const port = Number(dev.port || project?.config?.port || 0);
+  const port = Number(project?.port || dev.port || 0);
+  if (project?.user_stopped) return { state: "stopped", text: "Server off", hint: "" };
+  if (project?.mode === "reused")
+    return { state: "running", text: "Using a server already running", hint: `localhost:${port}` };
+  if (project?.mode === "static")
+    return { state: "running", text: "Serving the folder", hint: "No dev script, so Liesel serves its files itself." };
+  if (project?.gave_up)
+    return { state: "failed", text: "Server failed", hint: [dev.error, dev.last_line].filter(Boolean).join(" · ") };
+  if (project?.busy || status === "starting") return { state: "starting", text: "Starting…", hint: dev.command || "" };
   if (status === "stopped" && project?.issue)
-    return { state: "failed", text: "No dev server found", hint: project.issue };
-  if (status === "stopped" && !project?.user_stopped && !project?.config?.port)
-    return { state: "starting", text: "Starting…", hint: "" };
+    return { state: "failed", text: "No way to run it found", hint: project.issue };
+  if (status === "stopped" && project?.config?.port && !project?.config?.command)
+    return { state: "running", text: "Server on", hint: `Showing localhost:${project.config.port}` };
   const hint =
     status === "failed"
       ? [dev.error, dev.last_line].filter(Boolean).join(" · ")
-      : status === "running" || status === "starting"
+      : status === "running"
         ? `${dev.command || ""}${port ? `${dev.command ? " · " : ""}localhost:${port}` : ""}`
         : status === "exited"
           ? dev.last_line || ""
-          : project?.config?.port && !project?.config?.command
-            ? `Showing localhost:${project.config.port}`
-            : "";
+          : "";
   return { state: status, text: DEV_STATUS_TEXT[status] || status, hint };
 }
 
@@ -5724,15 +5744,16 @@ function renderProjectBar() {
   const hint = document.getElementById("devStatusHint");
   if (hint) hint.textContent = words.hint;
   // A server told to stop reads as stopped at once, while its process winds down.
-  const running = Boolean(dev.running) && dev.status !== "stopped";
-  const canStart = Boolean(project.config?.command || detectedDev);
+  const active =
+    !project.user_stopped &&
+    ((Boolean(dev.running) && dev.status !== "stopped") || project.mode === "static" || project.mode === "reused");
   const show = (id, visible) => {
     const button = document.getElementById(id);
     if (button) button.hidden = !visible;
   };
-  show("devRestart", running);
-  show("devStop", running);
-  show("devStart", !running && canStart);
+  show("devRestart", active);
+  show("devStop", active);
+  show("devStart", !active && !project.busy);
   const output = document.getElementById("devOutput");
   if (output) output.textContent = String(dev.output || "");
   const box = document.getElementById("devOutputBox");
@@ -5770,7 +5791,7 @@ function fillProjectSettings() {
   if (hint) {
     hint.textContent = detectedDev
       ? `Found ${detectedDev.framework ? `${detectedDev.framework}, ` : ""}the "${detectedDev.script}" script in package.json. It runs when the board opens.`
-      : "No dev script in package.json. Type the command that serves the project, or give only the port of a server you run yourself.";
+      : "No dev script in package.json, so Liesel serves the folder's HTML files itself. Type a command only if the project needs one.";
   }
   renderProjectBar();
 }
@@ -5818,63 +5839,422 @@ function devServerAction(action) {
     });
 }
 
-/** Add page is one small control that opens a path field in its place. */
-function setAddPageOpen(open) {
-  const toggle = document.getElementById("addPageToggle");
-  const form = document.getElementById("addPageForm");
-  const input = /** @type {HTMLInputElement | null} */ (document.getElementById("addPageInput"));
-  if (!toggle || !form) return;
-  toggle.hidden = open;
-  toggle.setAttribute("aria-expanded", String(open));
-  form.hidden = !open;
-  if (open) input?.focus();
-  else {
-    if (input) input.value = "";
-    if (document.activeElement === input || document.activeElement === document.body) toggle.focus();
+/* ------------------------------------------------------------ page picker */
+
+// The page picker is a full page over the board, like Settings. It lists the project's
+// pages (routes on disk, the running site's sitemap and links, and the board's own pages),
+// each with a small live preview once the server is up. What is ticked when you press
+// Show becomes the board's set of live pages; a page left out can be brought back with Undo.
+const pagesPicker = {
+  panel: document.getElementById("pagesPicker"),
+  /** @type {Array<{ path: string, source: string, pattern?: string }>} */
+  pages: [],
+  /** @type {Map<string, boolean>} */
+  checked: new Map(),
+  skipped: /** @type {string[]} */ ([]),
+  siteRead: false,
+  loading: false,
+  /** @type {Set<string>} paths whose preview has been asked for */
+  previewed: new Set(),
+  /** @type {IntersectionObserver | null} */
+  observer: null,
+  previewQueue: /** @type {HTMLElement[]} */ ([]),
+  previewsLoading: 0,
+};
+const PAGES_HASH = "#pages";
+
+function pagesOpen() {
+  return Boolean(pagesPicker.panel && !pagesPicker.panel.hidden);
+}
+
+/** Is a full page (Settings or the page picker) over the board? */
+function overlayOpen() {
+  return settingsOpen() || pagesOpen();
+}
+
+function boardLivePages() {
+  return liveItems().map((item) => String(item.page));
+}
+
+/** @param {boolean} open */
+function setPagesOpen(open) {
+  const panel = pagesPicker.panel;
+  if (!panel || open === pagesOpen()) return;
+  if (open && settingsOpen()) setSettingsOpen(false);
+  panel.hidden = !open;
+  document.getElementById("pagesToggle")?.setAttribute("aria-expanded", String(open));
+  if (open) {
+    panel.scrollTop = 0;
+    pagesPicker.checked = new Map(boardLivePages().map((page) => [page, true]));
+    pagesPicker.pages = boardLivePages().map((page) => ({ path: page, source: "board" }));
+    pagesPicker.siteRead = false;
+    pagesPicker.previewed.clear();
+    const filter = /** @type {HTMLInputElement | null} */ (document.getElementById("pagesFilter"));
+    if (filter) filter.value = "";
+    setPagesError("");
+    renderPickerRows();
+    void loadPickerPages();
+    document.getElementById("pagesApply")?.focus({ preventScroll: true });
+  } else {
+    pagesPicker.observer?.disconnect();
+    pagesPicker.previewQueue = [];
+    const rows = document.getElementById("pagesRows");
+    if (rows) rows.textContent = "";
+    if (location.hash === PAGES_HASH)
+      window.history.replaceState(window.history.state, "", location.pathname + location.search);
+    document.getElementById("pagesToggle")?.focus({ preventScroll: true });
+  }
+}
+
+function setPagesError(text) {
+  const error = document.getElementById("pagesError");
+  if (error) error.textContent = text;
+}
+
+/** Reads the project's pages, keeping what has been ticked or added here. */
+function loadPickerPages() {
+  if (pagesPicker.loading) return Promise.resolve();
+  pagesPicker.loading = true;
+  return projectRequest("project/pages")
+    .then((payload) => {
+      if (!pagesOpen()) return;
+      const known = new Map(pagesPicker.pages.map((page) => [page.path, page]));
+      for (const page of Array.isArray(payload.pages) ? payload.pages : []) {
+        if (typeof page?.path !== "string") continue;
+        const mine = known.get(page.path);
+        // A page added by hand keeps its place; the server's word on the rest wins.
+        if (!mine || mine.source !== "typed") known.set(page.path, page);
+      }
+      pagesPicker.pages = [...known.values()].sort((a, b) =>
+        a.path === "/" ? -1 : b.path === "/" ? 1 : a.path.localeCompare(b.path),
+      );
+      pagesPicker.skipped = Array.isArray(payload.skipped) ? payload.skipped.map(String) : [];
+      pagesPicker.siteRead = Boolean(payload.site_read);
+    })
+    .catch((failure) => setPagesError(failure.message))
+    .finally(() => {
+      pagesPicker.loading = false;
+      if (pagesOpen()) renderPickerRows();
+    });
+}
+
+/** @param {string} page */
+function pageTitle(page) {
+  return page === "/" ? "Home" : decodeSafely(page);
+}
+
+/** @param {string} value */
+function decodeSafely(value) {
+  try {
+    return decodeURI(value);
+  } catch {
+    return value;
+  }
+}
+
+function filteredPickerPages() {
+  const filter = /** @type {HTMLInputElement | null} */ (document.getElementById("pagesFilter"));
+  const query = (filter?.value || "").trim().toLowerCase();
+  if (!query) return pagesPicker.pages;
+  return pagesPicker.pages.filter((page) => `${pageTitle(page.path)} ${page.path}`.toLowerCase().includes(query));
+}
+
+function renderPickerRows() {
+  const rows = document.getElementById("pagesRows");
+  if (!rows) return;
+  pagesPicker.observer?.disconnect();
+  pagesPicker.previewQueue = [];
+  rows.textContent = "";
+  const filter = document.getElementById("pagesFilter");
+  if (filter) filter.hidden = pagesPicker.pages.length <= 12;
+  const visible = filteredPickerPages();
+  for (const page of visible) rows.append(pickerRow(page));
+  const status = document.getElementById("pagesStatus");
+  if (status) {
+    status.hidden = visible.length > 0 && !pagesPicker.loading;
+    status.textContent =
+      pagesPicker.pages.length === 0
+        ? pagesPicker.loading
+          ? "Finding pages…"
+          : "No pages found yet. Add one by its path below."
+        : visible.length === 0
+          ? "No page matches."
+          : "Finding pages…";
+  }
+  const note = document.getElementById("pagesNote");
+  if (note) {
+    const skipped = pagesPicker.skipped;
+    note.hidden = skipped.length === 0;
+    note.textContent = skipped.length
+      ? `Left out, because each needs a real value in its path: ${skipped.slice(0, 6).map(decodeSafely).join(", ")}${skipped.length > 6 ? ` and ${skipped.length - 6} more` : ""}.`
+      : "";
+  }
+  renderPickerSummary();
+  observePreviews();
+}
+
+/** @param {{ path: string, source: string, pattern?: string }} page */
+function pickerRow(page) {
+  const row = element("label", { class: "settings-row pages-row", "data-page": page.path });
+  const box = /** @type {HTMLInputElement} */ (element("input", { type: "checkbox" }));
+  box.checked = pagesPicker.checked.get(page.path) === true;
+  box.addEventListener("change", () => {
+    pagesPicker.checked.set(page.path, box.checked);
+    renderPickerSummary();
+  });
+  const preview = element("span", { class: "pages-preview", "aria-hidden": "true" });
+  const text = element("span", { class: "pages-row-text" });
+  text.append(element("span", { class: "pages-row-title", text: pageTitle(page.path) }));
+  if (page.pattern)
+    text.append(element("span", { class: "pages-row-hint", text: `An example of ${decodeSafely(page.pattern)}` }));
+  row.append(box, preview, text);
+  return row;
+}
+
+function renderPickerSummary() {
+  const all = /** @type {HTMLInputElement | null} */ (document.getElementById("pagesAll"));
+  const total = pagesPicker.pages.length;
+  const ticked = pagesPicker.pages.filter((page) => pagesPicker.checked.get(page.path)).length;
+  if (all) {
+    all.checked = total > 0 && ticked === total;
+    all.indeterminate = ticked > 0 && ticked < total;
+    all.disabled = total === 0;
+  }
+  const count = document.getElementById("pagesCount");
+  if (count) count.textContent = total ? `${ticked} of ${total}` : "";
+  const apply = /** @type {HTMLButtonElement | null} */ (document.getElementById("pagesApply"));
+  if (apply) {
+    apply.textContent = ticked === 0 ? "Show no pages" : ticked === 1 ? "Show 1 page" : `Show ${ticked} pages`;
+  }
+}
+
+/** Previews load as their rows come into view, two at a time, once the server is up. */
+function observePreviews() {
+  const rows = document.getElementById("pagesRows");
+  if (!rows || typeof IntersectionObserver !== "function") return;
+  pagesPicker.observer = new IntersectionObserver(
+    (entries) => {
+      for (const entry of entries) {
+        if (!entry.isIntersecting) continue;
+        pagesPicker.observer?.unobserve(entry.target);
+        pagesPicker.previewQueue.push(/** @type {HTMLElement} */ (entry.target));
+      }
+      queuePreviews();
+    },
+    { root: pagesPicker.panel, rootMargin: "200px 0px" },
+  );
+  for (const row of rows.querySelectorAll(".pages-row")) pagesPicker.observer.observe(row);
+}
+
+function queuePreviews() {
+  if (!projectReady() || !project?.proxy) return;
+  while (pagesPicker.previewsLoading < 2 && pagesPicker.previewQueue.length > 0) {
+    const row = /** @type {HTMLElement} */ (pagesPicker.previewQueue.shift());
+    const page = row.dataset.page || "";
+    const slot = row.querySelector(".pages-preview");
+    if (!slot || !row.isConnected || slot.querySelector("iframe")) continue;
+    pagesPicker.previewsLoading += 1;
+    const frame = /** @type {HTMLIFrameElement} */ (
+      element("iframe", {
+        tabindex: "-1",
+        title: "",
+        loading: "lazy",
+        scrolling: "no",
+        sandbox: "allow-scripts allow-same-origin",
+      })
+    );
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      pagesPicker.previewsLoading = Math.max(0, pagesPicker.previewsLoading - 1);
+      slot.classList.add("loaded");
+      queuePreviews();
+    };
+    frame.addEventListener("load", finish, { once: true });
+    window.setTimeout(finish, 8000);
+    frame.src = `${project.proxy}${page}`;
+    slot.append(frame);
   }
 }
 
 /** @param {SubmitEvent} event */
-function addLivePage(event) {
+function addPickerPage(event) {
   event.preventDefault();
-  const input = /** @type {HTMLInputElement | null} */ (document.getElementById("addPageInput"));
-  const page = input?.value.trim() || "";
-  if (!page) return setAddPageOpen(false);
-  projectRequest("pages", { page, tab: state.activeTab })
-    .then((payload) => {
-      setAddPageOpen(false);
-      if (payload?.item)
-        showBoardToast(`Added ${payload.item.page}`, project?.dev?.running ? "" : "Start the dev server to see it");
-      refreshBoard();
-    })
-    .catch((failure) => showBoardToast("Could not add that page", failure.message));
+  const input = /** @type {HTMLInputElement | null} */ (document.getElementById("pagesAddInput"));
+  let page = (input?.value || "").trim();
+  if (!page) return;
+  if (/^https?:\/\//i.test(page)) {
+    try {
+      const url = new URL(page);
+      page = url.pathname + url.search;
+    } catch {
+      // checked below
+    }
+  }
+  if (!page.startsWith("/")) page = `/${page}`;
+  if (page.startsWith("//") || /\s/.test(page) || page.length > 500) {
+    setPagesError("A page is a path on the site, such as /pricing.");
+    return;
+  }
+  setPagesError("");
+  if (!pagesPicker.pages.some((entry) => entry.path === page)) {
+    pagesPicker.pages.push({ path: page, source: "typed" });
+    pagesPicker.pages.sort((a, b) => (a.path === "/" ? -1 : b.path === "/" ? 1 : a.path.localeCompare(b.path)));
+  }
+  pagesPicker.checked.set(page, true);
+  if (input) input.value = "";
+  renderPickerRows();
+  pagesPicker.panel?.querySelector(`.pages-row[data-page="${CSS.escape(page)}"]`)?.scrollIntoView({ block: "nearest" });
 }
+
+let applyingPages = false;
+function applyPickedPages() {
+  if (applyingPages) return;
+  const pages = pagesPicker.pages.filter((page) => pagesPicker.checked.get(page.path)).map((page) => page.path);
+  const before = new Set(boardLivePages());
+  if (pages.length === before.size && pages.every((page) => before.has(page))) {
+    setPagesOpen(false);
+    return;
+  }
+  applyingPages = true;
+  const apply = /** @type {HTMLButtonElement | null} */ (document.getElementById("pagesApply"));
+  if (apply) apply.disabled = true;
+  projectRequest("pages/set", { pages, tab: state.activeTab })
+    .then((payload) => {
+      const removed = Array.isArray(payload.removed) ? payload.removed : [];
+      const added = Array.isArray(payload.added) ? payload.added : [];
+      for (const item of added) if (item?.id) liveSnapshotWanted.add(item.id);
+      setPagesOpen(false);
+      refreshBoard();
+      if (removed.length > 0) {
+        const text = removed.length === 1 ? `Removed ${pageTitle(removed[0].page)}` : `Removed ${removed.length} pages`;
+        showBoardToast(text, added.length ? `Added ${added.length}` : "", "Undo", () => restorePages(removed));
+      } else if (added.length > 0) {
+        showBoardToast(added.length === 1 ? `Added ${pageTitle(added[0].page)}` : `Added ${added.length} pages`, "");
+      }
+    })
+    .catch((failure) => setPagesError(failure.message))
+    .finally(() => {
+      applyingPages = false;
+      if (apply) apply.disabled = false;
+    });
+}
+
+/** @param {Array<{ token: string, page: string }>} removed */
+async function restorePages(removed) {
+  for (const entry of removed) {
+    await boardPost("restore", { token: entry.token }).catch((error) => {
+      dockStatus.textContent = `Could not bring back ${entry.page}: ${error.message}`;
+    });
+  }
+  refreshBoard();
+}
+
+function setupPagesPicker() {
+  document.getElementById("pagesToggle")?.addEventListener("click", () => setPagesOpen(!pagesOpen()));
+  document.getElementById("pagesClose")?.addEventListener("click", () => setPagesOpen(false));
+  document.getElementById("pagesApply")?.addEventListener("click", applyPickedPages);
+  document.getElementById("pagesAddForm")?.addEventListener("submit", addPickerPage);
+  document.getElementById("pagesFilter")?.addEventListener("input", renderPickerRows);
+  document.getElementById("pagesAll")?.addEventListener("change", (event) => {
+    const on = /** @type {HTMLInputElement} */ (event.currentTarget).checked;
+    for (const page of pagesPicker.pages) pagesPicker.checked.set(page.path, on);
+    for (const box of document.querySelectorAll("#pagesRows input[type=checkbox]"))
+      /** @type {HTMLInputElement} */ (box).checked = on;
+    renderPickerSummary();
+  });
+  // A project that was just opened asks which pages to show.
+  if (location.hash === PAGES_HASH) setPagesOpen(true);
+}
+
+/* ------------------------------------------------------------ board name */
+
+// Clicking the board's name in the top bar turns it into a field: Enter or leaving it
+// saves, Escape puts the old name back. The board keeps its address.
+function startBoardRename() {
+  const button = document.getElementById("boardName");
+  if (!button || state.ended || document.getElementById("boardNameInput")) return;
+  const current = String(bootstrap.name || button.textContent || "");
+  const input = /** @type {HTMLInputElement} */ (
+    element("input", {
+      class: "board-name-input",
+      id: "boardNameInput",
+      type: "text",
+      maxlength: "120",
+      spellcheck: "false",
+      autocomplete: "off",
+      "aria-label": "Board name",
+    })
+  );
+  input.value = current;
+  input.style.width = `${Math.max(8, current.length + 2)}ch`;
+  button.hidden = true;
+  button.after(input);
+  input.focus();
+  input.select();
+  let finished = false;
+  /** @param {boolean} save */
+  const finish = (save) => {
+    if (finished) return;
+    finished = true;
+    const name = input.value.replace(/\s+/g, " ").trim();
+    input.remove();
+    button.hidden = false;
+    if (!save || !name || name === current) {
+      button.focus({ preventScroll: true });
+      return;
+    }
+    showBoardName(name);
+    boardPost("name", { name })
+      .then((payload) => showBoardName(String(payload.name || name)))
+      .catch((error) => {
+        showBoardName(current);
+        showBoardToast("Could not rename the board", error.message);
+      });
+  };
+  input.addEventListener("input", () => {
+    input.style.width = `${Math.max(8, input.value.length + 2)}ch`;
+  });
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      finish(true);
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      finish(false);
+    }
+  });
+  input.addEventListener("blur", () => finish(true));
+}
+
+/** @param {string} name */
+function showBoardName(name) {
+  bootstrap.name = name;
+  const button = document.getElementById("boardName");
+  if (button) button.textContent = name;
+  const settingsName = document.getElementById("settingsBoardName");
+  if (settingsName) settingsName.textContent = name;
+  document.title = `${name} · Liesel`;
+}
+
+document.getElementById("boardName")?.addEventListener("click", startBoardRename);
 
 function setupProjectBoard() {
   if (!isProjectBoard()) return;
-  document.getElementById("addPageToggle")?.addEventListener("click", () => setAddPageOpen(true));
-  const pageInput = document.getElementById("addPageInput");
-  pageInput?.addEventListener("keydown", (event) => {
-    if (event.key !== "Escape") return;
-    event.preventDefault();
-    event.stopPropagation();
-    setAddPageOpen(false);
-  });
-  pageInput?.addEventListener("blur", () => {
-    if (!(/** @type {HTMLInputElement} */ (pageInput).value.trim())) setAddPageOpen(false);
-  });
   for (const action of /** @type {const} */ (["start", "stop", "restart"])) {
     document
       .getElementById(`dev${action[0].toUpperCase()}${action.slice(1)}`)
       ?.addEventListener("click", () => devServerAction(action));
   }
-  document.getElementById("addPageForm")?.addEventListener("submit", addLivePage);
   document.getElementById("projectForm")?.addEventListener("submit", (event) => void saveDevConfig(event));
   document.getElementById("devCommand")?.addEventListener("change", () => void saveDevConfig());
   document.getElementById("devPort")?.addEventListener("change", () => void saveDevConfig());
   const section = document.getElementById("projectPane");
   if (section) section.hidden = false;
   renderProjectBar();
+  setupPagesPicker();
   void loadProject().then(autoStartDevServer);
 }
 
@@ -6308,7 +6688,7 @@ function releaseHeldKeys() {
 window.addEventListener("keydown", (event) => {
   if (event.key === "Meta" || event.key === "Alt") {
     // A tap of Cmd or Option on Settings never arms notes or controls on the board under it.
-    if (settingsOpen()) return;
+    if (overlayOpen()) return;
     modifierPressed(event.key, otherModifierHeld(event), event.timeStamp);
     return;
   }
@@ -6323,15 +6703,16 @@ window.addEventListener("keydown", (event) => {
   }
   // The New menu is ordinary links: its keys are the browser's, and it closes itself on Escape.
   if (event.target instanceof Element && event.target.closest("#newMenu")) return;
-  // Escape closes Settings first, even from one of its fields.
-  if (event.key === "Escape" && settingsOpen()) {
+  // Escape closes Settings or the page picker first, even from one of its fields.
+  if (event.key === "Escape" && overlayOpen()) {
     event.preventDefault();
-    setSettingsOpen(false);
+    if (pagesOpen()) setPagesOpen(false);
+    else setSettingsOpen(false);
     return;
   }
-  // Settings is an ordinary page over the board: Tab moves between its fields, keys type,
-  // and no board shortcut acts on the board hidden under it.
-  if (settingsOpen()) return;
+  // Settings and the page picker are ordinary pages over the board: Tab moves between
+  // their fields, keys type, and no board shortcut acts on the board hidden under them.
+  if (overlayOpen()) return;
   // Tab switches the sidebar between Chat and Controls; in a text field it keeps its meaning.
   if (event.key === "Tab" && !event.metaKey && !event.ctrlKey && !event.altKey && !isTypingTarget(event.target)) {
     boardKey(event, () => event.preventDefault());

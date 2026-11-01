@@ -16,8 +16,9 @@ const crossSpawn = createRequire(import.meta.url)("cross-spawn");
  * agent works in the repo root, and live items show the project's own running dev server
  * through a localhost proxy that adds the board SDK to every page it serves.
  *
- * Nothing in this file runs code from the repository until the user presses Start: the
- * dev server is detected by reading `package.json`, and the git exclude is written with
+ * The dev server is detected by reading `package.json`; opening the board runs it (after
+ * installing dependencies when `node_modules` is missing). A folder with no dev script but
+ * HTML files is served by `createStaticServer` instead. The git exclude is written with
  * plain file reads, never a git command that could honour repo configuration.
  */
 
@@ -267,6 +268,230 @@ export function devServerPortFromOutput(text) {
 }
 
 /**
+ * The command that installs the project's dependencies when they are missing: the
+ * package.json names some and there is no `node_modules` folder. Empty otherwise.
+ * @param {string} root
+ * @param {string} [packageManager]
+ * @returns {Promise<string>}
+ */
+export async function installCommand(root, packageManager = "") {
+  let pkg;
+  try {
+    pkg = JSON.parse(await readFile(path.join(root, "package.json"), "utf8"));
+  } catch {
+    return "";
+  }
+  const declared = Object.keys(pkg?.dependencies || {}).length + Object.keys(pkg?.devDependencies || {}).length > 0;
+  if (!declared) return "";
+  if (await stat(path.join(root, "node_modules")).catch(() => null)) return "";
+  const manager = packageManager || (await detectDevServer(root))?.packageManager || "npm";
+  return `${manager} install`;
+}
+
+/**
+ * Whether something accepts connections on `localhost:<port>` (IPv4 or IPv6).
+ * @param {number} port
+ * @param {{ timeoutMs?: number }} [options]
+ * @returns {Promise<boolean>}
+ */
+export function portAnswers(port, { timeoutMs = 400 } = {}) {
+  if (!port) return Promise.resolve(false);
+  return new Promise((resolve) => {
+    const socket = netConnect({ host: "localhost", port, autoSelectFamily: true });
+    const done = (value) => {
+      clearTimeout(timer);
+      socket.destroy();
+      resolve(value);
+    };
+    const timer = setTimeout(() => done(false), timeoutMs);
+    socket.once("connect", () => done(true));
+    socket.once("error", () => done(false));
+  });
+}
+
+/**
+ * A loopback port nothing listens on right now.
+ * @returns {Promise<number>}
+ */
+export function freePort() {
+  return new Promise((resolve, reject) => {
+    const probe = createServer();
+    probe.once("error", reject);
+    probe.listen({ host: "127.0.0.1", port: 0 }, () => {
+      const address = probe.address();
+      const port = typeof address === "object" && address ? address.port : 0;
+      probe.close(() => resolve(port));
+    });
+  });
+}
+
+/**
+ * The ports of servers already running from inside this project: listening TCP sockets
+ * whose process works in the repo folder, found with `lsof` (argv only, no shell). It
+ * fails open: no lsof, a timeout, or anything odd means "none".
+ * @param {string} root
+ * @param {{ excludePids?: number[], excludePorts?: number[], execFileFn?: typeof execFile, timeoutMs?: number }} [options]
+ * @returns {Promise<number[]>}
+ */
+export async function findRunningServers(
+  root,
+  { excludePids = [process.pid], excludePorts = [], execFileFn = execFile, timeoutMs = 3000 } = {},
+) {
+  if (process.platform === "win32") return [];
+  /** @param {string[]} args @returns {Promise<string>} */
+  const lsof = (args) =>
+    new Promise((resolve) => {
+      execFileFn("lsof", args, { timeout: timeoutMs, maxBuffer: 4 * 1024 * 1024 }, (_error, stdout) =>
+        resolve(String(stdout || "")),
+      );
+    });
+  /** @type {Map<number, Set<number>>} */
+  const portsByPid = new Map();
+  let pid = 0;
+  for (const line of (await lsof(["-nP", "-iTCP", "-sTCP:LISTEN", "-Fpn"])).split("\n")) {
+    if (line.startsWith("p")) pid = Number(line.slice(1)) || 0;
+    else if (line.startsWith("n") && pid && !excludePids.includes(pid)) {
+      const port = Number(/:(\d+)$/.exec(line)?.[1] || 0);
+      if (port && !excludePorts.includes(port)) {
+        if (!portsByPid.has(pid)) portsByPid.set(pid, new Set());
+        portsByPid.get(pid)?.add(port);
+      }
+    }
+  }
+  if (portsByPid.size === 0) return [];
+  const realRoot = await realpath(root).catch(() => root);
+  const found = new Set();
+  pid = 0;
+  for (const line of (await lsof(["-a", "-d", "cwd", "-Fn", "-p", [...portsByPid.keys()].join(",")])).split("\n")) {
+    if (line.startsWith("p")) pid = Number(line.slice(1)) || 0;
+    else if (line.startsWith("n") && pid) {
+      const cwd = line.slice(1);
+      if (cwd === realRoot || cwd.startsWith(`${realRoot}${path.sep}`)) {
+        for (const port of portsByPid.get(pid) || []) found.add(port);
+      }
+    }
+  }
+  return [...found].sort((a, b) => a - b);
+}
+
+const STATIC_TYPES = {
+  ".html": "text/html; charset=utf-8",
+  ".htm": "text/html; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".js": "text/javascript; charset=utf-8",
+  ".mjs": "text/javascript; charset=utf-8",
+  ".json": "application/json; charset=utf-8",
+  ".svg": "image/svg+xml",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".gif": "image/gif",
+  ".webp": "image/webp",
+  ".avif": "image/avif",
+  ".ico": "image/x-icon",
+  ".woff": "font/woff",
+  ".woff2": "font/woff2",
+  ".ttf": "font/ttf",
+  ".otf": "font/otf",
+  ".mp4": "video/mp4",
+  ".webm": "video/webm",
+  ".mp3": "audio/mpeg",
+  ".txt": "text/plain; charset=utf-8",
+  ".xml": "application/xml; charset=utf-8",
+  ".pdf": "application/pdf",
+};
+
+/**
+ * Serves a folder of plain HTML the way a simple dev server would, for a project with no
+ * dev script: loopback only, GET and HEAD, `/docs/` is `docs/index.html`, `/about` may be
+ * `about.html`. Nothing outside the folder is served (realpath), and no dot file is.
+ * @param {string} root
+ */
+export function createStaticServer(root) {
+  let rootReal = "";
+  /** @param {string} pathname @returns {Promise<string>} */
+  const resolveFile = async (pathname) => {
+    let decoded;
+    try {
+      decoded = decodeURIComponent(pathname);
+    } catch {
+      return "";
+    }
+    if (decoded.includes("\0")) return "";
+    const parts = decoded.split("/").filter(Boolean);
+    if (parts.some((part) => part.startsWith(".") || part === "node_modules")) return "";
+    const base = path.join(rootReal, ...parts);
+    const candidates = decoded.endsWith("/")
+      ? [path.join(base, "index.html"), path.join(base, "index.htm")]
+      : [base, `${base}.html`, path.join(base, "index.html")];
+    for (const candidate of candidates) {
+      const real = await realpath(candidate).catch(() => "");
+      if (!real || (real !== rootReal && !real.startsWith(`${rootReal}${path.sep}`))) continue;
+      if ((await stat(real).catch(() => null))?.isFile()) return real;
+    }
+    return "";
+  };
+  const server = createServer(async (req, res) => {
+    if (req.method !== "GET" && req.method !== "HEAD") {
+      res.writeHead(405, { allow: "GET, HEAD" });
+      res.end();
+      return;
+    }
+    const pathname = String(req.url || "/").split(/[?#]/)[0] || "/";
+    const file = await resolveFile(pathname);
+    if (!file) {
+      res.writeHead(404, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
+      res.end(
+        `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Not found</title></head><body style="font:16px/1.5 system-ui,sans-serif;padding:48px;color:#16181d"><h1 style="font-weight:600">Not found</h1><p>There is no ${escapeHtml(pathname)} in this folder.</p></body></html>`,
+      );
+      return;
+    }
+    // A folder named without its slash redirects, so its relative links resolve.
+    if (!pathname.endsWith("/") && /index\.html?$/i.test(file) && path.basename(pathname) !== path.basename(file)) {
+      const tail = String(req.url || "").slice(pathname.length);
+      res.writeHead(301, { location: `${pathname}/${tail}` });
+      res.end();
+      return;
+    }
+    const body = await readFile(file).catch(() => null);
+    if (!body) {
+      res.writeHead(500);
+      res.end();
+      return;
+    }
+    res.writeHead(200, {
+      "content-type": STATIC_TYPES[path.extname(file).toLowerCase()] || "application/octet-stream",
+      "content-length": String(body.length),
+      "cache-control": "no-store",
+    });
+    res.end(req.method === "HEAD" ? undefined : body);
+  });
+  return {
+    /** @returns {Promise<number>} */
+    async listen() {
+      rootReal = await realpath(root);
+      return new Promise((resolve, reject) => {
+        server.once("error", reject);
+        server.listen({ host: "127.0.0.1", port: 0 }, () => {
+          server.off("error", reject);
+          server.on("error", () => {});
+          const address = server.address();
+          resolve(typeof address === "object" && address ? address.port : 0);
+        });
+      });
+    },
+    port() {
+      const address = server.address();
+      return typeof address === "object" && address ? address.port : 0;
+    },
+    close() {
+      server.closeAllConnections?.();
+      return new Promise((resolve) => server.close(() => resolve(undefined)));
+    },
+  };
+}
+
+/**
  * A live item's page: a URL path on the dev server, such as `/`, `/store` or `/products/x?ref=1`.
  * @param {unknown} value
  * @returns {string} the path, or "" when it is not one
@@ -416,7 +641,7 @@ export function createDevServer({
   /** @type {Array<() => void>} */
   let closeWaiters = [];
   return {
-    /** @param {{ command: string, port: number }} config */
+    /** @param {{ command: string, port: number, label?: string }} config */
     start(config) {
       if (child) return this.view();
       if (!config.command) {
@@ -426,7 +651,7 @@ export function createDevServer({
         return this.view();
       }
       state.status = "starting";
-      state.command = config.command;
+      state.command = config.label || config.command;
       state.port = config.port || 0;
       state.detectedPort = 0;
       state.output = "";
@@ -523,12 +748,15 @@ export function createDevServer({
      * @param {{ command: string, port: number }} config
      */
     async restart(config) {
-      if (child) {
-        const gone = new Promise((resolve) => closeWaiters.push(() => resolve(undefined)));
-        this.stop();
-        await gone;
-      }
+      await this.stopAndWait();
       return this.start(config);
+    },
+    /** Stops the server and resolves once its process has gone. */
+    async stopAndWait() {
+      if (!child) return;
+      const gone = new Promise((resolve) => closeWaiters.push(() => resolve(undefined)));
+      this.stop();
+      await gone;
     },
     /** The port the server printed wins: a busy default makes Vite and others move on. */
     port() {
@@ -594,7 +822,7 @@ function escapeHtml(value) {
   );
 }
 
-const LIVE_ACTION_LABELS = { restart: "Restart", start: "Start", settings: "Open Settings" };
+const LIVE_ACTION_LABELS = { restart: "Retry", start: "Start", settings: "Open Settings" };
 
 /**
  * The page a live frame shows when there is no dev server to show. A `busy` page (the
@@ -625,6 +853,7 @@ export function liveFallbackHtml({ title, message, sdkSrc, busy = false, action 
  *   sdkSrc: string,
  *   reservedPorts?: () => number[],
  *   onAnswer?: () => void,
+ *   onUnreachable?: (port: number) => void,
  *   statusMessage?: () => { title: string, message: string, busy?: boolean, action?: "restart" | "start" | "settings" | "" },
  * }} options
  */
@@ -633,6 +862,7 @@ export function createLiveProxy({
   sdkSrc,
   reservedPorts = () => [],
   onAnswer = () => {},
+  onUnreachable = () => {},
   statusMessage,
 }) {
   let origin = "";
@@ -747,6 +977,7 @@ export function createLiveProxy({
       },
     );
     upstream.on("error", () => {
+      onUnreachable(port);
       const status = statusMessage?.() || {
         title: "Dev server not answering",
         message: `Nothing answered at localhost:${port}.`,

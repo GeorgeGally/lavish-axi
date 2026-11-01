@@ -64,7 +64,7 @@ test("Settings is a full page with a way back to the board, in the home page's c
   // The way back carries no tooltip that would cover it.
   assert.doesNotMatch(settings.match(/<button class="settings-back"[^>]*>/)?.[0] || "", /title=/);
   assert.match(settings, /<h1 class="settings-title" id="settingsTitle">Settings<\/h1>/);
-  assert.match(settings, /<p class="settings-board">Shop<\/p>/);
+  assert.match(settings, /<p class="settings-board" id="settingsBoardName">Shop<\/p>/);
   const css = await readFile(new URL("../src/board.css", import.meta.url), "utf8");
   const rule = (selector) => {
     const at = css.indexOf(`\n${selector} {`);
@@ -104,21 +104,38 @@ test("Duplicate on a design's label shows at rest; only a copy's Rename and Dele
   assert.match(client, /button\("Delete", "Delete this copy", \(\) => deleteCopy\(item\.id\), true\)/);
 });
 
-test("a project board's top bar has only a small Add page; the dev server lives in Settings", () => {
+test("a project board's top bar has only Pages; the server's controls are folded under Advanced", () => {
   const html = createBoardHtml({ key: "k", file: "/repo/.liesel/board.json" }, /** @type {any} */ (board), {
     project: { root: "/repo" },
   });
   const bar = html.slice(html.indexOf('<header class="bar"'), html.indexOf("</header>"));
   const settings = html.slice(html.indexOf('id="settings"'), html.indexOf("<!-- /settings -->"));
-  // The dev server starts by itself, so the bar carries no state pill and no Start.
+  // The server runs by itself, so the bar carries no state pill and no Start.
   assert.doesNotMatch(bar, /devState|devToggle|dev-state|>Start</);
-  // Add page is one control; its path field opens in its place.
-  assert.match(bar, /id="addPageToggle"[^>]*aria-expanded="false"[^>]*aria-controls="addPageForm"/);
-  assert.match(bar, /<form class="add-page" id="addPageForm" autocomplete="off" hidden>/);
-  assert.doesNotMatch(bar.slice(bar.indexOf('id="addPageForm"')), /type="submit"/);
-  for (const id of ["devStart", "devStop", "devRestart", "devCommand", "devPort", "devOutput", "projectRoot"]) {
-    assert.match(settings, new RegExp(`id="${id}"`), id);
+  // Pages opens the page picker; the bare path field is gone.
+  assert.match(bar, /id="pagesToggle"[^>]*aria-haspopup="dialog"[^>]*aria-controls="pagesPicker"[^>]*>Pages</);
+  assert.doesNotMatch(html, /addPageForm|addPageInput|addPageToggle/);
+  // The board's name is a button that turns into a field.
+  assert.match(bar, /<button class="board-name" id="boardName" type="button" title="Rename this board">/);
+  const advanced = settings.slice(settings.indexOf('id="devAdvanced"'));
+  assert.match(settings, /<details class="settings-advanced" id="devAdvanced">\s*<summary[^>]*>Advanced<\/summary>/);
+  assert.doesNotMatch(settings, /id="devAdvanced" open/, "Advanced starts folded");
+  for (const id of ["devStart", "devStop", "devRestart", "devCommand", "devPort", "devOutput"]) {
+    assert.match(advanced, new RegExp(`id="${id}"`), id);
   }
   // The project path is cut in the middle, keeping its last folder.
   assert.match(settings, /class="settings-path-head"><\/span><span class="settings-path-tail">/);
+});
+
+test("the page picker is a full page with All pages, a filter, a way to add a page by path, and Show in reach", () => {
+  const html = createBoardHtml({ key: "k", file: "/repo/.liesel/board.json" }, /** @type {any} */ (board), {
+    project: { root: "/repo" },
+  });
+  const picker = html.slice(html.indexOf('id="pagesPicker"'));
+  assert.match(html, /<div class="settings pages-picker" id="pagesPicker" role="dialog" aria-modal="true"[^>]*hidden>/);
+  assert.match(picker, /id="pagesClose"[^>]*>[\s\S]*Back to board/);
+  assert.match(picker, /<div class="settings-top-inner">[\s\S]*id="pagesApply"/, "Show sits in the sticky top");
+  assert.match(picker, /<input type="checkbox" id="pagesAll">[\s\S]*All pages/);
+  assert.match(picker, /id="pagesFilter"[^>]*hidden/);
+  assert.match(picker, /<form class="pages-add" id="pagesAddForm"[\s\S]*id="pagesAddInput"/);
 });
