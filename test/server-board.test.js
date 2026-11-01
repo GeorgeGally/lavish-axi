@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmod, mkdtemp, mkdir, readFile, rm, stat, utimes, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, mkdir, readFile, realpath, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -397,52 +397,99 @@ test("an unknown board key is not a board", async (t) => {
   assert.equal(page.status, 404);
 });
 
-test("a board submission runs EASEL_NOTIFY_CMD once and leaves the feedback for poll", async (t) => {
-  const scratch = await mkdtemp(path.join(tmpdir(), "easel-notify-"));
-  t.after(() => rm(scratch, { recursive: true, force: true }));
-  const out = path.join(scratch, "calls.txt");
-  const script = path.join(scratch, "notify.sh");
-  await writeFile(
-    script,
-    `#!/bin/sh\nprintf '%s|%s|%s|%s|%s\\n' "$1" "$2" "$3" "$EASEL_BOARD" "$EASEL_SUBMISSION_ID" >> '${out}'\n`,
-  );
-  await chmod(script, 0o755);
-  const { base, boardDirectory } = await setup(t, { env: { EASEL_NOTIFY_CMD: script } });
-  const registered = await register(base, boardDirectory);
-
-  for (const text of ["Tighten the headline", "Accepted: Hero - Proposed (all sizes)"]) {
-    const queued = await fetch(`${base}/api/${registered.key}/prompts`, {
-      method: "POST",
-      headers: write(base),
-      body: JSON.stringify({ prompts: [{ uid: text, prompt: text, tag: "message" }], domSnapshot: "" }),
-    });
-    assert.equal(queued.status, 200);
-  }
+async function readNotifyCalls(out, want) {
   let calls = [];
-  for (let attempt = 0; attempt < 50 && calls.length < 2; attempt += 1) {
+  for (let attempt = 0; attempt < 80 && calls.length < want; attempt += 1) {
     await new Promise((resolve) => setTimeout(resolve, 50));
     calls = (await readFile(out, "utf8").catch(() => ""))
       .split("\n")
       .filter(Boolean)
       .map((line) => line.split("|"));
   }
-  assert.equal(calls.length, 2, "one run per submission");
-  const boardJson = boardFilePath(boardDirectory);
-  for (const [name, file, id, envBoard, envId] of calls) {
+  return calls;
+}
+
+async function notifyScript(scratch, out) {
+  const script = path.join(scratch, "notify.sh");
+  await writeFile(
+    script,
+    `#!/bin/sh\nprintf '%s|%s|%s|%s|%s|%s|%s|%s|%s\\n' "$#" "$EASEL_BOARD_DIR" "$EASEL_BOARD_ID" "$EASEL_NOTE_COUNT" "$1" "$2" "$3" "$EASEL_BOARD" "$EASEL_SUBMISSION_ID" >> '${out}'\n`,
+  );
+  await chmod(script, 0o755);
+  return script;
+}
+
+async function queueNote(base, key, text) {
+  const queued = await fetch(`${base}/api/${key}/prompts`, {
+    method: "POST",
+    headers: write(base),
+    body: JSON.stringify({ prompts: [{ uid: text, prompt: text, tag: "message" }], domSnapshot: "" }),
+  });
+  assert.equal(queued.status, 200);
+}
+
+test("a board note runs EASEL_NOTIFY_CMD debounced, with the board in argv and env, and leaves the feedback for poll", async (t) => {
+  const scratch = await mkdtemp(path.join(tmpdir(), "easel-notify-"));
+  t.after(() => rm(scratch, { recursive: true, force: true }));
+  const out = path.join(scratch, "calls.txt");
+  const script = await notifyScript(scratch, out);
+  const { base, boardDirectory } = await setup(t, { env: { EASEL_NOTIFY_CMD: script } });
+  const registered = await register(base, boardDirectory);
+
+  // A burst: the first note runs at once, the rest collapse into one trailing run.
+  for (const text of ["Tighten the headline", "Accepted: Hero - Proposed (all sizes)", "$(touch pwned) `id`"]) {
+    await queueNote(base, registered.key, text);
+  }
+  const first = await readNotifyCalls(out, 1);
+  assert.equal(first.length, 1, "the first note runs at once");
+  assert.equal(first[0][3], "1", "EASEL_NOTE_COUNT counts the notes waiting at run time");
+  await new Promise((resolve) => setTimeout(resolve, 3500));
+  const calls = await readNotifyCalls(out, 2);
+  assert.equal(calls.length, 2, "the burst collapses into one trailing run");
+  const realDir = await realpath(boardDirectory);
+  for (const [argc, dir, boardId, , name, boardJson, id, envBoard, envId] of calls) {
+    assert.equal(argc, "3", "argv stays board name, board.json, submission id");
+    assert.equal(dir, realDir);
+    assert.equal(boardId, registered.key);
     assert.equal(name, registered.board.name);
-    assert.equal(path.basename(file), "board.json");
-    assert.equal(await readFile(file, "utf8"), await readFile(boardJson, "utf8"));
+    assert.equal(boardJson, boardFilePath(realDir));
     assert.match(id, /^[0-9a-z]+-[0-9a-f]{8}$/);
     assert.equal(envBoard, name);
     assert.equal(envId, id);
   }
-  assert.notEqual(calls[0][2], calls[1][2]);
-
-  const polled = await fetch(`${base}/api/poll?file=${encodeURIComponent(boardJson)}&timeoutMs=2000`).then((response) =>
-    response.json(),
+  assert.notEqual(calls[0][6], calls[1][6]);
+  assert.equal(calls[1][3], "3");
+  assert.equal(
+    await readFile(out, "utf8").then((text) => text.includes("Tighten")),
+    false,
+    "note text is never passed",
   );
+
+  const polled = await fetch(
+    `${base}/api/poll?file=${encodeURIComponent(boardFilePath(boardDirectory))}&timeoutMs=2000`,
+  ).then((response) => response.json());
   assert.equal(polled.status, "feedback");
-  assert.equal(polled.prompts.length, 2);
+  assert.equal(polled.prompts.length, 3);
+});
+
+test("the notify hook stays off when unset and can come from the state directory's config.json", async (t) => {
+  const scratch = await mkdtemp(path.join(tmpdir(), "easel-notify-"));
+  t.after(() => rm(scratch, { recursive: true, force: true }));
+  const out = path.join(scratch, "calls.txt");
+  const script = await notifyScript(scratch, out);
+  const { base, boardDirectory, dir } = await setup(t, { env: { EASEL_NOTIFY_CMD: "", LAVISH_AXI_NOTIFY_CMD: "" } });
+  const registered = await register(base, boardDirectory);
+
+  await queueNote(base, registered.key, "Nobody is listening");
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  assert.equal(await readFile(out, "utf8").catch(() => ""), "", "no command, no run");
+
+  await writeFile(path.join(dir, "config.json"), JSON.stringify({ notify_cmd: script }));
+  await queueNote(base, registered.key, "Now wake up");
+  const calls = await readNotifyCalls(out, 1);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0][1], await realpath(boardDirectory));
+  assert.equal(calls[0][3], "2");
 });
 
 const DROP_PNG = Buffer.from(

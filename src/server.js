@@ -78,7 +78,7 @@ import {
 import { missingHistory, readBoardHistory, writeBoardHistory } from "./board-history.js";
 import { createBoardHtml } from "./board-page.js";
 import { THUMB_SCALE, captureCrop, cropBox, cropFrameHtml, findChrome, thumbFrameHtml } from "./board-crop.js";
-import { newSubmissionId, runNotifyCommand } from "./board-notify.js";
+import { createBoardNotifier, newSubmissionId, resolveNotifyCommand, runNotifyCommand } from "./board-notify.js";
 import {
   bindHost,
   extraAllowedHosts,
@@ -1961,25 +1961,46 @@ export async function serve({
   // reaches the agent as the user's own instructions. The session key is derived
   // from the artifact path, not a secret, so knowing it must not be enough -
   // only this server's own chrome may queue prompts.
-  // A board submission (a note sent, the queue flushed, Accept / Keep today) runs the
-  // operator's EASEL_NOTIFY_CMD once, after the batch is queued, without waiting on it.
+  // A board submission (a note sent from the composer, a pin, tune Send, an image drop,
+  // Accept / Keep today, an end) runs the operator's notify command (EASEL_NOTIFY_CMD, else
+  // `notify_cmd` in the state directory's config.json) after the batch is queued, without
+  // waiting on it, at most once per board per debounce window (see createBoardNotifier).
+  const boardNotifier = createBoardNotifier({
+    run: (key) => {
+      runBoardNotify(key).catch((error) =>
+        writeLog(`[easel] board notify skipped key=${key}: ${error?.message || error}`),
+      );
+    },
+  });
+  async function runBoardNotify(key) {
+    const command = await resolveNotifyCommand({
+      envCommand: productEnv("NOTIFY_CMD", env),
+      stateRoot: attachmentStateRoot,
+    });
+    if (!command) return;
+    const resolved = await boardForRequest(key);
+    if (!resolved) return;
+    const submissionId = newSubmissionId();
+    const noteCount = Number(resolved.session.pending_prompts) || 0;
+    writeLog(`[easel] board notify key=${key} submission=${submissionId} notes=${noteCount}`);
+    runNotifyCommand({
+      command,
+      boardDir: resolved.dir,
+      boardId: key,
+      noteCount,
+      board: resolved.board.name || path.basename(resolved.dir),
+      boardJson: resolved.session.file,
+      submissionId,
+      log: (line) => writeLog(`[easel] ${line}`),
+    });
+  }
   function notifyBoardSubmission(key, session) {
-    const command = productEnv("NOTIFY_CMD", env);
-    if (!command || path.basename(String(session?.file || "")) !== BOARD_FILE_NAME) return;
-    boardForRequest(key)
-      .then((resolved) => {
-        const submissionId = newSubmissionId();
-        const board = resolved?.board.name || path.basename(path.dirname(session.file));
-        writeLog(`[easel] board notify key=${key} submission=${submissionId}`);
-        runNotifyCommand({
-          command,
-          board,
-          boardJson: session.file,
-          submissionId,
-          log: (line) => writeLog(`[easel] ${line}`),
-        });
+    if (path.basename(String(session?.file || "")) !== BOARD_FILE_NAME) return;
+    resolveNotifyCommand({ envCommand: productEnv("NOTIFY_CMD", env), stateRoot: attachmentStateRoot })
+      .then((command) => {
+        if (command) boardNotifier.notify(key);
       })
-      .catch((error) => writeLog(`[easel] board notify skipped key=${key}: ${error?.message || error}`));
+      .catch(() => {});
   }
 
   app.post("/api/:key/prompts", async (req, res, next) => {
@@ -3146,6 +3167,7 @@ export async function serve({
       clearTimeout(bindRecoveryTimer);
       bindRecoveryTimer = null;
     }
+    boardNotifier.close();
     // Only the chrome whose artifact is being reopened is reloaded: the replacement server
     // adopts that session via state.json once it binds, and the caller named it. Every other
     // open review page is told why this server went away and left alone - a forced reload of a

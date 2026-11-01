@@ -1,16 +1,22 @@
 import { spawn } from "node:child_process";
 import crypto from "node:crypto";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 
 /**
- * When a reviewer submits feedback on a board, the server can run one command so a
- * supervisor learns about it without keeping a poll open. The command is the
- * operator's own (`EASEL_NOTIFY_CMD`); it gets the board name, the board.json path
- * and a submission id as arguments and as `EASEL_BOARD`, `EASEL_BOARD_JSON` and
- * `EASEL_SUBMISSION_ID`. It is fire and forget: it never holds the request, never
- * consumes the feedback (a poll still collects it), and a failure is only logged.
+ * When a reviewer queues a note on a board, the server can run one command so a
+ * supervisor wakes up without keeping a poll open. The command is the operator's own
+ * (`EASEL_NOTIFY_CMD`, or `notify_cmd` in the state directory's `config.json`); it gets
+ * the board name, the board.json path and a submission id as arguments and as
+ * `EASEL_BOARD`, `EASEL_BOARD_JSON` and `EASEL_SUBMISSION_ID`, plus `EASEL_BOARD_DIR`,
+ * `EASEL_BOARD_ID` (the session key) and `EASEL_NOTE_COUNT` (notes waiting for the
+ * agent). The note text is never passed. It is fire and forget: it never holds the
+ * request, never consumes the feedback (a poll still collects it), runs at most once per
+ * board per debounce window, and a failure is only logged.
  */
 
 export const NOTIFY_TIMEOUT_MS = 30_000;
+export const NOTIFY_DEBOUNCE_MS = 3_000;
 const STDERR_KEEP = 2000;
 
 export function newSubmissionId() {
@@ -18,8 +24,78 @@ export function newSubmissionId() {
 }
 
 /**
+ * The environment wins; otherwise `notify_cmd` from `<stateRoot>/config.json`, read on
+ * every call so a long-running server picks it up without a restart.
+ * @param {{ envCommand?: string, stateRoot: string }} options
+ * @returns {Promise<string>}
+ */
+export async function resolveNotifyCommand({ envCommand, stateRoot }) {
+  const fromEnv = String(envCommand || "").trim();
+  if (fromEnv) return fromEnv;
+  try {
+    const config = JSON.parse(await readFile(path.join(stateRoot, "config.json"), "utf8"));
+    return typeof config?.notify_cmd === "string" ? config.notify_cmd.trim() : "";
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * At most one run per board per window. The first note runs at once; notes inside the
+ * window collapse into one trailing run at its end, so the last note is always followed
+ * by a run (a supervisor that polled after the first run still hears about the rest).
+ * @param {{
+ *   run: (key: string) => void,
+ *   windowMs?: number,
+ *   now?: () => number,
+ *   setTimer?: (fn: () => void, ms: number) => any,
+ *   clearTimer?: (timer: any) => void,
+ * }} options
+ */
+export function createBoardNotifier({
+  run,
+  windowMs = NOTIFY_DEBOUNCE_MS,
+  now = Date.now,
+  setTimer = setTimeout,
+  clearTimer = clearTimeout,
+}) {
+  /** @type {Map<string, { last: number, timer: any }>} */
+  const boards = new Map();
+  const fire = (/** @type {string} */ key) => {
+    const entry = boards.get(key);
+    if (entry) {
+      entry.last = now();
+      entry.timer = null;
+    }
+    run(key);
+  };
+  return {
+    /** @param {string} key */
+    notify(key) {
+      const entry = boards.get(key) ?? { last: -Infinity, timer: null };
+      boards.set(key, entry);
+      if (entry.timer) return;
+      const wait = entry.last + windowMs - now();
+      if (wait <= 0) {
+        fire(key);
+        return;
+      }
+      entry.timer = setTimer(() => fire(key), wait);
+      entry.timer?.unref?.();
+    },
+    close() {
+      for (const entry of boards.values()) if (entry.timer) clearTimer(entry.timer);
+      boards.clear();
+    },
+  };
+}
+
+/**
  * @param {{
  *   command: string,
+ *   boardDir: string,
+ *   boardId: string,
+ *   noteCount: number,
  *   board: string,
  *   boardJson: string,
  *   submissionId: string,
@@ -32,6 +108,9 @@ export function newSubmissionId() {
  */
 export function runNotifyCommand({
   command,
+  boardDir,
+  boardId,
+  noteCount,
   board,
   boardJson,
   submissionId,
@@ -42,7 +121,15 @@ export function runNotifyCommand({
 }) {
   const cmd = String(command || "").trim();
   if (!cmd) return null;
-  const env = { ...process.env, EASEL_BOARD: board, EASEL_BOARD_JSON: boardJson, EASEL_SUBMISSION_ID: submissionId };
+  const env = {
+    ...process.env,
+    EASEL_BOARD_DIR: boardDir,
+    EASEL_BOARD_ID: boardId,
+    EASEL_NOTE_COUNT: String(noteCount),
+    EASEL_BOARD: board,
+    EASEL_BOARD_JSON: boardJson,
+    EASEL_SUBMISSION_ID: submissionId,
+  };
   /** @type {import("node:child_process").ChildProcess} */
   let child;
   try {
@@ -50,10 +137,12 @@ export function runNotifyCommand({
     // parameters and environment, never spliced into the shell text.
     child =
       platform === "win32"
-        ? spawnFn(cmd, { shell: true, env, stdio: ["ignore", "ignore", "pipe"], windowsHide: true })
+        ? // cmd.exe has no safe "$@"; Windows reads the values from the environment.
+          spawnFn(cmd, { shell: true, env, stdio: ["ignore", "ignore", "pipe"], windowsHide: true })
         : spawnFn("/bin/sh", ["-c", `${cmd} "$@"`, "easel-notify", board, boardJson, submissionId], {
             env,
             stdio: ["ignore", "ignore", "pipe"],
+            detached: true,
           });
   } catch (error) {
     log(`board notify failed to start submission=${submissionId}: ${error instanceof Error ? error.message : error}`);
