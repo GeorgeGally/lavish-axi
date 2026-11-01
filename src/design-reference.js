@@ -139,24 +139,24 @@ export const LAYOUT_SAFETY_CSS_SNIPPET = `<style>
 </style>`;
 
 // The agent already knows what it changed answering the last round of feedback,
-// so it says so rather than making Lavish diff two renders. Both attributes are
+// so it says so rather than making Easel diff two renders. Both attributes are
 // ordinary artifact content: they survive export and opening the file directly.
-export const REVISION_REGISTRY_SNIPPET = `<script type="application/json" data-lavish-revisions>
+export const REVISION_REGISTRY_SNIPPET = `<script type="application/json" data-easel-revisions>
 [{ "id": "r1", "label": "Round 1", "timestamp": "2026-01-01T10:00:00Z", "summary": "Tightened the pricing copy" }]
 </script>
-<section data-lavish-revision="r1">...the block you changed...</section>`;
+<section data-easel-revision="r1">...the block you changed...</section>`;
 
 // Single source for how agents choose an artifact's design direction. It flows into the
-// no-args home output, top-level --help (via DESIGN_SYSTEM_HINT), the `lavish-axi design`
+// no-args home output, top-level --help (via DESIGN_SYSTEM_HINT), the `easel design`
 // summary, and the design command help. The installable skill does not embed this rule;
-// it points at `lavish-axi design`. Edit the rule here only.
+// it points at `easel design`. Edit the rule here only.
 export const DESIGN_PRIORITY_RULE =
-  "Decide the design direction in this strict priority order, and only move to the next step when the current one truly yields nothing: (1) if the user asked for a specific look or named design system, use that; (2) otherwise you must first inspect the project the artifact is about - the subject or product whose content or UI it represents, which may differ from your current working directory - and match that project's design system: Tailwind or theme config, shared CSS variables or design tokens, component library, brand assets, or existing styled pages. If the artifact previews, proposes, or mocks a specific app's UI, render it in that app's own design system so it faithfully shows the product, even when you are running in a different repo; (3) only when both steps come up empty, use the Lavish-recommended Tailwind CSS browser runtime v4 + DaisyUI v5, available via CDN, and prefer that CDN snippet over hand-writing styles unless explicitly instructed otherwise by the user.";
+  "Decide the design direction in this strict priority order, and only move to the next step when the current one truly yields nothing: (1) if the user asked for a specific look or named design system, use that; (2) otherwise you must first inspect the project the artifact is about - the subject or product whose content or UI it represents, which may differ from your current working directory - and match that project's design system: Tailwind or theme config, shared CSS variables or design tokens, component library, brand assets, or existing styled pages. If the artifact previews, proposes, or mocks a specific app's UI, render it in that app's own design system so it faithfully shows the product, even when you are running in a different repo; (3) only when both steps come up empty, use the Easel-recommended Tailwind CSS browser runtime v4 + DaisyUI v5, available via CDN, and prefer that CDN snippet over hand-writing styles unless explicitly instructed otherwise by the user.";
 
 export const DESIGN_SYSTEM_HINT =
-  "Lavish does not auto-inject any design system - artifacts stay portable so they render identically when opened directly without lavish-axi running. Before writing any HTML: " +
+  "Easel does not auto-inject any design system - artifacts stay portable so they render identically when opened directly without easel running. Before writing any HTML: " +
   DESIGN_PRIORITY_RULE +
-  " Run `lavish-axi design` for a content-to-playbook router, a copy-pasteable CDN snippet, the whiteboard (Mermaid) opt-in snippet, and the DaisyUI component reference. When you deliver the artifact, state which of the three design sources you used and why.";
+  " Run `easel design` for a content-to-playbook router, a copy-pasteable CDN snippet, the whiteboard (Mermaid) opt-in snippet, and the DaisyUI component reference. When you deliver the artifact, state which of the three design sources you used and why.";
 
 export const DAISYUI_THEMES = [
   "light",
@@ -204,9 +204,9 @@ export function createDesignOutput() {
     },
     design: {
       summary:
-        "Use this Lavish CDN fallback only if (1) the user gave no design direction and (2) you already inspected the project the artifact is about and found no design system or style conventions to match. If you have not checked the subject project yet, check first. Lavish does not auto-inject any design system; artifacts stay portable HTML. Paint an explicit page background and readable text. " +
+        "Use this Easel CDN fallback only if (1) the user gave no design direction and (2) you already inspected the project the artifact is about and found no design system or style conventions to match. If you have not checked the subject project yet, check first. Easel does not auto-inject any design system; artifacts stay portable HTML. Paint an explicit page background and readable text. " +
         DESIGN_PRIORITY_RULE +
-        " Lavish adds only its SDK script to your file and never wraps a fragment, so start it with `<!doctype html>`: without one the page renders in quirks mode, where `<table>` text stops inheriting the color a wrapper theme sets. Paste the CDN snippet below into your `<head>`.",
+        " Easel adds only its SDK script to your file and never wraps a fragment, so start it with `<!doctype html>`: without one the page renders in quirks mode, where `<table>` text stops inheriting the color a wrapper theme sets. Paste the CDN snippet below into your `<head>`.",
       cdn_snippet: DESIGN_CDN_SNIPPET,
       cdn_urls: DESIGN_CDN_URLS,
       versions: { tailwind: TAILWIND_BROWSER_VERSION, daisyui: DAISYUI_VERSION },
@@ -215,36 +215,36 @@ export function createDesignOutput() {
         "Use this command for common syntax. Read the latest DaisyUI docs for full details when using advanced or unfamiliar components.",
       layout_safety_snippet: LAYOUT_SAFETY_CSS_SNIPPET,
       layout_safety_note:
-        "Optional copy-paste CSS for artifacts with dense nested grid/flex layouts, badges, wide monospace or pixel fonts, or local media. Paste it into the artifact yourself when useful. Lavish never auto-injects it, so direct-open portability stays intact.",
+        "Optional copy-paste CSS for artifacts with dense nested grid/flex layouts, badges, wide monospace or pixel fonts, or local media. Paste it into the artifact yourself when useful. Easel never auto-injects it, so direct-open portability stays intact.",
       other_design_systems:
-        "If the user asks for a different design system (Bootstrap, custom CSS, plain HTML, etc.), use that instead - Lavish does not require DaisyUI.",
+        "If the user asks for a different design system (Bootstrap, custom CSS, plain HTML, etc.), use that instead - Easel does not require DaisyUI.",
     },
     whiteboard_tooling: {
       use_when:
-        "Opt-in only: author a diagram as Mermaid in a `.mermaid` container solely when the user asks for an editable whiteboard - Lavish turns it into an Excalidraw whiteboard whose edits come back as feedback. Every other figure is hand-authored inline SVG per the diagram playbook.",
+        "Opt-in only: author a diagram as Mermaid in a `.mermaid` container solely when the user asks for an editable whiteboard - Easel turns it into an Excalidraw whiteboard whose edits come back as feedback. Every other figure is hand-authored inline SVG per the diagram playbook.",
       mermaid_cdn_snippet: MERMAID_CDN_SNIPPET,
       cdn_urls: { mermaid: MERMAID_CDN_URL },
       versions: { mermaid: MERMAID_VERSION },
       library_icons: {
         use_when:
-          "Optional, in a whiteboard flowchart such as an architecture or system diagram: show a node as an icon from an Excalidraw library the user installed. Run `lavish-axi libraries` to see what is installed and `lavish-axi libraries --search <text>` for exact item refs; skip this when nothing is installed.",
-        syntax: "%% lavish-icon <node-id> <library-id>/<item name>",
+          "Optional, in a whiteboard flowchart such as an architecture or system diagram: show a node as an icon from an Excalidraw library the user installed. Run `easel libraries` to see what is installed and `easel libraries --search <text>` for exact item refs; skip this when nothing is installed.",
+        syntax: "%% easel-icon <node-id> <library-id>/<item name>",
         example:
-          "flowchart LR\n  %% lavish-icon api aws-architecture-icons/AWS Lambda\n  user([Customer]) --> api[Orders API]",
+          "flowchart LR\n  %% easel-icon api aws-architecture-icons/AWS Lambda\n  user([Customer]) --> api[Orders API]",
         notes:
-          "One comment line per icon node, in flowcharts only. Keep the node's label naming the component: the icon sits above it. Mermaid ignores `%%` lines, so exported, shared, and directly opened copies show the plain node, and so does the whiteboard when the library or item is missing. A library item the reviewer drops on the whiteboard arrives in the edit summary as `Added library item <ref>`; add it to the Mermaid source as a node with its own `%% lavish-icon` line.",
+          "One comment line per icon node, in flowcharts only. Keep the node's label naming the component: the icon sits above it. Mermaid ignores `%%` lines, so exported, shared, and directly opened copies show the plain node, and so does the whiteboard when the library or item is missing. A library item the reviewer drops on the whiteboard arrives in the edit summary as `Added library item <ref>`; add it to the Mermaid source as a node with its own `%% easel-icon` line.",
       },
     },
     revision_marking: {
       use_when:
         "Opt-in only: on a regeneration that answers the reviewer's feedback, declare what you changed so the browser can show a Revisions legend. Skip it on a first draft, and skip it when you rewrote the whole artifact - a legend that marks everything says nothing.",
       registry_snippet: REVISION_REGISTRY_SNIPPET,
-      how: 'Append one entry per round to the `data-lavish-revisions` JSON (oldest first, stable `id`s), and put `data-lavish-revision="<id>"` on each block you actually edited or added. Lavish reads them and never restyles the page, so the saved file looks the same opened directly.',
+      how: 'Append one entry per round to the `data-easel-revisions` JSON (oldest first, stable `id`s), and put `data-easel-revision="<id>"` on each block you actually edited or added. Easel reads them and never restyles the page, so the saved file looks the same opened directly.',
     },
     tab_meta:
-      "Opt-in: a long-lived artifact can show live state on the background browser tab with `window.lavish?.setDocumentMeta?.({ title, icon })`; see the README.",
+      "Opt-in: a long-lived artifact can show live state on the background browser tab with `window.easel?.setDocumentMeta?.({ title, icon })`; see the README.",
     theme_usage: [
-      'Default to `<html data-theme="luxury">` - it matches the Lavish look. Pick a different theme from the list below only when the user asked for one or the content clearly calls for it.',
+      'Default to `<html data-theme="luxury">` - it matches the Easel look. Pick a different theme from the list below only when the user asked for one or the content clearly calls for it.',
       'Set a nested section theme with `<section data-theme="night">`.',
       "Prefer semantic colors such as `bg-base-100`, `bg-base-200`, `text-base-content`, `bg-primary`, `text-primary-content`, `alert-warning`, and `btn-primary` so themes remain readable.",
       "Avoid hardcoded Tailwind color names for text and surfaces unless the user asked for exact colors.",

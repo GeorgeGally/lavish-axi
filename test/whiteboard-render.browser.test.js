@@ -99,7 +99,7 @@ async function runBrowserFixture(t, fixtureName) {
     t.skip("Chrome or Chromium is required for the real-render regression");
     return null;
   }
-  const root = await mkdtemp(path.join(os.tmpdir(), "lavish-excalidraw-render-"));
+  const root = await mkdtemp(path.join(os.tmpdir(), "easel-excalidraw-render-"));
   try {
     await esbuild.build({
       entryPoints: [path.join(projectRoot, `test/fixtures/${fixtureName}.browser.jsx`)],

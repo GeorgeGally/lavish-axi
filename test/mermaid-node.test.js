@@ -162,9 +162,9 @@ test("isMermaidSvg matches aria-roledescription and .mermaid ancestor", () => {
   assert.equal(isMermaidSvg(svg), true);
 });
 
-test("isMermaidSvg matches the data-lavish-mermaid opt-in wrapper", () => {
+test("isMermaidSvg matches the data-easel-mermaid opt-in wrapper", () => {
   const svg = el("svg");
-  el("figure", { attrs: { "data-lavish-mermaid": "" }, children: [svg] });
+  el("figure", { attrs: { "data-easel-mermaid": "" }, children: [svg] });
   assert.equal(isMermaidSvg(svg), true);
 });
 

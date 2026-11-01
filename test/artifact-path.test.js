@@ -22,7 +22,7 @@ test("artifactTreeRoot is the HTML file's directory", () => {
 });
 
 test("resolveAllowedArtifactFile accepts a regular HTML file and returns its real path", async () => {
-  const dir = await mkdtemp(path.join(tmpdir(), "lavish-artifact-path-"));
+  const dir = await mkdtemp(path.join(tmpdir(), "easel-artifact-path-"));
   try {
     const artifact = path.join(dir, "preview.HTML");
     await writeFile(artifact, "<!doctype html><html><body></body></html>");
@@ -35,7 +35,7 @@ test("resolveAllowedArtifactFile accepts a regular HTML file and returns its rea
 });
 
 test("resolveAllowedArtifactFile accepts .htm", async () => {
-  const dir = await mkdtemp(path.join(tmpdir(), "lavish-artifact-path-"));
+  const dir = await mkdtemp(path.join(tmpdir(), "easel-artifact-path-"));
   try {
     const artifact = path.join(dir, "preview.htm");
     await writeFile(artifact, "<!doctype html><html><body></body></html>");
@@ -46,7 +46,7 @@ test("resolveAllowedArtifactFile accepts .htm", async () => {
 });
 
 test("resolveAllowedArtifactFile refuses a non-HTML path without following it as a tree", async () => {
-  const dir = await mkdtemp(path.join(tmpdir(), "lavish-artifact-path-"));
+  const dir = await mkdtemp(path.join(tmpdir(), "easel-artifact-path-"));
   try {
     const secret = path.join(dir, "secret.txt");
     await writeFile(secret, "outside-secret\n");
@@ -60,7 +60,7 @@ test("resolveAllowedArtifactFile refuses a non-HTML path without following it as
 });
 
 test("resolveAllowedArtifactFile refuses an HTML symlink whose real path is not HTML", async () => {
-  const dir = await mkdtemp(path.join(tmpdir(), "lavish-artifact-path-"));
+  const dir = await mkdtemp(path.join(tmpdir(), "easel-artifact-path-"));
   try {
     const secret = path.join(dir, "secret.txt");
     const decoy = path.join(dir, "decoy.html");
@@ -76,7 +76,7 @@ test("resolveAllowedArtifactFile refuses an HTML symlink whose real path is not 
 });
 
 test("resolveAllowedArtifactFile refuses a directory whose name looks like HTML", async () => {
-  const dir = await mkdtemp(path.join(tmpdir(), "lavish-artifact-path-"));
+  const dir = await mkdtemp(path.join(tmpdir(), "easel-artifact-path-"));
   try {
     const fake = path.join(dir, "site.html");
     await mkdir(fake);

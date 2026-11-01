@@ -2,10 +2,10 @@
 //
 // The agent already knows what it changed between review rounds, so it says so
 // in the file it regenerates: one `<script type="application/json"
-// data-lavish-revisions>` registry plus `data-lavish-revision="<id>"` on each
+// data-easel-revisions>` registry plus `data-easel-revision="<id>"` on each
 // block it touched. Both are ordinary artifact content, so they survive a
-// reload, an export, and opening the file with Lavish absent - the same way
-// `data-lavish-question` does. An artifact without the registry is unchanged.
+// reload, an export, and opening the file with Easel absent - the same way
+// `data-easel-question` does. An artifact without the registry is unchanged.
 //
 // Nothing here writes to the document. The reader sees the revision history in
 // the browser chrome's legend, and the served page stays byte-identical to the
@@ -79,7 +79,7 @@ export function truncateRevisionText(value, max) {
   return text.slice(0, limit);
 }
 
-// An id has to survive being written into a `data-lavish-revision` attribute and
+// An id has to survive being written into a `data-easel-revision` attribute and
 // compared against it, so whitespace-bearing and empty ids are not addressable.
 export function isAddressableRevisionId(id) {
   const text = typeof id === "string" || typeof id === "number" ? String(id) : "";
@@ -120,7 +120,7 @@ export function normalizeRevisionEntry(entry, index) {
 // without a usable id all yield fewer rows rather than an error. A malformed
 // registry must cost the reviewer a legend, never a page.
 export function parseRevisionRegistry(doc) {
-  const script = doc && doc.querySelector ? doc.querySelector("script[data-lavish-revisions]") : null;
+  const script = doc && doc.querySelector ? doc.querySelector("script[data-easel-revisions]") : null;
   if (!script) return [];
   const limits = revisionLimits();
   const text = String(script.textContent || "").trim();
@@ -219,12 +219,12 @@ export function collectRevisionMarks(doc, revisions) {
     if (revision && isAddressableRevisionId(revision.id)) declared.set(revision.id, revision);
   }
   const marks = [];
-  const elements = doc && doc.querySelectorAll ? doc.querySelectorAll("[data-lavish-revision]") : [];
+  const elements = doc && doc.querySelectorAll ? doc.querySelectorAll("[data-easel-revision]") : [];
   let examined = 0;
   for (const element of elements) {
     if (examined >= limits.rawMarks || marks.length >= limits.marks) break;
     examined += 1;
-    const id = element.getAttribute ? exactRevisionText(element.getAttribute("data-lavish-revision"), limits.id) : "";
+    const id = element.getAttribute ? exactRevisionText(element.getAttribute("data-easel-revision"), limits.id) : "";
     if (!declared.has(id)) continue;
     const selector = exactRevisionText(revisionSelectorFor(element, doc), limits.selector);
     if (!selector) continue;

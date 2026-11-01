@@ -2576,6 +2576,38 @@ function refuseStrayFileDrop(event) {
 }
 window.addEventListener("dragover", refuseStrayFileDrop);
 window.addEventListener("drop", refuseStrayFileDrop);
+
+// HTML files dropped on the board (outside a design) are copied into the board folder and
+// appear as new items, so a board can be filled without an agent or the CLI.
+/** @param {unknown[]} list */
+function addHtmlFiles(list) {
+  const files = /** @type {File[]} */ (
+    list.filter((file) => file instanceof File && /\.html?$/i.test(file.name))
+  ).slice(0, 50);
+  if (files.length === 0 || state.ended) return;
+  dockStatus.textContent = files.length === 1 ? `Adding ${files[0].name}…` : `Adding ${files.length} designs…`;
+  Promise.all(
+    files.map((file) =>
+      file.text().then((html) =>
+        fetch(`/api/boards/${encodeURIComponent(key)}/files`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ name: file.name, html }),
+        }).then((response) => (response.ok ? response.json() : Promise.reject(new Error("not accepted")))),
+      ),
+    ),
+  )
+    .then((added) => {
+      const names = added.map((entry) => entry?.item?.file).filter(Boolean);
+      dockStatus.textContent = names.length === 1 ? `Added ${names[0]}.` : `Added ${names.length} designs.`;
+      refreshBoard();
+    })
+    .catch(() => {
+      dockStatus.textContent = "That file could not be added to the board.";
+      refreshBoard();
+    });
+}
+window.addEventListener("drop", (event) => addHtmlFiles(Array.from(event.dataTransfer?.files || [])));
 window.addEventListener("dragenter", (event) => {
   if (event.dataTransfer?.types.includes("Files")) document.body.dataset.dragging = "true";
 });
@@ -4717,6 +4749,10 @@ function onArtboardMessage(event) {
   }
   if (data.type === "image-drop") {
     dropImageOn(record, data);
+    return;
+  }
+  if (data.type === "html-drop") {
+    addHtmlFiles(Array.isArray(data.files) ? data.files : []);
     return;
   }
   if (data.type === "pin") {

@@ -20,7 +20,7 @@ const PNG_DATA_URL =
   "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
 
 async function withTempDir(run) {
-  const dir = await mkdtemp(path.join(os.tmpdir(), "lavish-whiteboard-"));
+  const dir = await mkdtemp(path.join(os.tmpdir(), "easel-whiteboard-"));
   try {
     await run(dir);
   } finally {
@@ -109,7 +109,7 @@ test("writeWhiteboardFeedbackFiles writes a standalone .excalidraw and a PNG", a
     const scene = JSON.parse(await readFile(scenePath, "utf8"));
     assert.equal(scene.type, "excalidraw");
     assert.equal(scene.version, 2);
-    assert.equal(scene.source, "lavish-axi");
+    assert.equal(scene.source, "easel");
     assert.equal(scene.elements[0].id, "A");
     assert.deepEqual(scene.appState, {});
     const png = await readFile(previewPath);

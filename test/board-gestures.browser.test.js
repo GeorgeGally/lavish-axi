@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 import { findChrome } from "../src/board-crop.js";
 import { launchChrome } from "./board-cdp-browser.js";
 
-const runBrowserE2e = process.env.LAVISH_AXI_BROWSER_E2E === "1";
+const runBrowserE2e = process.env.EASEL_BROWSER_E2E === "1";
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 function run(command, args, env, timeout = 45_000) {
@@ -66,13 +66,13 @@ test(
   async () => {
     const temp = await mkdtemp(path.join(tmpdir(), "easel-gestures-e2e-"));
     const port = await freePort();
-    const lavishEnv = {
-      LAVISH_AXI_PORT: String(port),
-      LAVISH_AXI_STATE_DIR: path.join(temp, "state"),
-      LAVISH_AXI_NO_OPEN: "1",
-      LAVISH_AXI_TELEMETRY: "0",
-      LAVISH_AXI_HOST: "127.0.0.1",
-      LAVISH_AXI_LINK_HOST: "127.0.0.1",
+    const easelEnv = {
+      EASEL_PORT: String(port),
+      EASEL_STATE_DIR: path.join(temp, "state"),
+      EASEL_NO_OPEN: "1",
+      EASEL_TELEMETRY: "0",
+      EASEL_HOST: "127.0.0.1",
+      EASEL_LINK_HOST: "127.0.0.1",
     };
     const profile = path.join(temp, "chrome");
     await mkdir(profile, { recursive: true });
@@ -82,7 +82,7 @@ test(
       const board = path.join(temp, "board");
       await mkdir(board, { recursive: true });
       await writeFile(path.join(board, "01-gestures.html"), ITEM_HTML);
-      const output = run(process.execPath, ["bin/lavish-axi.js", "board", "open", board, "--no-open"], lavishEnv);
+      const output = run(process.execPath, ["bin/easel.js", "board", "open", board, "--no-open"], easelEnv);
       const url = output.match(/url:\s*"([^"]+)"/)?.[1];
       assert.ok(url, output);
 
@@ -334,7 +334,7 @@ test(
       assert.match(home, /board/, home);
     } finally {
       browser?.close();
-      run(process.execPath, ["bin/lavish-axi.js", "stop", "--port", String(port)], lavishEnv, 15_000);
+      run(process.execPath, ["bin/easel.js", "stop", "--port", String(port)], easelEnv, 15_000);
       await rm(temp, { recursive: true, force: true });
     }
   },

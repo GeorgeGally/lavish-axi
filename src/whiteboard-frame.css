@@ -19,7 +19,7 @@ body {
   color: #17130a;
 }
 
-body[data-lavish-whiteboard-theme="dark"] {
+body[data-easel-whiteboard-theme="dark"] {
   background: #0f1115;
   color: #f7f3ea;
 }
@@ -194,14 +194,14 @@ body[data-lavish-whiteboard-theme="dark"] {
   background: #ffd877;
 }
 
-body[data-lavish-whiteboard-theme="dark"] .wb-link-confirm-card {
+body[data-easel-whiteboard-theme="dark"] .wb-link-confirm-card {
   background: #1a1d23;
   box-shadow: 0 16px 42px rgba(0, 0, 0, 0.45);
 }
 
 /* Inline placement: no chrome close control floats over the header, so drop
    the reserved right padding; the fullscreen action takes that corner. */
-body[data-lavish-whiteboard-mode="inline"] #wbHeader {
+body[data-easel-whiteboard-mode="inline"] #wbHeader {
   padding-right: 12px;
 }
 
@@ -212,7 +212,7 @@ body[data-lavish-whiteboard-mode="inline"] #wbHeader {
   font-weight: 600;
 }
 
-body[data-lavish-whiteboard-theme="dark"] #wbFullscreen:hover,
+body[data-easel-whiteboard-theme="dark"] #wbFullscreen:hover,
 #wbFullscreen:hover {
   background: rgba(128, 128, 128, 0.15);
 }

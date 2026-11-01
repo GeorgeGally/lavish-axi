@@ -4,8 +4,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-process.env.LAVISH_AXI_HOST = "127.0.0.1";
-process.env.LAVISH_AXI_LINK_HOST = "127.0.0.1";
+process.env.EASEL_HOST = "127.0.0.1";
+process.env.EASEL_LINK_HOST = "127.0.0.1";
 
 import {
   createWhiteboardChannelToken,
@@ -38,7 +38,7 @@ const PNG_DATA_URL =
   "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
 
 async function startWhiteboardServer({ html = ARTIFACT_HTML } = {}) {
-  const dir = await mkdtemp(path.join(tmpdir(), "lavish-wb-server-"));
+  const dir = await mkdtemp(path.join(tmpdir(), "easel-wb-server-"));
   const assetsDir = path.join(dir, "whiteboard-assets");
   await mkdir(path.join(assetsDir, "fonts", "Excalifont"), { recursive: true });
   await writeFile(path.join(assetsDir, "whiteboard.js"), "// fake bundle\n");
@@ -84,7 +84,7 @@ test("createWhiteboardFrameHtml loads only whiteboard-assets resources", () => {
   const html = createWhiteboardFrameHtml("channel-token");
   assert.match(html, /<link rel="stylesheet" href="\/whiteboard-assets\/whiteboard\.css">/);
   assert.match(html, /<script src="\/whiteboard-assets\/whiteboard\.js"><\/script>/);
-  assert.match(html, /__lavishWhiteboardChannelToken="channel-token"/);
+  assert.match(html, /__easelWhiteboardChannelToken="channel-token"/);
   assert.doesNotMatch(html, /https?:\/\//);
 });
 
@@ -100,7 +100,7 @@ test("whiteboard confirms sanitized links inside the frame", async () => {
   assert.match(frame, /event\.key !== "Tab"/);
   assert.match(frame, /window\.open\(safe, "_blank", "noopener,noreferrer"\)/);
   assert.match(css, /\.wb-link-confirm/);
-  assert.match(css, /data-lavish-whiteboard-theme="dark"/);
+  assert.match(css, /data-easel-whiteboard-theme="dark"/);
 });
 
 test("whiteboard channel tokens are signed, session bound, and short lived", () => {
@@ -191,7 +191,7 @@ test("whiteboard write routes reject cross-origin and unknown sessions", async (
 
 async function frameChannelToken(base, query = "") {
   const frame = await fetch(`${base}/whiteboard-frame${query}`).then((res) => res.text());
-  return /__lavishWhiteboardChannelToken="([^"]+)"/.exec(frame)?.[1] || "";
+  return /__easelWhiteboardChannelToken="([^"]+)"/.exec(frame)?.[1] || "";
 }
 
 test("whiteboard channel authentication accepts only the frame-issued token", async () => {
@@ -383,7 +383,7 @@ test("GET /api/whiteboard-libraries serves the user's libraries and refreshes on
 });
 
 test("mermaid-sources hashes follow referenced library items only for icon diagrams", async () => {
-  const iconFlowchart = "flowchart LR\n  %% lavish-icon api aws-icons/Lambda\n  api[Orders API] --&gt; db[(Orders)]";
+  const iconFlowchart = "flowchart LR\n  %% easel-icon api aws-icons/Lambda\n  api[Orders API] --&gt; db[(Orders)]";
   const ctx = await startWhiteboardServer({
     html: `<!doctype html><html><body><pre class="mermaid">${iconFlowchart}</pre><pre class="mermaid">flowchart TD\n  A --&gt; B</pre></body></html>`,
   });

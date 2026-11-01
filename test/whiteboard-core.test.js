@@ -125,7 +125,7 @@ test("whiteboard persistence payload keeps migration and baseline fields togethe
 
 test("a scene drawn with unverified libraries is never restored as matching its diagram", () => {
   const baselineElements = [rect("A")];
-  const iconSource = "flowchart TD\n%% lavish-icon a aws/Lambda\na-->b";
+  const iconSource = "flowchart TD\n%% easel-icon a aws/Lambda\na-->b";
   const state = {
     sceneSourceHash: "hash-1",
     textMetricsVersion: 1,
@@ -810,7 +810,7 @@ test("prepareLibraryIconSkeletons grows the node around icon and label, keeping 
     [{ nodeId: "api", ref: "aws/AWS Lambda", item: lambdaItem() }],
   ).skeletons[0];
   assert.equal(styled.label.strokeColor, "#c92a2a");
-  assert.deepEqual(node.customData, { lavishIconNode: "aws/AWS Lambda" });
+  assert.deepEqual(node.customData, { easelIconNode: "aws/AWS Lambda" });
   assert.equal(skeletons[0].height, 40, "input skeletons are not mutated");
 });
 
@@ -916,7 +916,7 @@ test("prepareLibraryIconSkeletons reports missing items and nodes and skips subg
 test("placeLibraryIcons scales the item into the top of the node with deterministic ids", () => {
   const container = {
     ...rect("api", { x: 100, y: 180, width: 120, height: 90, groupIds: ["subgraph_group_vpc"] }),
-    customData: { lavishIconNode: "aws/AWS Lambda" },
+    customData: { easelIconNode: "aws/AWS Lambda" },
     boundElements: [{ id: "api-label", type: "text" }],
   };
   const label = { ...boundLabel("api-label", "api", "Orders API"), groupIds: ["subgraph_group_vpc"], height: 20 };
@@ -944,7 +944,7 @@ test("placeLibraryIcons scales the item into the top of the node with determinis
   ]);
   assert.equal(cap.fontSize, 16);
   assert.equal(cap.containerId, "api:icon:0");
-  assert.deepEqual(bg.customData, { lavishLibraryRef: "aws/AWS Lambda" });
+  assert.deepEqual(bg.customData, { easelLibraryRef: "aws/AWS Lambda" });
   assert.equal(item.elements[0].x, 100, "library item is not mutated");
   assert.deepEqual(
     placeLibraryIcons([container, label], () => null),
@@ -954,7 +954,7 @@ test("placeLibraryIcons scales the item into the top of the node with determinis
 
 test("summarizeSceneEdits names a reviewer-dropped library item once", () => {
   const baseline = [rect("A")];
-  const ref = { lavishLibraryRef: "aws/AWS Lambda" };
+  const ref = { easelLibraryRef: "aws/AWS Lambda" };
   const edited = [
     rect("A"),
     rect("n1", { x: 300, y: 120, groupIds: ["g1"], customData: ref }),
@@ -967,7 +967,7 @@ test("summarizeSceneEdits names a reviewer-dropped library item once", () => {
 });
 
 test("summarizeSceneEdits folds an icon node's icon into the node", () => {
-  const ref = { lavishLibraryRef: "aws/AWS Lambda" };
+  const ref = { easelLibraryRef: "aws/AWS Lambda" };
   const baseline = [
     rect("api", { groupIds: ["api:icon"] }),
     boundLabel("api-label", "api", "Orders API"),
@@ -984,7 +984,7 @@ test("summarizeSceneEdits folds an icon node's icon into the node", () => {
 });
 
 test("summarizeSceneEdits reports a part deleted from an icon as an edit, not a removal", () => {
-  const ref = { lavishLibraryRef: "aws/AWS Lambda" };
+  const ref = { easelLibraryRef: "aws/AWS Lambda" };
   const baseline = [
     rect("api", { groupIds: ["api:icon"] }),
     boundLabel("api-label", "api", "Orders API"),
@@ -1000,7 +1000,7 @@ test("summarizeSceneEdits reports a part deleted from an icon as an edit, not a 
 });
 
 test("summarizeSceneEdits reports a moved reviewer-dropped item once", () => {
-  const ref = { lavishLibraryRef: "sys/Queue" };
+  const ref = { easelLibraryRef: "sys/Queue" };
   const baseline = [rect("q1", { groupIds: ["g"], customData: ref }), rect("q2", { groupIds: ["g"], customData: ref })];
   const edited = baseline.map((element) => ({ ...element, y: element.y + 30 }));
   const summary = summarizeSceneEdits(baseline, edited);
@@ -1009,7 +1009,7 @@ test("summarizeSceneEdits reports a moved reviewer-dropped item once", () => {
 });
 
 test("summarizeSceneEdits reports a moved part of a multi-element library item", () => {
-  const ref = { lavishLibraryRef: "sys/Queue" };
+  const ref = { easelLibraryRef: "sys/Queue" };
   const baseline = [
     rect("q1", { groupIds: ["g"], customData: ref }),
     rect("q2", { y: 50, groupIds: ["g"], customData: ref }),
@@ -1023,7 +1023,7 @@ test("summarizeSceneEdits reports a moved part of a multi-element library item",
 });
 
 test("summarizeSceneEdits reports text edited inside an icon node's icon", () => {
-  const ref = { lavishLibraryRef: "aws/AWS Lambda" };
+  const ref = { easelLibraryRef: "aws/AWS Lambda" };
   const baseline = [
     rect("api", { groupIds: ["api:icon"] }),
     boundLabel("api-label", "api", "Orders API"),
@@ -1046,7 +1046,7 @@ test("summarizeSceneEdits reports text edited inside an icon node's icon", () =>
 });
 
 test("summarizeSceneEdits reports an icon resized within its node, relative to the node", () => {
-  const ref = { lavishLibraryRef: "aws/AWS Lambda" };
+  const ref = { easelLibraryRef: "aws/AWS Lambda" };
   const baseline = [
     rect("api", { groupIds: ["api:icon"] }),
     boundLabel("api-label", "api", "Orders API"),
@@ -1063,7 +1063,7 @@ test("summarizeSceneEdits reports an icon resized within its node, relative to t
 });
 
 test("summarizeSceneEdits reports a part moved or resized inside an unchanged library item outline", () => {
-  const ref = { lavishLibraryRef: "sys/Server" };
+  const ref = { easelLibraryRef: "sys/Server" };
   const frame = rect("s1", { width: 200, height: 200, groupIds: ["g"], customData: ref });
   const part = rect("s2", { x: 20, y: 20, width: 40, height: 40, groupIds: ["g"], customData: ref });
   const baseline = [frame, part];
@@ -1106,7 +1106,7 @@ test("summarizeSceneEdits reports a part moved or resized inside an unchanged li
 });
 
 test("summarizeSceneEdits reports a uniformly scaled library item as resized only", () => {
-  const ref = { lavishLibraryRef: "sys/Server" };
+  const ref = { easelLibraryRef: "sys/Server" };
   const baseline = [
     rect("s1", { width: 200, height: 200, groupIds: ["g"], customData: ref }),
     rect("s2", { x: 20, y: 20, width: 40, height: 40, groupIds: ["g"], customData: ref }),

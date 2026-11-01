@@ -1,4 +1,4 @@
-export function injectLavishSdk(html, key, artifactRevision, artifactLoadToken = "") {
+export function injectEaselSdk(html, key, artifactRevision, artifactLoadToken = "") {
   const revisionNumber = Number(artifactRevision);
   const revision = Number.isFinite(revisionNumber) && revisionNumber >= 0 ? Math.trunc(revisionNumber) : null;
   const revisionQuery = revision === null ? "" : `&artifact_revision=${revision}`;

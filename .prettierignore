@@ -1,9 +1,9 @@
 dist
 node_modules
-.lavish
-.lavish-axi
+.easel
+.easel
 .no-mistakes
-lavish-code-review.html
+easel-code-review.html
 package-lock.json
 CHANGELOG.md
 plugin.json

@@ -20,7 +20,7 @@ function uniquePng(seed) {
 }
 
 async function withTempDir(run) {
-  const dir = await mkdtemp(path.join(os.tmpdir(), "lavish-admit-"));
+  const dir = await mkdtemp(path.join(os.tmpdir(), "easel-admit-"));
   try {
     await run(dir);
   } finally {

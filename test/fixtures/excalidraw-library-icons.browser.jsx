@@ -44,16 +44,16 @@ const libraries = [
 
 const sources = {
   lr: `flowchart LR
-  %% lavish-icon api fixture/Gear
-  %% lavish-icon db fixture/Gear
-  %% lavish-icon q fixture/Gear
+  %% easel-icon api fixture/Gear
+  %% easel-icon db fixture/Gear
+  %% easel-icon q fixture/Gear
   user([Customer]) --> api[Orders API]
   api --> db[(Orders table)]
   api --> q[Order events]`,
   td: `flowchart TD
-  %% lavish-icon api fixture/gear
-  %% lavish-icon db fixture/Gear
-  %% lavish-icon q fixture/Gear
+  %% easel-icon api fixture/gear
+  %% easel-icon db fixture/Gear
+  %% easel-icon q fixture/Gear
   user[Customer] --> api[Orders API]
   api --> db[Orders table]
   api --> q[Order events]`,
@@ -111,7 +111,7 @@ function checkIconNode(elements, layout) {
   if (!node) throw new Error(`${layout}: icon node lost its Mermaid id`);
   if (node.strokeColor !== "transparent") throw new Error(`${layout}: icon node box is still drawn`);
   const icon = elements.filter(
-    (element) => element.customData?.lavishLibraryRef === "fixture/Gear" && element.groupIds.includes("api:icon"),
+    (element) => element.customData?.easelLibraryRef === "fixture/Gear" && element.groupIds.includes("api:icon"),
   );
   if (icon.length !== 2) throw new Error(`${layout}: expected 2 icon elements, got ${icon.length}`);
   const label = elements.find((element) => element.type === "text" && element.containerId === "api");
@@ -146,7 +146,7 @@ function checkIconNode(elements, layout) {
     if (gap > 8) throw new Error(`${layout}: arrow ${arrow.id} stops ${gap}px short of the node`);
   }
   const nodes = elements.filter(
-    (element) => ["rectangle", "ellipse", "diamond"].includes(element.type) && !element.customData?.lavishLibraryRef,
+    (element) => ["rectangle", "ellipse", "diamond"].includes(element.type) && !element.customData?.easelLibraryRef,
   );
   for (const [index, a] of nodes.entries()) {
     for (const b of nodes.slice(index + 1)) {
@@ -191,7 +191,7 @@ async function insertFromLibraryPanel(elements) {
   const after = api.getSceneElements().map((element) => structuredClone(element));
   const dropped = after.filter(
     (element) =>
-      element.customData?.lavishLibraryRef === "fixture/Gear" && !elements.some((before) => before.id === element.id),
+      element.customData?.easelLibraryRef === "fixture/Gear" && !elements.some((before) => before.id === element.id),
   );
   if (dropped.length !== 2) throw new Error(`library insert kept ${dropped.length} tagged elements`);
   if (new Set(dropped.map((element) => element.groupIds.at(-1))).size !== 1) {

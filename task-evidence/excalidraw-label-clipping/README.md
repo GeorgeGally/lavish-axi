@@ -2,7 +2,7 @@
 
 ## End-to-end reproduction
 
-The fixture was opened with the built Lavish CLI and rendered through the normal session chrome, sandboxed artifact iframe, inline whiteboard iframe, Mermaid conversion, and Excalidraw canvas path.
+The fixture was opened with the built Easel CLI and rendered through the normal session chrome, sandboxed artifact iframe, inline whiteboard iframe, Mermaid conversion, and Excalidraw canvas path.
 
 `before.png` was captured from a cold browser before the fix.
 It reproduces the supplied failure: leading and trailing glyphs are missing from `Disposable adapter sidecar`, `Adapter Protocol v1`, `Codex app-server`, `Future adapter`, and the multiline canonical-tools label.
@@ -26,7 +26,7 @@ The fix asks Excalidraw's own scene-export boundary to load the exact required f
 This also reruns multiline wrapping with the loaded metrics.
 
 Saved scenes created before this correction carry no text-metrics version.
-On their first reopen, Lavish loads the scene fonts and expands only stale auto-sized text width or height values.
+On their first reopen, Easel loads the scene fonts and expands only stale auto-sized text width or height values.
 It preserves every element's position, style, binding, identity, content, and other user-edited data, then persists the current version so the migration runs once.
 
 ## Automated regression
@@ -43,4 +43,4 @@ The same browser test creates a fallback-sized saved scene, applies the one-time
 
 Every label is fully readable in both captures, including the multiline canonical-tools label.
 
-`standalone-mermaid-1440x900-dpr1.png` opens the original artifact directly, without Lavish injection, and confirms that the non-Excalidraw Mermaid rendering path remains unchanged.
+`standalone-mermaid-1440x900-dpr1.png` opens the original artifact directly, without Easel injection, and confirms that the non-Excalidraw Mermaid rendering path remains unchanged.

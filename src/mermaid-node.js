@@ -21,7 +21,7 @@ export function isMermaidSvg(svg) {
   const id = svg.id || "";
   if (id.startsWith("mermaid-") || id.startsWith("mermaid_")) return true;
   if (svg.getAttribute?.("aria-roledescription")) return true;
-  return !!(svg.closest && svg.closest(".mermaid, [data-lavish-mermaid]"));
+  return !!(svg.closest && svg.closest(".mermaid, [data-easel-mermaid]"));
 }
 
 // Extract a node's visible label as a single line. Mermaid renders multi-line

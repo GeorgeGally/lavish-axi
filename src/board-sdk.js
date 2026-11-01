@@ -1193,6 +1193,12 @@
       showDropBox(null);
       const target = dropTargetAt(event.clientX, event.clientY);
       const file = imageFileOf(event.dataTransfer);
+      // HTML files dropped on a design are new designs for the board, not page content.
+      const pages = Array.from(event.dataTransfer.files || []).filter((entry) => /\.html?$/i.test(entry.name));
+      if (!file && pages.length > 0) {
+        post({ type: "html-drop", files: pages });
+        return;
+      }
       if (!target || !file) return;
       post({
         type: "image-drop",

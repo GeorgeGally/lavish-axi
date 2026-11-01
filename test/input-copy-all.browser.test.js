@@ -10,7 +10,7 @@ import test from "node:test";
 import { parse } from "parse5";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const playbooksPath = process.env.LAVISH_AXI_PLAYBOOKS_MODULE || path.join(repoRoot, "src/playbooks.js");
+const playbooksPath = process.env.EASEL_PLAYBOOKS_MODULE || path.join(repoRoot, "src/playbooks.js");
 const { PLAYBOOKS } = await import(pathToFileURL(playbooksPath).href);
 let chromeLaunchState;
 
@@ -36,7 +36,7 @@ async function chromePath() {
 
 async function headlessChromeState(chrome) {
   if (chromeLaunchState) return chromeLaunchState;
-  const root = await mkdtemp(path.join(os.tmpdir(), "lavish-copy-all-probe-"));
+  const root = await mkdtemp(path.join(os.tmpdir(), "easel-copy-all-probe-"));
   try {
     const result = spawnSync(
       chrome,
@@ -67,7 +67,7 @@ async function headlessChromeState(chrome) {
 function copyAllHtmlSnippet() {
   const inputPlaybook = PLAYBOOKS.find(({ id }) => id === "input");
   assert.ok(inputPlaybook, "the exported playbooks include the input playbook");
-  const htmlBlocks = inputPlaybook.lavish_notes.flatMap((note) =>
+  const htmlBlocks = inputPlaybook.easel_notes.flatMap((note) =>
     [...note.matchAll(/```html\r?\n([\s\S]*?)\r?\n```/g)].map((match) => match[1]),
   );
   assert.equal(htmlBlocks.length, 1, "the input playbook emits one standalone HTML snippet");
@@ -75,7 +75,7 @@ function copyAllHtmlSnippet() {
 }
 
 function fixtureQuestions() {
-  return `<form data-lavish-question="plan">
+  return `<form data-easel-question="plan">
       <label><input type="radio" name="plan" value="Starter" checked> Starter</label>
       <label><input type="radio" name="plan" value="Pro"> Pro</label>
       <label><input type="checkbox" name="billing" value="Annual" checked> Annual</label>
@@ -83,7 +83,7 @@ function fixtureQuestions() {
       <input type="text" name="blank" value="   ">
       <button type="submit">Submit</button>
     </form>
-    <form data-lavish-question="delivery">
+    <form data-easel-question="delivery">
       <label for="goal">Goal</label><input id="goal" type="text" name="goal" value="Ship the review">
       <label for="context">Context</label><textarea id="context" name="context">Keep the scope opt-in</textarea>
     </form>`;
@@ -94,7 +94,7 @@ function probeScript(scenario, { clicks = 1 } = {}) {
     clipboard:
       "window.__copied = ''; Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async (value) => { window.__copied = value; } } });",
     execCommand:
-      "window.__execCommandText = ''; Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async () => { throw new Error('permission denied'); } } }); document.execCommand = (command) => { if (command !== 'copy') return false; const temporary = [...document.querySelectorAll('textarea')].find((area) => area.readOnly && !area.dataset.lavishCopyAllManual); window.__execCommandText = temporary?.value || ''; return Boolean(temporary); };",
+      "window.__execCommandText = ''; Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async () => { throw new Error('permission denied'); } } }); document.execCommand = (command) => { if (command !== 'copy') return false; const temporary = [...document.querySelectorAll('textarea')].find((area) => area.readOnly && !area.dataset.easelCopyAllManual); window.__execCommandText = temporary?.value || ''; return Boolean(temporary); };",
     manual:
       "Object.defineProperty(navigator, 'clipboard', { configurable: true, value: undefined }); document.execCommand = undefined;",
     delayedManual:
@@ -127,13 +127,13 @@ function probeScript(scenario, { clicks = 1 } = {}) {
           }));
         document.body.dataset.result = JSON.stringify({
           status: document.querySelector('[role="status"]').textContent,
-          noLavish: typeof window.lavish === 'undefined',
+          noEasel: typeof window.easel === 'undefined',
           copied: window.__copied,
           execCommandText: window.__execCommandText,
           clipboardCalls: window.__clipboardCalls,
           manual,
           textareaCount: document.querySelectorAll('textarea').length,
-          manualTextareaCount: document.querySelectorAll('[data-lavish-copy-all-manual]').length,
+          manualTextareaCount: document.querySelectorAll('[data-easel-copy-all-manual]').length,
         });
       } catch (error) {
         document.body.dataset.result = JSON.stringify({ error: String(error) });
@@ -211,7 +211,7 @@ async function runBrowserScenario(t, scenario, fixture, options = {}) {
     t.skip(launchState.reason);
     return null;
   }
-  const root = await mkdtemp(path.join(os.tmpdir(), "lavish-copy-all-"));
+  const root = await mkdtemp(path.join(os.tmpdir(), "easel-copy-all-"));
   const fixtureHtml = typeof fixture === "string" ? fixture : fixture ? fixtureQuestions() : "";
   const html = `<!doctype html><html><head><meta charset="utf-8"><title>Standalone answers</title></head><body>${fixtureHtml}${snippet}${probeScript(scenario, options)}</body></html>`;
   const server = http.createServer((_request, response) => {
@@ -256,10 +256,10 @@ const expected =
   "plan:\n  plan: Starter\n  billing: Annual\n\n" +
   "delivery:\n  goal: Ship the review\n  context: Keep the scope opt-in";
 
-test("clipboard API copies checked and filled answers from two forms without Lavish", async (t) => {
+test("clipboard API copies checked and filled answers from two forms without Easel", async (t) => {
   const result = await runBrowserScenario(t, "clipboard", true);
   if (!result) return;
-  assert.equal(result.noLavish, true);
+  assert.equal(result.noEasel, true);
   assert.equal(result.status, "Answers copied.");
   assert.equal(result.copied, expected);
 });
@@ -267,7 +267,7 @@ test("clipboard API copies checked and filled answers from two forms without Lav
 test("a rejected clipboard API falls back to document.execCommand", async (t) => {
   const result = await runBrowserScenario(t, "execCommand", true);
   if (!result) return;
-  assert.equal(result.noLavish, true);
+  assert.equal(result.noEasel, true);
   assert.equal(result.status, "Answers copied.");
   assert.equal(result.execCommandText, expected);
   assert.equal(result.textareaCount, 1, "the temporary copy textarea is removed after use");
@@ -276,7 +276,7 @@ test("a rejected clipboard API falls back to document.execCommand", async (t) =>
 test("unavailable clipboard paths show a visible selected read-only textarea", async (t) => {
   const result = await runBrowserScenario(t, "manual", true);
   if (!result) return;
-  assert.equal(result.noLavish, true);
+  assert.equal(result.noEasel, true);
   assert.match(result.status, /copy.*manually/i);
   assert.equal(result.manual.length, 1);
   assert.equal(result.manual[0].value, expected);
@@ -287,7 +287,7 @@ test("unavailable clipboard paths show a visible selected read-only textarea", a
 test("a page without questions reports a harmless empty state", async (t) => {
   const result = await runBrowserScenario(t, "empty", false);
   if (!result) return;
-  assert.equal(result.noLavish, true);
+  assert.equal(result.noEasel, true);
   assert.equal(result.status, "No questions or answers to copy.");
   assert.equal(result.clipboardCalls, 0);
   assert.equal(result.manual.length, 0);
@@ -296,7 +296,7 @@ test("a page without questions reports a harmless empty state", async (t) => {
 test("repeated clicks with the fallback forced leave exactly one manual textarea", async (t) => {
   const result = await runBrowserScenario(t, "manual", true, { clicks: 2 });
   if (!result) return;
-  assert.equal(result.noLavish, true);
+  assert.equal(result.noEasel, true);
   assert.equal(result.manualTextareaCount, 1, "the prior manual textarea is removed before a new one is added");
   assert.equal(result.manual.length, 1);
   assert.equal(result.manual[0].value, expected);
@@ -315,7 +315,7 @@ test("an older rejected copy cannot replace a newer successful answer", async (t
   const result = await runBrowserScenario(
     t,
     "staleFailure",
-    '<form data-lavish-question="revision"><input name="answer" value="Old answer"></form>',
+    '<form data-easel-question="revision"><input name="answer" value="Old answer"></form>',
   );
   if (!result) return;
   assert.equal(result.copied, "revision:\n  answer: New answer");
@@ -327,13 +327,13 @@ test("checked choices with empty or missing values copy their visible labels", a
   const result = await runBrowserScenario(
     t,
     "clipboard",
-    '<form data-lavish-question="choices"><label><input type="checkbox" name="feature" value="" checked> Include notes</label><label><input type="radio" name="tier" checked> Standard tier</label></form>',
+    '<form data-easel-question="choices"><label><input type="checkbox" name="feature" value="" checked> Include notes</label><label><input type="radio" name="tier" checked> Standard tier</label></form>',
   );
   if (!result) return;
   assert.equal(result.copied, "choices:\n  feature: Include notes\n  tier: Standard tier");
 });
 
-const fieldsetFixture = `<form data-lavish-question="access">
+const fieldsetFixture = `<form data-easel-question="access">
       <fieldset disabled>
         <label><input type="checkbox" name="legacy" value="Yes" checked> Legacy</label>
       </fieldset>
@@ -344,11 +344,11 @@ const fieldsetFixture = `<form data-lavish-question="access">
 test("fieldset-disabled and directly disabled controls are excluded", async (t) => {
   const result = await runBrowserScenario(t, "clipboard", fieldsetFixture);
   if (!result) return;
-  assert.equal(result.noLavish, true);
+  assert.equal(result.noEasel, true);
   assert.equal(result.copied, "access:\n  active: Visible answer");
 });
 
-const unsupportedInputFixture = `<form data-lavish-question="settings">
+const unsupportedInputFixture = `<form data-easel-question="settings">
       <input type="range" name="volume" value="50">
       <input type="color" name="accent" value="#000000">
       <input type="text" name="note" value="Keep this">
@@ -360,7 +360,7 @@ test("range and color values are excluded from copied answers", async (t) => {
   assert.equal(result.copied, "settings:\n  note: Keep this");
 });
 
-const multiSelectFixture = `<form data-lavish-question="tags">
+const multiSelectFixture = `<form data-easel-question="tags">
       <select name="tags" multiple>
         <option value="alpha" selected>Alpha</option>
         <option value="beta" selected>Beta</option>
@@ -371,11 +371,11 @@ const multiSelectFixture = `<form data-lavish-question="tags">
 test("a multi-value select copies one line per selected option", async (t) => {
   const result = await runBrowserScenario(t, "clipboard", multiSelectFixture);
   if (!result) return;
-  assert.equal(result.noLavish, true);
+  assert.equal(result.noEasel, true);
   assert.equal(result.copied, "tags:\n  tags: alpha\n  tags: beta");
 });
 
-const disabledSelectedOptionsFixture = `<form data-lavish-question="tags">
+const disabledSelectedOptionsFixture = `<form data-easel-question="tags">
       <select name="tags" multiple>
         <option value="alpha" selected>Alpha</option>
         <option value="beta" selected disabled>Beta</option>
@@ -392,7 +392,7 @@ test("disabled selected options and disabled optgroups are excluded", async (t) 
   assert.equal(result.copied, "tags:\n  tags: alpha\n  tags: delta");
 });
 
-const multilineFixture = `<form data-lavish-question="notes">
+const multilineFixture = `<form data-easel-question="notes">
       <textarea name="notes">Line one
 Line two
 Line three</textarea>
@@ -401,12 +401,12 @@ Line three</textarea>
 test("a multi-line textarea value indents its continuation lines under the label", async (t) => {
   const result = await runBrowserScenario(t, "clipboard", multilineFixture);
   if (!result) return;
-  assert.equal(result.noLavish, true);
+  assert.equal(result.noEasel, true);
   assert.equal(result.copied, "notes:\n  notes: Line one\n    Line two\n    Line three");
 });
 
-const nestedQuestionFixture = `<form data-lavish-question="outer">
-      <div data-lavish-question="inner">
+const nestedQuestionFixture = `<form data-easel-question="outer">
+      <div data-easel-question="inner">
         <input type="text" name="detail" value="Nested answer">
       </div>
     </form>`;
@@ -414,6 +414,6 @@ const nestedQuestionFixture = `<form data-lavish-question="outer">
 test("a nested question's control is counted once, under the inner question", async (t) => {
   const result = await runBrowserScenario(t, "clipboard", nestedQuestionFixture);
   if (!result) return;
-  assert.equal(result.noLavish, true);
+  assert.equal(result.noEasel, true);
   assert.equal(result.copied, "inner:\n  detail: Nested answer");
 });

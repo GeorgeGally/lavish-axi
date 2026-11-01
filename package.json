@@ -1,18 +1,16 @@
 {
   "name": "easel",
-  "version": "0.1.95",
+  "version": "0.2.0",
   "packageManager": "pnpm@11.1.1",
   "description": "HTML is the new markdown. Easel is a board for reviewing and tuning HTML designs with your agent.",
   "type": "module",
   "bin": {
-    "easel": "dist/cli.mjs",
-    "lavish-axi": "dist/cli.mjs"
+    "easel": "dist/cli.mjs"
   },
   "files": [
     "dist",
     "plugin.json",
-    "skills/lavish",
-    "lavish-editor-marketing/renders/lavish-editor-marketing.gif",
+    "skills/easel",
     "LICENSE",
     "THIRD-PARTY-NOTICES.md",
     "README.md"
@@ -73,12 +71,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/kunchenguid/lavish-axi.git"
+    "url": "git+https://github.com/GeorgeGally/lavish-axi.git"
   },
   "bugs": {
-    "url": "https://github.com/kunchenguid/lavish-axi/issues"
+    "url": "https://github.com/GeorgeGally/lavish-axi/issues"
   },
-  "homepage": "https://github.com/kunchenguid/lavish-axi#readme",
+  "homepage": "https://github.com/GeorgeGally/lavish-axi#readme",
   "publishConfig": {
     "access": "public"
   }

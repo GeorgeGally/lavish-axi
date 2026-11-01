@@ -17,7 +17,7 @@ const CAPTURE_TIMEOUT_MS = 20000;
 
 /** @param {NodeJS.ProcessEnv} [env] */
 export function findChrome(env = process.env) {
-  const configured = String(env.EASEL_CHROME || env.LAVISH_AXI_CHROME || "").trim();
+  const configured = String(env.EASEL_CHROME || "").trim();
   if (configured) return existsSync(configured) ? configured : "";
   const candidates =
     process.platform === "darwin"

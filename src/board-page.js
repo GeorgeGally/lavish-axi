@@ -89,7 +89,7 @@ export function createBoardHtml(
 </header>
 <main class="plane" id="plane">
   <div class="canvas" id="canvas"></div>
-  <div class="empty" id="empty" hidden>Nothing on this board yet.</div>
+  <div class="empty" id="empty" hidden>Nothing on this board yet. Drop HTML files here, or ask your agent to add designs.</div>
 </main>
 <aside class="chat" id="chat" data-view="chat" aria-label="Sidebar">
   <header class="chat-head">

@@ -27,7 +27,7 @@ export function isWildcardHost(host) {
   }
 }
 
-// Address the server binds to (LAVISH_AXI_HOST). Defaults to loopback. A wildcard value
+// Address the server binds to (EASEL_HOST). Defaults to loopback. A wildcard value
 // (0.0.0.0 or ::) is never listened on; resolveListenHosts maps it to loopback.
 export function bindHost(env = process.env) {
   return productEnv("HOST", env)?.trim() || LOOPBACK_HOST;
@@ -36,9 +36,9 @@ export function bindHost(env = process.env) {
 /**
  * Concrete listen addresses. Never includes 0.0.0.0 / ::.
  * The first entry is the primary (requested) host. Loopback is always included: it is the one
- * address every CLI probes whatever its own LAVISH_AXI_HOST says, so a server pinned to a
+ * address every CLI probes whatever its own EASEL_HOST says, so a server pinned to a
  * Tailscale or LAN address is still found by a client configured without one instead of that
- * client spawning a second daemon on the same port. When LAVISH_AXI_HOST is unset, the Tailscale
+ * client spawning a second daemon on the same port. When EASEL_HOST is unset, the Tailscale
  * IPv4 is added when present.
  * @param {{ host?: string, env?: NodeJS.ProcessEnv, tailscale?: { ipv4?: string } | null, extraHosts?: string[] }} [options]
  * @returns {string[]}
@@ -118,14 +118,14 @@ export function clientHost(env = process.env) {
   return resolveListenHosts({ env })[0];
 }
 
-// Hostname written into the session URLs the server generates (LAVISH_AXI_LINK_HOST).
+// Hostname written into the session URLs the server generates (EASEL_LINK_HOST).
 // Defaults to the host the CLI dials.
 export function linkHost(env = process.env) {
   return productEnv("LINK_HOST", env)?.trim() || clientHost(env);
 }
 
 // Extra Host header values the server's DNS-rebinding guard accepts beyond the
-// loopback names and the resolved bind/link host, set via LAVISH_AXI_ALLOWED_HOSTS
+// loopback names and the resolved bind/link host, set via EASEL_ALLOWED_HOSTS
 // (whitespace-separated). A lone "*" disables the guard entirely - an explicit
 // opt-out for operators fronting the server with their own auth/proxy.
 export function extraAllowedHosts(env = process.env) {
@@ -147,7 +147,7 @@ export function stateFile() {
   return path.join(stateDir(), "state.json");
 }
 
-// Which Lavish installation a server belongs to, reported by /health. A CLI only ever stops a
+// Which Easel installation a server belongs to, reported by /health. A CLI only ever stops a
 // duplicate daemon that shares its own state file, so another user's (or another test's) server on
 // the same port at a different address is never touched. Resolve the directory, not the state file:
 // state.json may not exist yet when the server first reports its identity.
@@ -174,6 +174,10 @@ export async function ensureStateDir() {
   await mkdir(stateDir(), { recursive: true });
 }
 
+// Easel's own port, away from 4387 (the default of the tool Easel grew from), so the two can
+// run side by side instead of each finding the other at its control address and refusing it.
+export const DEFAULT_PORT = 4747;
+
 export function defaultPort() {
-  return Number(productEnv("PORT") || 4387);
+  return Number(productEnv("PORT") || DEFAULT_PORT);
 }

@@ -7,7 +7,7 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
-const runBrowserE2e = process.env.LAVISH_AXI_BROWSER_E2E === "1";
+const runBrowserE2e = process.env.EASEL_BROWSER_E2E === "1";
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const fixtures = path.join(repoRoot, "test/fixtures/layout-audit");
 
@@ -39,23 +39,23 @@ test(
   "real browser layout audit stays silent on acceptable pages and reports one severe root per broken case",
   { skip: !runBrowserE2e, timeout: 480_000 },
   async () => {
-    const temp = await mkdtemp(path.join(tmpdir(), "lavish-layout-browser-"));
+    const temp = await mkdtemp(path.join(tmpdir(), "easel-layout-browser-"));
     const port = await freePort();
-    const lavishEnv = {
-      LAVISH_AXI_PORT: String(port),
-      LAVISH_AXI_STATE_DIR: path.join(temp, "state"),
-      LAVISH_AXI_NO_OPEN: "1",
-      LAVISH_AXI_TELEMETRY: "0",
-      LAVISH_AXI_HOST: "127.0.0.1",
-      LAVISH_AXI_LINK_HOST: "127.0.0.1",
+    const easelEnv = {
+      EASEL_PORT: String(port),
+      EASEL_STATE_DIR: path.join(temp, "state"),
+      EASEL_NO_OPEN: "1",
+      EASEL_TELEMETRY: "0",
+      EASEL_HOST: "127.0.0.1",
+      EASEL_LINK_HOST: "127.0.0.1",
     };
     const chromeEnv = {
-      CHROME_DEVTOOLS_AXI_SESSION: `lavish-layout-${process.pid}`,
+      CHROME_DEVTOOLS_AXI_SESSION: `easel-layout-${process.pid}`,
       CHROME_DEVTOOLS_AXI_USER_DATA_DIR: path.join(temp, "chrome"),
     };
 
     function openArtifact(file) {
-      const output = run(process.execPath, ["bin/lavish-axi.js", file, "--no-open"], lavishEnv);
+      const output = run(process.execPath, ["bin/easel.js", file, "--no-open"], easelEnv);
       const url = output.match(/url:\s*"([^"]+)"/)?.[1];
       assert.ok(url, output);
       return { file, url };
@@ -109,7 +109,7 @@ test(
         run("chrome-devtools-axi", ["wait", String(settleMs)], chromeEnv, settleMs + 45_000);
         inbox = readInbox();
       }
-      const poll = run(process.execPath, ["bin/lavish-axi.js", "poll", file, "--timeout-ms", "600"], lavishEnv);
+      const poll = run(process.execPath, ["bin/easel.js", "poll", file, "--timeout-ms", "600"], easelEnv);
 
       assert.equal(inbox.gate, false, `${name}: the artifact is always revealed after a completed pass`);
       assert.equal(Number(inbox.badge), expectedCount, name);
@@ -162,7 +162,7 @@ test(
       assert.equal(Number(detected.badge), 3);
       assert.equal(detected.gate, false);
       assert.match(
-        run(process.execPath, ["bin/lavish-axi.js", "poll", revalidationFile, "--timeout-ms", "600"], lavishEnv),
+        run(process.execPath, ["bin/easel.js", "poll", revalidationFile, "--timeout-ms", "600"], easelEnv),
         /status:\s*waiting/,
       );
 
@@ -176,7 +176,7 @@ test(
       assert.equal(repaired.wrapHidden, true);
       assert.equal(repaired.gate, false);
     } finally {
-      run(process.execPath, ["bin/lavish-axi.js", "stop", "--port", String(port)], lavishEnv, 15_000);
+      run(process.execPath, ["bin/easel.js", "stop", "--port", String(port)], easelEnv, 15_000);
       run("chrome-devtools-axi", ["stop"], chromeEnv);
       await rm(temp, { recursive: true, force: true });
     }

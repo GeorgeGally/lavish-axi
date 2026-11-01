@@ -4,8 +4,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-process.env.LAVISH_AXI_HOST = "127.0.0.1";
-process.env.LAVISH_AXI_LINK_HOST = "127.0.0.1";
+process.env.EASEL_HOST = "127.0.0.1";
+process.env.EASEL_LINK_HOST = "127.0.0.1";
 
 import { addItem, boardFilePath, placeItem, readBoard } from "../src/board.js";
 import { serve } from "../src/server.js";
@@ -380,13 +380,102 @@ test("the server home page is Easel and lists the boards it has open", async (t)
   const empty = await (await fetch(`${base}/`, { headers: { accept: "text/html" } })).text();
   assert.match(empty, /<title>Easel<\/title>/);
   assert.match(empty, /<h1>Easel<\/h1>/);
-  assert.doesNotMatch(empty, /Lavish/);
+  assert.doesNotMatch(empty, /lavish/i);
   assert.match(empty, /No boards are open/);
+  assert.match(empty, /<form[^>]*id="newBoard"/);
+  assert.match(empty, /name="folder"/);
+  assert.match(empty, /name="name"/);
 
   const registered = await register(base, boardDirectory);
   const listed = await (await fetch(`${base}/`, { headers: { accept: "text/html" } })).text();
   assert.match(listed, new RegExp(`<a href="/board/${registered.key}">hero</a>`));
   assert.doesNotMatch(listed, /No boards are open/);
+});
+
+test("the home page makes a new board in a folder, creating the folder when it is missing", async (t) => {
+  const { base, dir } = await setup(t);
+  const folder = path.join(dir, "made", "shop");
+  const response = await fetch(`${base}/api/board-folders`, {
+    method: "POST",
+    headers: write(base),
+    body: JSON.stringify({ folder, name: "Shop" }),
+  });
+  assert.equal(response.status, 200);
+  const payload = await response.json();
+  assert.match(payload.url, /\/board\/[0-9a-f]{16}$/);
+  const board = await readBoard(folder);
+  assert.equal(board.name, "Shop");
+  const listed = await (await fetch(`${base}/`, { headers: { accept: "text/html" } })).text();
+  assert.match(listed, />Shop</);
+});
+
+test("the home page opens an existing folder of HTML as a board", async (t) => {
+  const { base, boardDirectory } = await setup(t);
+  const response = await fetch(`${base}/api/board-folders`, {
+    method: "POST",
+    headers: write(base),
+    body: JSON.stringify({ folder: boardDirectory, name: "" }),
+  });
+  assert.equal(response.status, 200);
+  const payload = await response.json();
+  assert.deepEqual(payload.board.items.map((item) => item.file).sort(), ["v1.html", "v2.html"]);
+});
+
+test("a new board from the home page needs the page's own origin and a usable folder", async (t) => {
+  const { base, dir } = await setup(t);
+  const body = JSON.stringify({ folder: path.join(dir, "x"), name: "X" });
+  const bare = await fetch(`${base}/api/board-folders`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body,
+  });
+  assert.equal(bare.status, 403);
+  const foreign = await fetch(`${base}/api/board-folders`, {
+    method: "POST",
+    headers: { "content-type": "application/json", origin: "https://evil.example" },
+    body,
+  });
+  assert.equal(foreign.status, 403);
+  for (const folder of ["", "relative/path", "/", path.join(dir, "secret.txt")]) {
+    const refused = await fetch(`${base}/api/board-folders`, {
+      method: "POST",
+      headers: write(base),
+      body: JSON.stringify({ folder, name: "X" }),
+    });
+    assert.equal(refused.status, 400, `refuses ${JSON.stringify(folder)}`);
+  }
+});
+
+test("an HTML file dropped on the board becomes a new item and never overwrites a file", async (t) => {
+  const { base, boardDirectory } = await setup(t);
+  const registered = await register(base, boardDirectory);
+  /** @param {string} name @param {string} html @param {Record<string, string>} [headers] */
+  const add = (name, html, headers = write(base)) =>
+    fetch(`${base}/api/boards/${registered.key}/files`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ name, html }),
+    });
+
+  const first = await add("hero.html", "<!doctype html><h1>Hero</h1>");
+  assert.equal(first.status, 200);
+  const added = await first.json();
+  assert.equal(added.item.file, "hero.html");
+  assert.equal(await readFile(path.join(boardDirectory, "hero.html"), "utf8"), "<!doctype html><h1>Hero</h1>");
+
+  const clash = await (await add("v1.html", "<h1>New v1</h1>")).json();
+  assert.equal(clash.item.file, "v1-2.html");
+  assert.equal(await readFile(path.join(boardDirectory, "v1.html"), "utf8"), ITEM_HTML);
+
+  const escaped = await (await add("../../outside.html", "<h1>Inside</h1>")).json();
+  assert.equal(escaped.item.file, "outside.html");
+  await stat(path.join(boardDirectory, "outside.html"));
+
+  assert.equal((await add("notes.txt", "x")).status, 400);
+  assert.equal((await add("a.html", "<h1>x</h1>", { "content-type": "application/json" })).status, 403);
+
+  const board = await readBoard(boardDirectory);
+  assert.ok(board.items.some((item) => item.file === "v1-2.html"));
 });
 
 test("an unknown board key is not a board", async (t) => {
@@ -477,7 +566,7 @@ test("the notify hook stays off when unset and can come from the state directory
   t.after(() => rm(scratch, { recursive: true, force: true }));
   const out = path.join(scratch, "calls.txt");
   const script = await notifyScript(scratch, out);
-  const { base, boardDirectory, dir } = await setup(t, { env: { EASEL_NOTIFY_CMD: "", LAVISH_AXI_NOTIFY_CMD: "" } });
+  const { base, boardDirectory, dir } = await setup(t, { env: { EASEL_NOTIFY_CMD: "" } });
   const registered = await register(base, boardDirectory);
 
   await queueNote(base, registered.key, "Nobody is listening");

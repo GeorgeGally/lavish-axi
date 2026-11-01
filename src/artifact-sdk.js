@@ -4,7 +4,7 @@ import { readArtifactRevisions } from "./artifact-revisions.js";
 import * as mermaidHelpers from "./mermaid-node.js";
 import { tableCellTarget } from "./table-cell.js";
 
-export const LAVISH_INTERNAL_QUEUE_KEY = "_lavishQueueKey";
+export const EASEL_INTERNAL_QUEUE_KEY = "_easelQueueKey";
 
 export const MODE_TOGGLE_HOTKEY_KEY = "i";
 
@@ -15,7 +15,7 @@ export function isModeToggleHotkeyEvent(event) {
 
 // Derive the browser-only replacement key used to collapse unsent updates for the same input.
 // The key is stripped by the chrome before prompts are sent to the server or returned by poll.
-export function deriveLavishQueueKey(element, options = {}) {
+export function deriveEaselQueueKey(element, options = {}) {
   function stringValue(value) {
     return value === null || value === undefined ? "" : String(value);
   }
@@ -64,7 +64,7 @@ export function deriveLavishQueueKey(element, options = {}) {
     const scope = closestElementMatching(el, "form,fieldset") || el?.parentElement || el;
     const tag = tagName(scope) || "scope";
     const explicit = stringValue(
-      attributeValue(scope, "data-lavish-question") || attributeValue(scope, "id") || attributeValue(scope, "name"),
+      attributeValue(scope, "data-easel-question") || attributeValue(scope, "id") || attributeValue(scope, "name"),
     ).trim();
     if (explicit) return `${tag}:${explicit}`;
     return elementPath(scope) || tag;
@@ -84,8 +84,8 @@ export function deriveLavishQueueKey(element, options = {}) {
     return stringValue(options.queueKey).trim();
   }
 
-  const question = closestElementMatching(element, "[data-lavish-question]");
-  const questionKey = stringValue(attributeValue(question, "data-lavish-question")).trim();
+  const question = closestElementMatching(element, "[data-easel-question]");
+  const questionKey = stringValue(attributeValue(question, "data-easel-question")).trim();
   if (questionKey) return `question:${questionKey}`;
 
   const tag = tagName(element);
@@ -409,7 +409,7 @@ export function planClipboardPaste(clipboardData, acceptedMime) {
 }
 
 /**
- * Decide whether an incoming `lavish:attachmentResult` may be applied to this
+ * Decide whether an incoming `easel:attachmentResult` may be applied to this
  * document's chips. Two independent conditions, both required:
  *
  * 1. It came from the chrome (`event.source === parent`). The SDK's listener is on
@@ -474,7 +474,7 @@ export function createArtifactSdk(
   }
   // Only an explicit "off" declaration on the root opts out; absent or unknown
   // values keep the artifact annotatable by default.
-  const initialAnnotationMode = document.documentElement.getAttribute("data-lavish-annotate") !== "off";
+  const initialAnnotationMode = document.documentElement.getAttribute("data-easel-annotate") !== "off";
   let annotationMode = initialAnnotationMode;
   let hovered = null;
   let selected = null;
@@ -490,7 +490,7 @@ export function createArtifactSdk(
   // server re-validates size and enforces the per-prompt count/byte caps at queue
   // time (see attachment-store.js), rejecting the entire send batch on a mismatch
   // so the chrome can preserve the queue and surface the correction to the user.
-  // The count cap mirrors the server's LAVISH_AXI_MAX_ATTACHMENTS_PER_PROMPT, passed
+  // The count cap mirrors the server's EASEL_MAX_ATTACHMENTS_PER_PROMPT, passed
   // in via createSdkJs (W1); the literal 4 is only the fallback when the SDK runs
   // without that wiring (e.g. a unit-test call to createArtifactSdk).
   const ATTACHMENT_MAX_COUNT =
@@ -531,26 +531,26 @@ export function createArtifactSdk(
   function attachmentChipHtml(item, index) {
     const name = escapeAnnotationText(item.name || "image");
     const thumb = item.url
-      ? '<img class="lavish-attachment-thumb" src="' + escapeAnnotationText(item.url) + '" alt="">'
-      : '<span class="lavish-attachment-thumb lavish-attachment-thumb-empty" aria-hidden="true"></span>';
+      ? '<img class="easel-attachment-thumb" src="' + escapeAnnotationText(item.url) + '" alt="">'
+      : '<span class="easel-attachment-thumb easel-attachment-thumb-empty" aria-hidden="true"></span>';
     let status = "";
-    if (item.status === "uploading") status = '<span class="lavish-attachment-status">Uploading…</span>';
+    if (item.status === "uploading") status = '<span class="easel-attachment-status">Uploading…</span>';
     else if (item.status === "error")
       status =
-        '<span class="lavish-attachment-status lavish-attachment-status-error">' +
+        '<span class="easel-attachment-status easel-attachment-status-error">' +
         escapeAnnotationText(item.error || "Upload failed") +
         "</span>";
     // Only a real (retryable) upload gets a Retry button; a rejected non-image has no file.
     const retry =
       item.status === "error" && item.file
-        ? '<button type="button" class="lavish-attachment-retry" data-attachment-retry="' + index + '">Retry</button>'
+        ? '<button type="button" class="easel-attachment-retry" data-attachment-retry="' + index + '">Retry</button>'
         : "";
     return (
-      '<div class="lavish-attachment-chip' +
+      '<div class="easel-attachment-chip' +
       (item.status === "error" ? " is-error" : "") +
       '">' +
       thumb +
-      '<span class="lavish-attachment-body"><span class="lavish-attachment-name" title="' +
+      '<span class="easel-attachment-body"><span class="easel-attachment-name" title="' +
       name +
       '">' +
       name +
@@ -558,7 +558,7 @@ export function createArtifactSdk(
       status +
       "</span>" +
       retry +
-      '<button type="button" class="lavish-attachment-remove" data-attachment-remove="' +
+      '<button type="button" class="easel-attachment-remove" data-attachment-remove="' +
       index +
       '" aria-label="Remove image" title="Remove">' +
       REMOVE_ICON +
@@ -616,7 +616,7 @@ export function createArtifactSdk(
           // Route through postArtifactMessage so the message carries the current
           // artifact_load_token - the chrome drops any artifact message without it
           // before the upload handler ever runs.
-          postArtifactMessage("lavish:uploadAttachment", {
+          postArtifactMessage("easel:uploadAttachment", {
             nonce: ATTACHMENT_NONCE,
             localId: item.localId,
             name: item.name,
@@ -1011,7 +1011,7 @@ export function createArtifactSdk(
       return;
     }
     const iframe = document.createElement("iframe");
-    iframe.setAttribute("data-lavish-ui", "whiteboard-inline");
+    iframe.setAttribute("data-easel-ui", "whiteboard-inline");
     iframe.setAttribute("title", "Excalidraw whiteboard");
     // Stricter than (and independent of) this artifact frame's own sandbox.
     iframe.setAttribute("sandbox", "allow-scripts allow-popups");
@@ -1052,15 +1052,15 @@ export function createArtifactSdk(
     // While the chrome overlay edits a diagram fullscreen, its inline frame is
     // parked on about:blank so two editors never autosave the same sidecar;
     // resume reboots the frame, which re-inits from the latest saved scene.
-    if (msg.type === "lavish:suspendWhiteboard") {
+    if (msg.type === "easel:suspendWhiteboard") {
       const target = whiteboardEntryByIndex(msg.diagramIndex);
       if (target) target.iframe.src = "about:blank";
     }
-    if (msg.type === "lavish:resumeWhiteboard") {
+    if (msg.type === "easel:resumeWhiteboard") {
       const target = whiteboardEntryByIndex(msg.diagramIndex);
       if (target) target.iframe.src = whiteboardFrameSrc(target);
     }
-    if (msg.type === "lavish:requestLayoutDiagnostics") scheduleLayoutAudit(true);
+    if (msg.type === "easel:requestLayoutDiagnostics") scheduleLayoutAudit(true);
   });
 
   function enhanceMermaid() {
@@ -1128,7 +1128,7 @@ export function createArtifactSdk(
     if (range.collapsed || !text) return null;
 
     const ancestor = closestElement(range.commonAncestorContainer);
-    if (isLavishUi(ancestor) || isLavishAction(ancestor) || isInteractiveControl(ancestor)) return null;
+    if (isEaselUi(ancestor) || isEaselAction(ancestor) || isInteractiveControl(ancestor)) return null;
 
     const commonAncestorSelector = selector(ancestor);
     const target = {
@@ -1151,26 +1151,26 @@ export function createArtifactSdk(
     };
   }
 
-  function isLavishUi(el) {
-    return !!(el && el.closest && el.closest("[data-lavish-ui]"));
+  function isEaselUi(el) {
+    return !!(el && el.closest && el.closest("[data-easel-ui]"));
   }
 
-  function isLavishAction(el) {
-    return !!(el && el.closest && el.closest("[data-lavish-action]"));
+  function isEaselAction(el) {
+    return !!(el && el.closest && el.closest("[data-easel-action]"));
   }
 
   // Native interactive controls (radios, checkboxes, inputs, selects, buttons,
   // labels, disclosure summaries, editable regions, interactive ARIA widgets)
   // should toggle/focus/type natively instead of triggering annotation, just
-  // like elements marked with data-lavish-action.
+  // like elements marked with data-easel-action.
   function isInteractiveControl(el) {
     return isNativeInteractive(el);
   }
 
   function highlightElement(el) {
     if (!el) return;
-    el.style.outline = "var(--lavish-annotate-outline,2px solid #f4c95d)";
-    el.style.outlineOffset = "var(--lavish-annotate-offset,2px)";
+    el.style.outline = "var(--easel-annotate-outline,2px solid #f4c95d)";
+    el.style.outlineOffset = "var(--easel-annotate-offset,2px)";
   }
 
   function clearHighlight(el) {
@@ -1179,7 +1179,7 @@ export function createArtifactSdk(
 
   function clearTextHighlight() {
     if (!shadow) return;
-    for (const el of [...shadow.querySelectorAll(".lavish-text-highlight")]) el.remove();
+    for (const el of [...shadow.querySelectorAll(".easel-text-highlight")]) el.remove();
   }
 
   function highlightTextRange(range) {
@@ -1188,7 +1188,7 @@ export function createArtifactSdk(
     for (const rect of [...range.getClientRects()]) {
       if (rect.width <= 0 || rect.height <= 0) continue;
       const mark = document.createElement("div");
-      mark.className = "lavish-text-highlight";
+      mark.className = "easel-text-highlight";
       mark.style.left = rect.left + "px";
       mark.style.top = rect.top + "px";
       mark.style.width = rect.width + "px";
@@ -1199,12 +1199,12 @@ export function createArtifactSdk(
 
   function setAnnotationMode(enabled) {
     annotationMode = !!enabled;
-    let style = document.getElementById("lavish-cursor-style");
+    let style = document.getElementById("easel-cursor-style");
     if (annotationMode && !style) {
       style = document.createElement("style");
-      style.id = "lavish-cursor-style";
+      style.id = "easel-cursor-style";
       style.textContent =
-        ":root{--lavish-accent:#f4c95d;--lavish-annotate-outline:2px solid var(--lavish-accent);--lavish-annotate-offset:2px}*{cursor:default!important}:where(:is([role='button'],[role='checkbox'],[role='combobox'],[role='menuitem'],[role='menuitemcheckbox'],[role='menuitemradio'],[role='option'],[role='radio'],[role='switch'],[role='tab'],[role='treeitem']):not(a[href])),:where(:is([role='button'],[role='checkbox'],[role='combobox'],[role='menuitem'],[role='menuitemcheckbox'],[role='menuitemradio'],[role='option'],[role='radio'],[role='switch'],[role='tab'],[role='treeitem']):not(a[href])) *{cursor:pointer!important}:where(:is([role='button'],[role='checkbox'],[role='combobox'],[role='menuitem'],[role='menuitemcheckbox'],[role='menuitemradio'],[role='option'],[role='radio'],[role='switch'],[role='tab'],[role='treeitem']) a[href]),:where(:is([role='button'],[role='checkbox'],[role='combobox'],[role='menuitem'],[role='menuitemcheckbox'],[role='menuitemradio'],[role='option'],[role='radio'],[role='switch'],[role='tab'],[role='treeitem']) a[href]) *{cursor:default!important}[data-lavish-action],[data-lavish-action] *{cursor:pointer!important}input,textarea,[contenteditable]:not([contenteditable='false']){cursor:text!important}button,select,label,option,input[type='button'],input[type='submit'],input[type='reset'],input[type='checkbox'],input[type='radio'],input[type='file'],input[type='color'],input[type='range'],input[type='image']{cursor:pointer!important}";
+        ":root{--easel-accent:#f4c95d;--easel-annotate-outline:2px solid var(--easel-accent);--easel-annotate-offset:2px}*{cursor:default!important}:where(:is([role='button'],[role='checkbox'],[role='combobox'],[role='menuitem'],[role='menuitemcheckbox'],[role='menuitemradio'],[role='option'],[role='radio'],[role='switch'],[role='tab'],[role='treeitem']):not(a[href])),:where(:is([role='button'],[role='checkbox'],[role='combobox'],[role='menuitem'],[role='menuitemcheckbox'],[role='menuitemradio'],[role='option'],[role='radio'],[role='switch'],[role='tab'],[role='treeitem']):not(a[href])) *{cursor:pointer!important}:where(:is([role='button'],[role='checkbox'],[role='combobox'],[role='menuitem'],[role='menuitemcheckbox'],[role='menuitemradio'],[role='option'],[role='radio'],[role='switch'],[role='tab'],[role='treeitem']) a[href]),:where(:is([role='button'],[role='checkbox'],[role='combobox'],[role='menuitem'],[role='menuitemcheckbox'],[role='menuitemradio'],[role='option'],[role='radio'],[role='switch'],[role='tab'],[role='treeitem']) a[href]) *{cursor:default!important}[data-easel-action],[data-easel-action] *{cursor:pointer!important}input,textarea,[contenteditable]:not([contenteditable='false']){cursor:text!important}button,select,label,option,input[type='button'],input[type='submit'],input[type='reset'],input[type='checkbox'],input[type='radio'],input[type='file'],input[type='color'],input[type='range'],input[type='image']{cursor:pointer!important}";
       document.head.appendChild(style);
     }
     if (!annotationMode && style) style.remove();
@@ -1217,13 +1217,13 @@ export function createArtifactSdk(
 
   function queuePrompt(prompt, options = {}) {
     const originElement = options.element || document.activeElement || document.body;
-    /** @type {{ uid: string, prompt: string, selector: string, tag: string, text: string, target?: unknown, attachments?: Array<{ id: string, name?: string }>, _lavishQueueKey?: string }} */
+    /** @type {{ uid: string, prompt: string, selector: string, tag: string, text: string, target?: unknown, attachments?: Array<{ id: string, name?: string }>, _easelQueueKey?: string }} */
     const item = {
       ...context(originElement),
       prompt: String(prompt || ""),
     };
     const queueKey = typeof deriveQueueKey === "function" ? deriveQueueKey(originElement, options) : "";
-    if (queueKey) item._lavishQueueKey = String(queueKey);
+    if (queueKey) item._easelQueueKey = String(queueKey);
 
     if (options.uid) item.uid = String(options.uid);
     if (options.selector) item.selector = String(options.selector);
@@ -1244,22 +1244,22 @@ export function createArtifactSdk(
       if (attachments.length) item.attachments = attachments;
     }
 
-    postArtifactMessage("lavish:queuePrompt", { prompt: item });
+    postArtifactMessage("easel:queuePrompt", { prompt: item });
   }
 
   function sendQueuedPrompts() {
-    postArtifactMessage("lavish:sendQueuedPrompts");
+    postArtifactMessage("easel:sendQueuedPrompts");
   }
 
   function endSession() {
-    postArtifactMessage("lavish:endSession");
+    postArtifactMessage("easel:endSession");
   }
 
   function snapshot() {
     const lines = [];
 
     function walk(el, depth) {
-      if (!(el instanceof Element) || depth > 6 || isLavishUi(el)) return;
+      if (!(el instanceof Element) || depth > 6 || isEaselUi(el)) return;
 
       const c = context(el);
       const name = c.text ? ' "' + c.text.slice(0, 80).replace(/"/g, "'") + '"' : "";
@@ -1306,7 +1306,7 @@ export function createArtifactSdk(
   }
 
   function isRequiredControl(el) {
-    if (!el?.matches?.("button,input,select,textarea,a[href],summary,[data-lavish-action],[role]")) return false;
+    if (!el?.matches?.("button,input,select,textarea,a[href],summary,[data-easel-action],[role]")) return false;
     if (el.matches("input[type='hidden'],[disabled],[aria-disabled='true']")) return false;
     if (!el.hasAttribute("role")) return true;
     return new Set(["button", "link", "checkbox", "radio", "switch", "textbox", "combobox"]).has(
@@ -1340,7 +1340,7 @@ export function createArtifactSdk(
   }
 
   function isVisibleForLayoutAudit(el, rect = el.getBoundingClientRect()) {
-    if (!el || isLavishUi(el) || rect.width <= 0 || rect.height <= 0) return false;
+    if (!el || isEaselUi(el) || rect.width <= 0 || rect.height <= 0) return false;
     let node = el;
     while (node && node.nodeType === 1) {
       const style = getComputedStyle(node);
@@ -1462,7 +1462,7 @@ export function createArtifactSdk(
   }
 
   function isDiagramLayoutElement(el) {
-    return Boolean(el?.closest?.(".mermaid,svg,[data-lavish-ui]"));
+    return Boolean(el?.closest?.(".mermaid,svg,[data-easel-ui]"));
   }
 
   function hasVisualMaskAncestor(el) {
@@ -1516,7 +1516,7 @@ export function createArtifactSdk(
 
   function collectLayoutAuditElements() {
     return [...(document.body?.querySelectorAll("*") || [])]
-      .filter((el) => el instanceof Element && !isLavishUi(el))
+      .filter((el) => el instanceof Element && !isEaselUi(el))
       .slice(0, 800);
   }
 
@@ -1740,7 +1740,7 @@ export function createArtifactSdk(
 
   function opaqueSiblingBlocker(el, point, animationTargets) {
     const top = document.elementFromPoint(point.x, point.y);
-    if (!(top instanceof Element) || top === el || el.contains(top) || top.contains(el) || isLavishUi(top)) return null;
+    if (!(top instanceof Element) || top === el || el.contains(top) || top.contains(el) || isEaselUi(top)) return null;
 
     const targetAncestors = [];
     let targetNode = el;
@@ -1951,7 +1951,7 @@ export function createArtifactSdk(
     return document
       .getAnimations()
       .filter((animation) => ["running", "pending"].includes(String(animation.playState)))
-      .filter((animation) => !isLavishUi(animationTarget(animation)));
+      .filter((animation) => !isEaselUi(animationTarget(animation)));
   }
 
   function activeAnimationTargets() {
@@ -2000,7 +2000,7 @@ export function createArtifactSdk(
     if (!layoutAuditPublishRequested && signature === lastLayoutAuditSignature) return;
     layoutAuditPublishRequested = false;
     lastLayoutAuditSignature = signature;
-    postArtifactMessage("lavish:layoutDiagnostics", {
+    postArtifactMessage("easel:layoutDiagnostics", {
       complete,
       artifact_revision: artifactRevision,
       artifact_pass_sequence: ++layoutAuditPassSequence,
@@ -2058,7 +2058,7 @@ export function createArtifactSdk(
   // viewer's network, not a defect in the artifact.
   function reportLocalAssetFailure(event) {
     const el = event.target;
-    if (!(el instanceof Element) || isLavishUi(el)) return;
+    if (!(el instanceof Element) || isEaselUi(el)) return;
     const tag = String(el.tagName || "").toLowerCase();
     if (!["img", "script", "link", "source", "video", "audio", "iframe"].includes(tag)) return;
     const raw = String(el.getAttribute("src") || el.getAttribute("href") || "");
@@ -2070,7 +2070,7 @@ export function createArtifactSdk(
       return;
     }
     if (resolved.origin !== window.location.origin) return;
-    postArtifactMessage("lavish:artifactAssetFailure", {
+    postArtifactMessage("easel:artifactAssetFailure", {
       detail: "<" + tag + "> could not load " + resolved.pathname,
     });
   }
@@ -2079,10 +2079,10 @@ export function createArtifactSdk(
 
   // ---------------------------------------------------------------------------
   // Review-context preservation. A live reload replaces this document wholesale, so anything the
-  // user typed or answered inside it is lost unless the chrome replays it. Lavish only ever
-  // replays state it owns: an open annotation card, and controls inside a `data-lavish-question`
-  // scope (the documented Lavish input contract). Application-owned form state is left alone
-  // because Lavish cannot tell an intentional reset from a preserved answer.
+  // user typed or answered inside it is lost unless the chrome replays it. Easel only ever
+  // replays state it owns: an open annotation card, and controls inside a `data-easel-question`
+  // scope (the documented Easel input contract). Application-owned form state is left alone
+  // because Easel cannot tell an intentional reset from a preserved answer.
   // ---------------------------------------------------------------------------
 
   let activeCardContext = null;
@@ -2108,10 +2108,10 @@ export function createArtifactSdk(
     }
   }
 
-  function lavishQuestionControls() {
+  function easelQuestionControls() {
     const entries = [];
-    for (const scope of document.querySelectorAll("[data-lavish-question]")) {
-      const question = String(scope.getAttribute("data-lavish-question") || "");
+    for (const scope of document.querySelectorAll("[data-easel-question]")) {
+      const question = String(scope.getAttribute("data-easel-question") || "");
       const controls = [...scope.querySelectorAll("input,select,textarea")];
       controls.forEach((el, index) => {
         const control = /** @type {any} */ (el);
@@ -2138,7 +2138,7 @@ export function createArtifactSdk(
   }
 
   function collectReviewState() {
-    const card = shadow ? shadow.querySelector(".lavish-annotation-card") : null;
+    const card = shadow ? shadow.querySelector(".easel-annotation-card") : null;
     const textarea = card ? card.querySelector("textarea") : null;
     const text = textarea ? String(textarea.value || "") : "";
     return {
@@ -2148,7 +2148,7 @@ export function createArtifactSdk(
         activeCardContext && activeCardContext.tag !== "text" && text.trim()
           ? { selector: String(activeCardContext.selector || ""), text: text.slice(0, 4000) }
           : null,
-      fields: lavishQuestionControls().map((entry) => ({
+      fields: easelQuestionControls().map((entry) => ({
         key: entry.key,
         index: entry.index,
         question: entry.question,
@@ -2163,7 +2163,7 @@ export function createArtifactSdk(
     if (reviewStateTimer) window.clearTimeout(reviewStateTimer);
     reviewStateTimer = window.setTimeout(() => {
       reviewStateTimer = 0;
-      postArtifactMessage("lavish:reviewState", { state: collectReviewState() });
+      postArtifactMessage("easel:reviewState", { state: collectReviewState() });
     }, 120);
   }
 
@@ -2171,7 +2171,7 @@ export function createArtifactSdk(
     if (!state || typeof state !== "object") return;
     const fields = Array.isArray(state.fields) ? state.fields : [];
     if (fields.length) {
-      const entries = lavishQuestionControls();
+      const entries = easelQuestionControls();
       for (const field of fields) {
         const match =
           entries.find((entry) => entry.key === field.key) ||
@@ -2205,7 +2205,7 @@ export function createArtifactSdk(
           showAnnotationCard(late, { restoreText: String(card.text) });
           return;
         }
-        postArtifactMessage("lavish:reviewDraftUnrestorable", { selector: String(card.selector) });
+        postArtifactMessage("easel:reviewDraftUnrestorable", { selector: String(card.selector) });
       }, REVIEW_DRAFT_ANCHOR_SETTLE_MS);
       return;
     }
@@ -2214,28 +2214,28 @@ export function createArtifactSdk(
 
   document.addEventListener("change", (event) => {
     const el = event.target;
-    if (el instanceof Element && el.closest("[data-lavish-question]")) scheduleReviewStateReport();
+    if (el instanceof Element && el.closest("[data-easel-question]")) scheduleReviewStateReport();
   });
   document.addEventListener("input", (event) => {
     const el = event.target;
-    if (el instanceof Element && el.closest("[data-lavish-question]")) scheduleReviewStateReport();
+    if (el instanceof Element && el.closest("[data-easel-question]")) scheduleReviewStateReport();
   });
 
   function ensureShadow() {
     if (shadow) return shadow;
 
     const host = document.createElement("div");
-    host.className = "lavish-annotation-root";
-    host.setAttribute("data-lavish-ui", "annotation-root");
+    host.className = "easel-annotation-root";
+    host.setAttribute("data-easel-ui", "annotation-root");
     document.documentElement.appendChild(host);
 
     shadow = host.attachShadow({ mode: "open" });
-    // Keep the artifact's own key handlers from seeing, and cancelling, typing in Lavish controls.
+    // Keep the artifact's own key handlers from seeing, and cancelling, typing in Easel controls.
     for (const type of ["keydown", "keypress", "keyup"]) {
       shadow.addEventListener(type, (event) => event.stopPropagation());
     }
     const style = document.createElement("style");
-    style.textContent = `:host{all:initial;position:fixed;z-index:2147483647;left:0;top:0;color-scheme:dark;--ink-900:#0f1115;--ink-800:#11141a;--ink-700:#171a21;--ink-600:#1c212b;--steel-700:#2a2f3a;--steel-600:#303745;--steel-500:#3c4557;--steel-400:#8c96aa;--steel-300:#aeb6c6;--steel-200:#b9c0cf;--steel-100:#d8deea;--cream-50:#fffbf3;--cream-100:#f7f3ea;--cream-200:#e8e1cf;--brass-500:#f4c95d;--brass-400:#ffd877;--brass-ink:#17130a;--bg:var(--ink-900);--bg-panel:var(--ink-800);--bg-elevated:var(--ink-600);--fg:var(--cream-100);--fg-faint:var(--steel-300);--border:var(--steel-600);--accent:#f4c95d;--accent-hover:#ffd877;--font-sans:Geist,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;--font-mono:"Geist Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;--radius-md:10px;--radius-xl:14px;--shadow-floating:0 20px 70px rgba(0,0,0,.35);font-family:var(--font-sans)}*{box-sizing:border-box}:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.lavish-text-highlight{position:fixed;pointer-events:none;background:rgba(244,201,93,.28);border-radius:2px;box-shadow:0 0 0 1px rgba(244,201,93,.45)}.lavish-annotation-card{position:fixed;width:min(320px,calc(100vw - 24px));padding:12px;border-radius:var(--radius-xl);background:var(--bg-panel);color:var(--fg);border:1px solid var(--accent);box-shadow:var(--shadow-floating);font:14px/1.4 var(--font-sans)}.lavish-heading{font-weight:700;margin-bottom:6px}.lavish-annotation-card textarea{width:100%;min-height:86px;resize:vertical;border-radius:var(--radius-md);border:1px solid var(--border);background:var(--bg);color:var(--fg);padding:9px;font:inherit;font-family:var(--font-sans)}.lavish-annotation-card textarea::placeholder{color:var(--fg-faint)}.lavish-annotation-card .lavish-hint{margin-top:6px;font-size:11px;color:var(--fg-faint)}.lavish-annotation-card .lavish-hint-alert{color:#ff9d7a;font-weight:700}.lavish-annotation-card .lavish-row{display:flex;gap:8px;justify-content:flex-end;margin-top:8px}.lavish-annotation-card button{border:0;border-radius:var(--radius-md);padding:8px 10px;font-family:var(--font-sans);font-size:13px;font-weight:700;cursor:pointer}.lavish-annotation-card button:active{opacity:.85}.lavish-annotation-card .lavish-send{background:var(--accent);color:var(--brass-ink)}.lavish-annotation-card .lavish-send:hover{background:var(--accent-hover)}.lavish-annotation-card .lavish-cancel{background:var(--steel-700);color:var(--fg)}.lavish-annotation-card.is-dropping{outline:2px dashed var(--accent);outline-offset:3px}.lavish-attachments{display:flex;flex-direction:column;gap:6px;margin-top:8px;max-height:176px;overflow-y:auto}.lavish-attachment-chip{display:flex;align-items:center;gap:8px;padding:6px;border-radius:var(--radius-md);background:var(--bg);border:1px solid var(--border)}.lavish-attachment-chip.is-error{border-color:#e0623d}.lavish-attachment-thumb{width:32px;height:32px;border-radius:6px;object-fit:cover;background:var(--ink-700);flex:0 0 auto}.lavish-attachment-thumb-empty{display:inline-block}.lavish-attachment-body{display:flex;flex-direction:column;gap:1px;min-width:0;flex:1 1 auto}.lavish-attachment-name{font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.lavish-attachment-status{font-size:11px;color:var(--fg-faint)}.lavish-attachment-status-error{color:#ff9d7a}.lavish-attachment-retry{flex:0 0 auto;padding:4px 8px;font-size:11px;font-weight:700;border-radius:8px;background:var(--steel-700);color:var(--fg);cursor:pointer;border:0}.lavish-attachment-remove{flex:0 0 auto;display:flex;align-items:center;justify-content:center;width:22px;height:22px;padding:0!important;border-radius:50%;background:transparent;color:rgba(255,255,255,.85);cursor:pointer;border:0}.lavish-attachment-remove:hover{background:rgba(255,255,255,.14);color:#fff}.lavish-attach-row{margin-top:8px}.lavish-attach{display:inline-flex;align-items:center;gap:6px;padding:6px 9px!important;background:var(--steel-700)!important;color:var(--fg)!important;font-size:12px!important}.lavish-attach:hover{background:var(--steel-600)!important}.lavish-reveal-marker{position:fixed;pointer-events:none;border:2px solid var(--accent);border-radius:4px;box-shadow:0 0 0 4px rgba(244,201,93,.22);animation:lavish-reveal-pulse 2.4s var(--ease,ease-out) forwards}@keyframes lavish-reveal-pulse{0%{opacity:0}12%{opacity:1}70%{opacity:1}100%{opacity:0}}`;
+    style.textContent = `:host{all:initial;position:fixed;z-index:2147483647;left:0;top:0;color-scheme:dark;--ink-900:#0f1115;--ink-800:#11141a;--ink-700:#171a21;--ink-600:#1c212b;--steel-700:#2a2f3a;--steel-600:#303745;--steel-500:#3c4557;--steel-400:#8c96aa;--steel-300:#aeb6c6;--steel-200:#b9c0cf;--steel-100:#d8deea;--cream-50:#fffbf3;--cream-100:#f7f3ea;--cream-200:#e8e1cf;--brass-500:#f4c95d;--brass-400:#ffd877;--brass-ink:#17130a;--bg:var(--ink-900);--bg-panel:var(--ink-800);--bg-elevated:var(--ink-600);--fg:var(--cream-100);--fg-faint:var(--steel-300);--border:var(--steel-600);--accent:#f4c95d;--accent-hover:#ffd877;--font-sans:Geist,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;--font-mono:"Geist Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;--radius-md:10px;--radius-xl:14px;--shadow-floating:0 20px 70px rgba(0,0,0,.35);font-family:var(--font-sans)}*{box-sizing:border-box}:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.easel-text-highlight{position:fixed;pointer-events:none;background:rgba(244,201,93,.28);border-radius:2px;box-shadow:0 0 0 1px rgba(244,201,93,.45)}.easel-annotation-card{position:fixed;width:min(320px,calc(100vw - 24px));padding:12px;border-radius:var(--radius-xl);background:var(--bg-panel);color:var(--fg);border:1px solid var(--accent);box-shadow:var(--shadow-floating);font:14px/1.4 var(--font-sans)}.easel-heading{font-weight:700;margin-bottom:6px}.easel-annotation-card textarea{width:100%;min-height:86px;resize:vertical;border-radius:var(--radius-md);border:1px solid var(--border);background:var(--bg);color:var(--fg);padding:9px;font:inherit;font-family:var(--font-sans)}.easel-annotation-card textarea::placeholder{color:var(--fg-faint)}.easel-annotation-card .easel-hint{margin-top:6px;font-size:11px;color:var(--fg-faint)}.easel-annotation-card .easel-hint-alert{color:#ff9d7a;font-weight:700}.easel-annotation-card .easel-row{display:flex;gap:8px;justify-content:flex-end;margin-top:8px}.easel-annotation-card button{border:0;border-radius:var(--radius-md);padding:8px 10px;font-family:var(--font-sans);font-size:13px;font-weight:700;cursor:pointer}.easel-annotation-card button:active{opacity:.85}.easel-annotation-card .easel-send{background:var(--accent);color:var(--brass-ink)}.easel-annotation-card .easel-send:hover{background:var(--accent-hover)}.easel-annotation-card .easel-cancel{background:var(--steel-700);color:var(--fg)}.easel-annotation-card.is-dropping{outline:2px dashed var(--accent);outline-offset:3px}.easel-attachments{display:flex;flex-direction:column;gap:6px;margin-top:8px;max-height:176px;overflow-y:auto}.easel-attachment-chip{display:flex;align-items:center;gap:8px;padding:6px;border-radius:var(--radius-md);background:var(--bg);border:1px solid var(--border)}.easel-attachment-chip.is-error{border-color:#e0623d}.easel-attachment-thumb{width:32px;height:32px;border-radius:6px;object-fit:cover;background:var(--ink-700);flex:0 0 auto}.easel-attachment-thumb-empty{display:inline-block}.easel-attachment-body{display:flex;flex-direction:column;gap:1px;min-width:0;flex:1 1 auto}.easel-attachment-name{font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.easel-attachment-status{font-size:11px;color:var(--fg-faint)}.easel-attachment-status-error{color:#ff9d7a}.easel-attachment-retry{flex:0 0 auto;padding:4px 8px;font-size:11px;font-weight:700;border-radius:8px;background:var(--steel-700);color:var(--fg);cursor:pointer;border:0}.easel-attachment-remove{flex:0 0 auto;display:flex;align-items:center;justify-content:center;width:22px;height:22px;padding:0!important;border-radius:50%;background:transparent;color:rgba(255,255,255,.85);cursor:pointer;border:0}.easel-attachment-remove:hover{background:rgba(255,255,255,.14);color:#fff}.easel-attach-row{margin-top:8px}.easel-attach{display:inline-flex;align-items:center;gap:6px;padding:6px 9px!important;background:var(--steel-700)!important;color:var(--fg)!important;font-size:12px!important}.easel-attach:hover{background:var(--steel-600)!important}.easel-reveal-marker{position:fixed;pointer-events:none;border:2px solid var(--accent);border-radius:4px;box-shadow:0 0 0 4px rgba(244,201,93,.22);animation:easel-reveal-pulse 2.4s var(--ease,ease-out) forwards}@keyframes easel-reveal-pulse{0%{opacity:0}12%{opacity:1}70%{opacity:1}100%{opacity:0}}`;
     shadow.appendChild(style);
     return shadow;
   }
@@ -2248,7 +2248,7 @@ export function createArtifactSdk(
       activeAttachments = null;
     }
     if (shadow) {
-      for (const el of [...shadow.querySelectorAll(".lavish-annotation-card")]) el.remove();
+      for (const el of [...shadow.querySelectorAll(".easel-annotation-card")]) el.remove();
     }
     clearHighlight(hovered);
     clearHighlight(selected);
@@ -2256,7 +2256,7 @@ export function createArtifactSdk(
     clearTextHighlight();
     selected = null;
     // Only a card that was open has state to retire. Reporting `card: null` with nothing open
-    // (a page declaring data-lavish-annotate="off" closes at boot) would overwrite a stored
+    // (a page declaring data-easel-annotate="off" closes at boot) would overwrite a stored
     // draft the chrome has not replayed yet, because that replay waits for the frame's load event.
     if (hadCard) scheduleReviewStateReport();
   }
@@ -2284,7 +2284,7 @@ export function createArtifactSdk(
 
     const rect = options.range ? options.range.getBoundingClientRect() : anchor.getBoundingClientRect();
     const card = document.createElement("div");
-    card.className = "lavish-annotation-card";
+    card.className = "easel-annotation-card";
     const nodeLabel = c.tag === "mermaid-node" ? c.target?.label || c.text || "" : "";
     const isTableCell = c.target?.type === "table-cell";
     // The annotation targets the element that was clicked, which inside a table cell is often a
@@ -2313,21 +2313,21 @@ export function createArtifactSdk(
             : "Tell the agent what to change about this element...";
     const sendNowHint = isApplePlatform() ? "⌘" : "Ctrl";
     card.innerHTML =
-      '<div class="lavish-heading">' +
+      '<div class="easel-heading">' +
       heading +
       '</div><textarea placeholder="' +
       placeholder +
-      '"></textarea><div class="lavish-attachments" data-attachments hidden></div>' +
-      '<div class="lavish-attach-row"><button class="lavish-attach" type="button">' +
+      '"></textarea><div class="easel-attachments" data-attachments hidden></div>' +
+      '<div class="easel-attach-row"><button class="easel-attach" type="button">' +
       '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>' +
       "<span>Attach image</span></button>" +
-      '<input class="lavish-attach-input" type="file" accept="' +
+      '<input class="easel-attach-input" type="file" accept="' +
       ATTACHMENT_IMAGE_TYPES.accept +
       '" multiple hidden></div>' +
-      '<div class="lavish-hint">Enter to queue &middot; ' +
+      '<div class="easel-hint">Enter to queue &middot; ' +
       sendNowHint +
       "+Enter to send &middot; paste or drop an image" +
-      '</div><div class="lavish-row"><button class="lavish-cancel" type="button">Cancel</button><button class="lavish-send" type="button">Queue</button></div>';
+      '</div><div class="easel-row"><button class="easel-cancel" type="button">Cancel</button><button class="easel-send" type="button">Queue</button></div>';
     root.appendChild(card);
 
     // Clamp the card fully inside the viewport. Called again whenever its height
@@ -2343,12 +2343,12 @@ export function createArtifactSdk(
     positionCard();
 
     const textarea = /** @type {HTMLTextAreaElement | null} */ (card.querySelector("textarea"));
-    const cancelButton = /** @type {HTMLButtonElement | null} */ (card.querySelector(".lavish-cancel"));
-    const sendButton = /** @type {HTMLButtonElement | null} */ (card.querySelector(".lavish-send"));
+    const cancelButton = /** @type {HTMLButtonElement | null} */ (card.querySelector(".easel-cancel"));
+    const sendButton = /** @type {HTMLButtonElement | null} */ (card.querySelector(".easel-send"));
     const attachmentsList = /** @type {HTMLDivElement | null} */ (card.querySelector("[data-attachments]"));
-    const attachButton = /** @type {HTMLButtonElement | null} */ (card.querySelector(".lavish-attach"));
-    const attachInput = /** @type {HTMLInputElement | null} */ (card.querySelector(".lavish-attach-input"));
-    const attachNotice = /** @type {HTMLDivElement | null} */ (card.querySelector(".lavish-hint"));
+    const attachButton = /** @type {HTMLButtonElement | null} */ (card.querySelector(".easel-attach"));
+    const attachInput = /** @type {HTMLInputElement | null} */ (card.querySelector(".easel-attach-input"));
+    const attachNotice = /** @type {HTMLDivElement | null} */ (card.querySelector(".easel-hint"));
     if (!textarea || !cancelButton || !sendButton || !attachmentsList || !attachButton || !attachInput) return;
 
     // The card has one notice line, shared by the neutral keyboard hint and by
@@ -2361,10 +2361,10 @@ export function createArtifactSdk(
       if (!attachNotice) return;
       if (message) {
         attachNotice.textContent = message;
-        attachNotice.classList.add("lavish-hint-alert");
+        attachNotice.classList.add("easel-hint-alert");
       } else {
         attachNotice.innerHTML = defaultHintHtml;
-        attachNotice.classList.remove("lavish-hint-alert");
+        attachNotice.classList.remove("easel-hint-alert");
       }
     };
     const attachments = makeAttachmentsController(attachmentsList, { notify, onLayout: positionCard });
@@ -2454,7 +2454,7 @@ export function createArtifactSdk(
         closeCard();
       }
     });
-    // Unsent annotation text is review context Lavish owns, so it is reported to the chrome and
+    // Unsent annotation text is review context Easel owns, so it is reported to the chrome and
     // replayed after a live reload.
     textarea.addEventListener("input", scheduleReviewStateReport);
     if (typeof options.restoreText === "string") {
@@ -2486,15 +2486,15 @@ export function createArtifactSdk(
       const value = meta?.[field];
       if (typeof value === "string" || value === null) payload[field] = value;
     }
-    postArtifactMessage("lavish:documentMeta", payload);
+    postArtifactMessage("easel:documentMeta", payload);
   }
 
-  /** @type {Window & { lavish?: unknown }} */ (window).lavish = {
+  /** @type {Window & { easel?: unknown }} */ (window).easel = {
     queuePrompt,
     sendQueuedPrompts,
     endSession,
     getQueuedPrompts: () => [],
-    setStatus: (message) => postArtifactMessage("lavish:status", { message: String(message) }),
+    setStatus: (message) => postArtifactMessage("easel:status", { message: String(message) }),
     setDocumentMeta,
     snapshot,
   };
@@ -2504,42 +2504,42 @@ export function createArtifactSdk(
     // without the source check the artifact could post to itself and drive the SDK.
     if (event.source !== parent) return;
     const msg = event.data || {};
-    if (msg.type === "lavish:setAnnotationMode") setAnnotationMode(msg.enabled);
-    if (msg.type === "lavish:attachmentResult") {
+    if (msg.type === "easel:setAnnotationMode") setAnnotationMode(msg.enabled);
+    if (msg.type === "easel:attachmentResult") {
       if (!isTrustedAttachmentResult(event, { parentWindow: parent, nonce: ATTACHMENT_NONCE })) return;
       activeAttachments?.handleResult(msg.localId, msg.ok, msg.id, msg.error);
     }
-    if (msg.type === "lavish:requestSnapshot") {
-      postArtifactMessage("lavish:snapshot", {
+    if (msg.type === "easel:requestSnapshot") {
+      postArtifactMessage("easel:snapshot", {
         snapshot: snapshot(),
         snapshot_request_id: typeof msg.snapshot_request_id === "string" ? msg.snapshot_request_id : "",
       });
     }
-    if (msg.type === "lavish:restoreScroll") {
+    if (msg.type === "easel:restoreScroll") {
       window.scrollTo(Number(msg.x) || 0, Number(msg.y) || 0);
     }
-    if (msg.type === "lavish:restoreReviewState") restoreReviewState(msg.state);
-    if (msg.type === "lavish:revealElement") revealElement(msg.selector);
-    if (msg.type === "lavish:queuedAnchors") {
+    if (msg.type === "easel:restoreReviewState") restoreReviewState(msg.state);
+    if (msg.type === "easel:revealElement") revealElement(msg.selector);
+    if (msg.type === "easel:queuedAnchors") {
       queuedAnchorSelectors = new Set(Array.isArray(msg.selectors) ? msg.selectors.map(String) : []);
     }
-    if (msg.type === "lavish:annotateElement" && annotationMode) {
+    if (msg.type === "easel:annotateElement" && annotationMode) {
       const target = safeQuerySelector(msg.selector);
       if (target) showAnnotationCard(target);
     }
   });
 
-  // Bring a warning's element into view and flash it. The marker is Lavish UI, so it is excluded
+  // Bring a warning's element into view and flash it. The marker is Easel UI, so it is excluded
   // from the layout audit and never becomes a finding of its own.
   function revealElement(selector) {
     const target = selector === "html" ? document.documentElement : safeQuerySelector(selector);
     if (!(target instanceof Element)) return;
     target.scrollIntoView({ block: "center", inline: "center", behavior: "smooth" });
     const root = ensureShadow();
-    for (const el of [...root.querySelectorAll(".lavish-reveal-marker")]) el.remove();
+    for (const el of [...root.querySelectorAll(".easel-reveal-marker")]) el.remove();
     const rect = target.getBoundingClientRect();
     const marker = document.createElement("div");
-    marker.className = "lavish-reveal-marker";
+    marker.className = "easel-reveal-marker";
     marker.style.left = rect.left + "px";
     marker.style.top = rect.top + "px";
     marker.style.width = Math.max(rect.width, 4) + "px";
@@ -2557,7 +2557,7 @@ export function createArtifactSdk(
     (event) => {
       if (!isModeToggleHotkeyEvent(event)) return;
       event.preventDefault();
-      postArtifactMessage("lavish:toggleAnnotationMode");
+      postArtifactMessage("easel:toggleAnnotationMode");
     },
     true,
   );
@@ -2571,7 +2571,7 @@ export function createArtifactSdk(
       if (scrollFrame) return;
       scrollFrame = window.requestAnimationFrame(() => {
         scrollFrame = 0;
-        postArtifactMessage("lavish:scroll", { x: window.scrollX, y: window.scrollY });
+        postArtifactMessage("easel:scroll", { x: window.scrollX, y: window.scrollY });
       });
     },
     { passive: true },
@@ -2582,8 +2582,8 @@ export function createArtifactSdk(
     (event) => {
       if (
         !annotationMode ||
-        isLavishUi(event.target) ||
-        isLavishAction(event.target) ||
+        isEaselUi(event.target) ||
+        isEaselAction(event.target) ||
         isInteractiveControl(event.target)
       )
         return;
@@ -2612,8 +2612,8 @@ export function createArtifactSdk(
     (event) => {
       if (
         !annotationMode ||
-        isLavishUi(event.target) ||
-        isLavishAction(event.target) ||
+        isEaselUi(event.target) ||
+        isEaselAction(event.target) ||
         isInteractiveControl(event.target)
       )
         return;
@@ -2632,8 +2632,8 @@ export function createArtifactSdk(
     (event) => {
       if (
         !annotationMode ||
-        isLavishUi(event.target) ||
-        isLavishAction(event.target) ||
+        isEaselUi(event.target) ||
+        isEaselAction(event.target) ||
         isInteractiveControl(event.target)
       )
         return;
@@ -2660,7 +2660,7 @@ export function createArtifactSdk(
       const selector = [clicked?.selector, node].find((candidate) => candidate && queuedAnchorSelectors.has(candidate));
       if (selector) {
         closeCard();
-        postArtifactMessage("lavish:editQueuedAnchor", { selector });
+        postArtifactMessage("easel:editQueuedAnchor", { selector });
         return;
       }
       showAnnotationCard(event.target);
@@ -2670,7 +2670,7 @@ export function createArtifactSdk(
 
   setAnnotationMode(annotationMode);
   // Report the page default once; subsequent mode changes belong to the chrome.
-  postArtifactMessage("lavish:annotationMode", { enabled: initialAnnotationMode });
+  postArtifactMessage("easel:annotationMode", { enabled: initialAnnotationMode });
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", startLayoutAudit, { once: true });
   } else {
@@ -2689,7 +2689,7 @@ export function createArtifactSdk(
   // Report the agent-declared revision registry so the chrome can offer its
   // legend. Read-only: the SDK never marks up the page for it, because a
   // highlight painted here would make the served artifact differ from the file
-  // opened without Lavish. The message is sent even when the artifact declares
+  // opened without Easel. The message is sent even when the artifact declares
   // nothing, so a reload that removed the registry clears a stale legend.
   function reportArtifactRevisions() {
     let payload = { revisions: [], marks: [] };
@@ -2698,7 +2698,7 @@ export function createArtifactSdk(
     } catch {
       // A malformed registry costs the reader a legend, never the review.
     }
-    postArtifactMessage("lavish:revisions", payload);
+    postArtifactMessage("easel:revisions", payload);
   }
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", reportArtifactRevisions, { once: true });

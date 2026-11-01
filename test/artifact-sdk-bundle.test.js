@@ -130,7 +130,7 @@ function bootSdk({
   const documentElement = createElement("html");
   const head = createElement("head");
   const body = createElement("body");
-  if (htmlAnnotate !== null) documentElement.setAttribute("data-lavish-annotate", htmlAnnotate);
+  if (htmlAnnotate !== null) documentElement.setAttribute("data-easel-annotate", htmlAnnotate);
   appendTo(documentElement, head);
   appendTo(documentElement, body);
   for (const element of revisionMarkElements) appendTo(body, element);
@@ -150,7 +150,7 @@ function bootSdk({
     },
     URL: {
       createObjectURL() {
-        return "blob:lavish-test";
+        return "blob:easel-test";
       },
       revokeObjectURL() {},
     },
@@ -170,8 +170,8 @@ function bootSdk({
       createElement,
       getElementById: () => null,
       querySelector: (selector) =>
-        selector === "script[data-lavish-revisions]" ? revisionsScript : documentQuery(selector),
-      querySelectorAll: (selector) => (selector === "[data-lavish-revision]" ? revisionMarkElements : []),
+        selector === "script[data-easel-revisions]" ? revisionsScript : documentQuery(selector),
+      querySelectorAll: (selector) => (selector === "[data-easel-revision]" ? revisionMarkElements : []),
       getSelection: () => selection,
     },
   };
@@ -196,7 +196,7 @@ function bootSdk({
   return {
     posted,
     body,
-    api: sandbox.window.lavish,
+    api: sandbox.window.easel,
     // Returns the dispatched event so a test can tell whether the SDK swallowed the click.
     click(target, modifiers = {}) {
       const listener = documentListeners.find((entry) => entry.type === "click");
@@ -270,7 +270,7 @@ function bootSdk({
     cards() {
       return documentElement.children
         .flatMap((child) => child.shadowRoot?.children || [])
-        .filter((child) => child.className === "lavish-annotation-card");
+        .filter((child) => child.className === "easel-annotation-card");
     },
     card() {
       const card = this.cards().at(-1);
@@ -280,7 +280,7 @@ function bootSdk({
     queue(text) {
       const card = this.card();
       card.querySelector("textarea").value = text;
-      card.querySelector(".lavish-send").onclick();
+      card.querySelector(".easel-send").onclick();
       return posted.at(-1);
     },
   };
@@ -298,7 +298,7 @@ for (const { label, attributes, enabled } of [
     const target = appendTo(sdk.body, cell("p", "Decision board"));
     assert.equal(sdk.click(target).defaultPrevented, enabled);
     assert.equal(sdk.cards().length, enabled ? 1 : 0);
-    const mode = sdk.posted.find((message) => message.type === "lavish:annotationMode");
+    const mode = sdk.posted.find((message) => message.type === "easel:annotationMode");
     assert.ok(mode, "the SDK reports the initial mode to the chrome");
     assert.equal(mode.enabled, enabled);
     assert.equal(mode.artifact_load_token, "load-token");
@@ -312,13 +312,13 @@ test("a page that declares off reports no review state at boot", () => {
   const sdk = bootSdk({ htmlAnnotate: "off" });
   sdk.runTimers();
   assert.equal(
-    sdk.posted.some((message) => message.type === "lavish:reviewState"),
+    sdk.posted.some((message) => message.type === "easel:reviewState"),
     false,
     "nothing was open, so there is no card state to retire",
   );
   const target = appendTo(sdk.body, cell("h1", "Headline"));
   sdk.sendChromeMessage({
-    type: "lavish:restoreReviewState",
+    type: "easel:restoreReviewState",
     state: { card: { selector: "h1", text: "needs a shorter headline" }, fields: [] },
   });
   sdk.setDocumentQuery((selector) => (selector === "h1" ? target : null));
@@ -330,15 +330,15 @@ test("the chrome can turn annotation on and off after a page declares off", () =
   const sdk = bootSdk({ htmlAnnotate: "off" });
   const target = appendTo(sdk.body, cell("p", "Decision board"));
   assert.equal(sdk.click(target).defaultPrevented, false);
-  sdk.sendChromeMessage({ type: "lavish:setAnnotationMode", enabled: true });
+  sdk.sendChromeMessage({ type: "easel:setAnnotationMode", enabled: true });
   assert.equal(sdk.click(target).defaultPrevented, true);
   assert.equal(sdk.cards().length, 1);
-  sdk.sendChromeMessage({ type: "lavish:setAnnotationMode", enabled: false });
+  sdk.sendChromeMessage({ type: "easel:setAnnotationMode", enabled: false });
   assert.equal(sdk.click(target).defaultPrevented, false);
   // This harness retains closed cards; no new card should appear while disabled.
   assert.equal(sdk.cards().length, 1);
   sdk.runTimers();
-  const state = sdk.posted.filter((message) => message.type === "lavish:reviewState").at(-1);
+  const state = sdk.posted.filter((message) => message.type === "easel:reviewState").at(-1);
   assert.equal(state.state.card, null, "turning annotation off closes the active card");
 });
 
@@ -362,12 +362,12 @@ test("a requested layout diagnostic publishes even when the result is unchanged"
   const sdk = bootSdk({ runAnimationFrames: true });
 
   await sdk.runAllTimers();
-  const first = sdk.posted.filter((message) => message.type === "lavish:layoutDiagnostics");
+  const first = sdk.posted.filter((message) => message.type === "easel:layoutDiagnostics");
   assert.equal(first.length, 1);
 
-  sdk.sendChromeMessage({ type: "lavish:requestLayoutDiagnostics" });
+  sdk.sendChromeMessage({ type: "easel:requestLayoutDiagnostics" });
   await sdk.runAllTimers();
-  const diagnostics = sdk.posted.filter((message) => message.type === "lavish:layoutDiagnostics");
+  const diagnostics = sdk.posted.filter((message) => message.type === "easel:layoutDiagnostics");
   assert.equal(diagnostics.length, 2);
   assert.equal(diagnostics[1].artifact_pass_sequence, diagnostics[0].artifact_pass_sequence + 1);
   assert.deepEqual(diagnostics[1].findings, diagnostics[0].findings);
@@ -376,10 +376,10 @@ test("a requested layout diagnostic publishes even when the result is unchanged"
 test("the served SDK echoes the snapshot request id", () => {
   const sdk = bootSdk();
 
-  sdk.sendChromeMessage({ type: "lavish:requestSnapshot", snapshot_request_id: "snapshot-17" });
+  sdk.sendChromeMessage({ type: "easel:requestSnapshot", snapshot_request_id: "snapshot-17" });
 
   const response = sdk.posted.at(-1);
-  assert.equal(response.type, "lavish:snapshot");
+  assert.equal(response.type, "easel:snapshot");
   assert.equal(response.snapshot_request_id, "snapshot-17");
   assert.equal(response.artifact_load_token, "load-token");
 });
@@ -393,12 +393,12 @@ test("the served SDK bundle reports the artifact's own revision registry and mar
     { id: "r1", label: "Tightened header copy", summary: "Shortened the hero headline" },
   ]);
   const marked = createElement("h1");
-  marked.setAttribute("data-lavish-revision", "r1");
+  marked.setAttribute("data-easel-revision", "r1");
   marked.textContent = "Ship faster";
 
   const sdk = bootSdk({ revisionsScript, revisionMarkElements: [marked] });
 
-  const message = sdk.posted.find((entry) => entry.type === "lavish:revisions");
+  const message = sdk.posted.find((entry) => entry.type === "easel:revisions");
   assert.ok(message, "the SDK reports the revision registry on load");
   assert.equal(message.revisions.length, 1);
   assert.equal(message.revisions[0].id, "r1");
@@ -417,7 +417,7 @@ test("the served SDK bundle queues a table-cell annotation without a missing-hel
   sdk.click(evidence);
   const message = sdk.queue("Check this permission");
 
-  assert.equal(message.type, "lavish:queuePrompt");
+  assert.equal(message.type, "easel:queuePrompt");
   assert.equal(message.prompt.prompt, "Check this permission");
   assert.deepEqual(
     { ...message.prompt.target },
@@ -551,7 +551,7 @@ test("Escape leaves an annotation card with an in-flight attachment open, even w
 
   sdk.click(paragraph);
   const card = sdk.card();
-  const attachInput = card.querySelector(".lavish-attach-input");
+  const attachInput = card.querySelector(".easel-attach-input");
   // Never resolves - only the synchronous "uploading" status addFiles sets is needed here.
   attachInput.files = [{ name: "shot.png", type: "image/png", size: 10, arrayBuffer: () => new Promise(() => {}) }];
   const changeListener = attachInput.listeners.find((entry) => entry.type === "change");
@@ -573,20 +573,20 @@ test("the served SDK bundle reports a draft whose anchor the artifact no longer 
   const sdk = bootSdk();
 
   sdk.sendChromeMessage({
-    type: "lavish:restoreReviewState",
+    type: "easel:restoreReviewState",
     state: { card: { selector: "#hero", text: "needs a shorter headline" }, fields: [] },
   });
 
   // The load event proves the document parsed, not that it finished rendering, so nothing is
   // reported until the anchor has had time to appear.
   assert.equal(
-    sdk.posted.some((message) => message.type === "lavish:reviewDraftUnrestorable"),
+    sdk.posted.some((message) => message.type === "easel:reviewDraftUnrestorable"),
     false,
   );
 
   sdk.runTimers();
   const report = sdk.posted.at(-1);
-  assert.equal(report.type, "lavish:reviewDraftUnrestorable");
+  assert.equal(report.type, "easel:reviewDraftUnrestorable");
   assert.equal(report.selector, "#hero");
   assert.equal(report.artifact_load_token, "load-token");
 });
@@ -599,14 +599,14 @@ test("the served SDK bundle restores a draft whose anchor arrives after the load
   sdk.setDocumentQuery((selector) => (selector === "#hero" ? late : null));
 
   sdk.sendChromeMessage({
-    type: "lavish:restoreReviewState",
+    type: "easel:restoreReviewState",
     state: { card: { selector: "#hero", text: "needs a shorter headline" }, fields: [] },
   });
   late = appendTo(sdk.body, cell("h1", "Headline"));
   sdk.runTimers();
 
   assert.equal(
-    sdk.posted.some((message) => message.type === "lavish:reviewDraftUnrestorable"),
+    sdk.posted.some((message) => message.type === "easel:reviewDraftUnrestorable"),
     false,
     "an anchor that arrived late is restored, not reported gone",
   );
@@ -617,8 +617,8 @@ test("the served SDK bundle reports nothing when there is no draft to restore", 
   const sdk = bootSdk();
   const before = sdk.posted.length;
 
-  sdk.sendChromeMessage({ type: "lavish:restoreReviewState", state: { card: null, fields: [] } });
-  sdk.sendChromeMessage({ type: "lavish:restoreReviewState", state: { card: { selector: "#hero", text: "  " } } });
+  sdk.sendChromeMessage({ type: "easel:restoreReviewState", state: { card: null, fields: [] } });
+  sdk.sendChromeMessage({ type: "easel:restoreReviewState", state: { card: { selector: "#hero", text: "  " } } });
   sdk.runTimers();
 
   assert.equal(sdk.posted.length, before);
@@ -633,7 +633,7 @@ test("the served SDK bundle leaves a card the user opened alone when the anchor 
   sdk.setDocumentQuery((selector) => (selector === "#hero" ? late : null));
 
   sdk.sendChromeMessage({
-    type: "lavish:restoreReviewState",
+    type: "easel:restoreReviewState",
     state: { card: { selector: "#hero", text: "needs a shorter headline" }, fields: [] },
   });
 
@@ -647,7 +647,7 @@ test("the served SDK bundle leaves a card the user opened alone when the anchor 
   // The draft is still stored on the chrome side, so a later load can try again; nothing here
   // claims the anchor is gone either.
   assert.equal(
-    sdk.posted.some((message) => message.type === "lavish:reviewDraftUnrestorable"),
+    sdk.posted.some((message) => message.type === "easel:reviewDraftUnrestorable"),
     false,
   );
 });
@@ -662,13 +662,13 @@ test("the served SDK bundle drops a late restore once the user has opened a card
   sdk.setDocumentQuery((selector) => (selector === "#hero" ? late : null));
 
   sdk.sendChromeMessage({
-    type: "lavish:restoreReviewState",
+    type: "easel:restoreReviewState",
     state: { card: { selector: "#hero", text: "needs a shorter headline" }, fields: [] },
   });
 
   const paragraph = appendTo(sdk.body, cell("p", "Just prose"));
   sdk.click(paragraph);
-  sdk.card().querySelector(".lavish-cancel").onclick();
+  sdk.card().querySelector(".easel-cancel").onclick();
   const cardsAfterCancel = sdk.cards().length;
 
   late = appendTo(sdk.body, cell("h1", "Headline"));
@@ -677,7 +677,7 @@ test("the served SDK bundle drops a late restore once the user has opened a card
   assert.equal(sdk.cards().length, cardsAfterCancel, "the cancelled card is not replaced by a restored one");
   assert.notEqual(sdk.card().querySelector("textarea").value, "needs a shorter headline");
   assert.equal(
-    sdk.posted.some((message) => message.type === "lavish:reviewDraftUnrestorable"),
+    sdk.posted.some((message) => message.type === "easel:reviewDraftUnrestorable"),
     false,
   );
 });
@@ -687,7 +687,7 @@ test("clicking an element with a queued note asks the chrome to edit it instead 
   const paragraph = appendTo(sdk.body, cell("p", "Just prose"));
   sdk.click(paragraph);
   const queued = sdk.queue("Reword this");
-  sdk.sendChromeMessage({ type: "lavish:queuedAnchors", selectors: [queued.prompt.selector] });
+  sdk.sendChromeMessage({ type: "easel:queuedAnchors", selectors: [queued.prompt.selector] });
   // The stub shadow root keeps closed cards, so a new card shows as a higher count.
   const cardsBefore = sdk.cards().length;
 
@@ -695,7 +695,7 @@ test("clicking an element with a queued note asks the chrome to edit it instead 
 
   assert.equal(sdk.cards().length, cardsBefore);
   const message = sdk.posted.at(-1);
-  assert.equal(message.type, "lavish:editQueuedAnchor");
+  assert.equal(message.type, "easel:editQueuedAnchor");
   assert.equal(message.selector, queued.prompt.selector);
   assert.equal(message.artifact_load_token, "load-token");
 });
@@ -705,8 +705,8 @@ test("an element whose queued note left the queue opens a fresh card again", () 
   const paragraph = appendTo(sdk.body, cell("p", "Just prose"));
   sdk.click(paragraph);
   const queued = sdk.queue("Reword this");
-  sdk.sendChromeMessage({ type: "lavish:queuedAnchors", selectors: [queued.prompt.selector] });
-  sdk.sendChromeMessage({ type: "lavish:queuedAnchors", selectors: [] });
+  sdk.sendChromeMessage({ type: "easel:queuedAnchors", selectors: [queued.prompt.selector] });
+  sdk.sendChromeMessage({ type: "easel:queuedAnchors", selectors: [] });
   const cardsBefore = sdk.cards().length;
 
   sdk.click(paragraph);
@@ -719,7 +719,7 @@ test("the chrome can hand an element click back for a fresh card", () => {
   const paragraph = appendTo(sdk.body, cell("p", "Just prose"));
   sdk.setDocumentQuery((selector) => (selector === "body > p" ? paragraph : null));
 
-  sdk.sendChromeMessage({ type: "lavish:annotateElement", selector: "body > p" });
+  sdk.sendChromeMessage({ type: "easel:annotateElement", selector: "body > p" });
 
   assert.match(sdk.card().innerHTML, /Annotate &lt;p&gt;/);
 });
@@ -746,7 +746,7 @@ test("a note queued from a diagram node's label opens again from the node's shap
   sdk.click(label);
   const queued = sdk.queue("Rename this step");
   sdk.sendChromeMessage({
-    type: "lavish:queuedAnchors",
+    type: "easel:queuedAnchors",
     selectors: [queued.prompt.selector, queued.prompt.target.selector],
   });
   const cardsBefore = sdk.cards().length;
@@ -755,7 +755,7 @@ test("a note queued from a diagram node's label opens again from the node's shap
 
   assert.equal(sdk.cards().length, cardsBefore);
   const message = sdk.posted.at(-1);
-  assert.equal(message.type, "lavish:editQueuedAnchor");
+  assert.equal(message.type, "easel:editQueuedAnchor");
   assert.equal(message.selector, queued.prompt.target.selector);
 });
 
@@ -769,7 +769,7 @@ test("a click inside a table cell opens only the note on the exact element click
   sdk.click(strong);
   const strongNote = sdk.queue("Explain this app");
   sdk.sendChromeMessage({
-    type: "lavish:queuedAnchors",
+    type: "easel:queuedAnchors",
     selectors: [cellNote.prompt.selector, strongNote.prompt.selector],
   });
   const cardsBefore = sdk.cards().length;
@@ -777,7 +777,7 @@ test("a click inside a table cell opens only the note on the exact element click
   sdk.click(em);
 
   assert.equal(sdk.cards().length, cardsBefore + 1);
-  assert.notEqual(sdk.posted.at(-1)?.type, "lavish:editQueuedAnchor");
+  assert.notEqual(sdk.posted.at(-1)?.type, "easel:editQueuedAnchor");
 });
 
 // In annotate mode a plain click on a link annotates it, so Ctrl-click (Cmd-click on macOS) is the
@@ -849,14 +849,14 @@ test("Ctrl-click follows a link even when the link already has a queued note", (
   const { link } = buildLink(sdk);
   sdk.click(link);
   const queued = sdk.queue("Is this the right spec?");
-  sdk.sendChromeMessage({ type: "lavish:queuedAnchors", selectors: [queued.prompt.selector] });
+  sdk.sendChromeMessage({ type: "easel:queuedAnchors", selectors: [queued.prompt.selector] });
   const postedBefore = sdk.posted.length;
 
   const event = sdk.click(link, { ctrlKey: true });
 
   assert.equal(event.defaultPrevented, false);
   assert.equal(
-    sdk.posted.slice(postedBefore).some((message) => message.type === "lavish:editQueuedAnchor"),
+    sdk.posted.slice(postedBefore).some((message) => message.type === "easel:editQueuedAnchor"),
     false,
   );
 });
@@ -879,11 +879,11 @@ test("Ctrl-click on a link after a text selection does not eat the next plain cl
 test("setDocumentMeta posts the title and icon the page asked for, stamped with the load token", () => {
   const sdk = bootSdk();
   sdk.api.setDocumentMeta({ title: "(1) Board", icon: "data:image/svg+xml,<svg/>" });
-  const message = sdk.posted.find((entry) => entry.type === "lavish:documentMeta");
+  const message = sdk.posted.find((entry) => entry.type === "easel:documentMeta");
   assert.deepEqual(
     { ...message },
     {
-      type: "lavish:documentMeta",
+      type: "easel:documentMeta",
       title: "(1) Board",
       icon: "data:image/svg+xml,<svg/>",
       artifact_load_token: "load-token",
@@ -896,7 +896,7 @@ test("setDocumentMeta forwards null to restore, omits unset fields and drops non
   sdk.api.setDocumentMeta({ title: null });
   sdk.api.setDocumentMeta({ icon: 42, title: { toString: () => "x" } });
   sdk.api.setDocumentMeta();
-  const messages = sdk.posted.filter((entry) => entry.type === "lavish:documentMeta");
+  const messages = sdk.posted.filter((entry) => entry.type === "easel:documentMeta");
   assert.deepEqual(
     messages.map((entry) => JSON.parse(JSON.stringify({ title: entry.title, icon: entry.icon }))),
     [{ title: null }, {}, {}],
