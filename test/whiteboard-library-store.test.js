@@ -13,13 +13,13 @@ const library = (name) =>
   });
 
 test("loadExcalidrawLibraries returns nothing for a missing directory", async () => {
-  const result = await loadExcalidrawLibraries(path.join(tmpdir(), "easel-no-such-library-dir"));
+  const result = await loadExcalidrawLibraries(path.join(tmpdir(), "liesel-no-such-library-dir"));
   assert.deepEqual(result.libraries, []);
   assert.deepEqual(result.skipped, []);
 });
 
 test("loadExcalidrawLibraries skips colliding ids, oversized files, and bad JSON with reasons", async () => {
-  const dir = await mkdtemp(path.join(tmpdir(), "easel-libraries-"));
+  const dir = await mkdtemp(path.join(tmpdir(), "liesel-libraries-"));
   try {
     await writeFile(path.join(dir, "AWS Icons.excalidrawlib"), library("Lambda"));
     await writeFile(path.join(dir, "aws_icons.excalidrawlib"), library("S3"));
@@ -45,7 +45,7 @@ test("loadExcalidrawLibraries skips colliding ids, oversized files, and bad JSON
 });
 
 test("the library cache re-reads only when the directory changes", async () => {
-  const dir = await mkdtemp(path.join(tmpdir(), "easel-libraries-cache-"));
+  const dir = await mkdtemp(path.join(tmpdir(), "liesel-libraries-cache-"));
   try {
     const load = createExcalidrawLibraryCache();
     await writeFile(path.join(dir, "one.excalidrawlib"), library("A"));
@@ -67,7 +67,7 @@ test("the library cache re-reads only when the directory changes", async () => {
 });
 
 test("loadExcalidrawLibraries reports unreadable and non-file entries as skipped", async (t) => {
-  const dir = await mkdtemp(path.join(tmpdir(), "easel-libraries-broken-"));
+  const dir = await mkdtemp(path.join(tmpdir(), "liesel-libraries-broken-"));
   try {
     await writeFile(path.join(dir, "ok.excalidrawlib"), library("A"));
     await mkdir(path.join(dir, "folder.excalidrawlib"));

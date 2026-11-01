@@ -91,7 +91,7 @@ function post(message) {
       ...(state.channelId
         ? { channelId: state.channelId }
         : {
-            channelToken: String(/** @type {any} */ (window).__easelWhiteboardChannelToken || ""),
+            channelToken: String(/** @type {any} */ (window).__lieselWhiteboardChannelToken || ""),
             diagramId: state.diagramId,
           }),
     },
@@ -114,8 +114,8 @@ function setBanner(id, text) {
 }
 
 function buildShell(theme, mode) {
-  document.body.dataset.easelWhiteboardTheme = theme;
-  document.body.dataset.easelWhiteboardMode = mode;
+  document.body.dataset.lieselWhiteboardTheme = theme;
+  document.body.dataset.lieselWhiteboardMode = mode;
   const shell = el("div", { id: "wbShell" });
   const header = el("header", { id: "wbHeader" });
   const title = el("div", { id: "wbTitle", textContent: "Whiteboard" });
@@ -138,7 +138,7 @@ function buildShell(theme, mode) {
       textContent: "Fullscreen",
       title: "Open this whiteboard full screen",
     });
-    fullscreenButton.onclick = () => post({ type: "easel-whiteboard:maximize", diagramIndex: state.diagramIndex });
+    fullscreenButton.onclick = () => post({ type: "liesel-whiteboard:maximize", diagramIndex: state.diagramIndex });
     header.append(fullscreenButton);
   }
   const fallbackBanner = el("div", { id: "wbFallbackBanner", className: "wb-banner", hidden: true });
@@ -238,7 +238,7 @@ function postSave(flushId = "") {
   const scene = currentScene();
   if (!scene) return false;
   post({
-    type: "easel-whiteboard:save",
+    type: "liesel-whiteboard:save",
     diagramIndex: state.diagramIndex,
     ...createWhiteboardPersistencePayload(state, scene),
     ...(flushId ? { flushId } : {}),
@@ -262,7 +262,7 @@ function prepareTeardown(message) {
   state.setLocked?.(true);
   if (!postSave(flushId)) {
     state.teardownFlushId = "";
-    post({ type: "easel-whiteboard:teardownReady", flushId });
+    post({ type: "liesel-whiteboard:teardownReady", flushId });
   }
 }
 
@@ -273,7 +273,7 @@ function flushSaveNow(message) {
   window.clearTimeout(state.saveTimer);
   if (!postSave(flushId)) {
     state.flushIds.delete(flushId);
-    post({ type: "easel-whiteboard:flushComplete", flushId, ok: true });
+    post({ type: "liesel-whiteboard:flushComplete", flushId, ok: true });
   }
 }
 
@@ -283,17 +283,17 @@ function handleSaveResult(message) {
   if (flushId === state.teardownFlushId) {
     state.teardownFlushId = "";
     if (message.ok) {
-      post({ type: "easel-whiteboard:teardownReady", flushId });
+      post({ type: "liesel-whiteboard:teardownReady", flushId });
       return;
     }
     state.setLocked?.(false);
     const error = String(message.error || "failed to save whiteboard scene");
     showStatus(`Could not save before closing: ${error}`, { transient: false });
-    post({ type: "easel-whiteboard:teardownFailed", flushId, error });
+    post({ type: "liesel-whiteboard:teardownFailed", flushId, error });
     return;
   }
   if (state.flushIds.delete(flushId)) {
-    post({ type: "easel-whiteboard:flushComplete", flushId, ok: Boolean(message.ok) });
+    post({ type: "liesel-whiteboard:flushComplete", flushId, ok: Boolean(message.ok) });
   }
 }
 
@@ -628,7 +628,7 @@ async function queueFeedback() {
     });
     const pngDataUrl = await blobToDataUrl(blob);
     post({
-      type: "easel-whiteboard:queueFeedback",
+      type: "liesel-whiteboard:queueFeedback",
       diagramIndex: state.diagramIndex,
       diagramId: state.diagramId,
       ...createWhiteboardPersistencePayload(state, scene),
@@ -715,18 +715,18 @@ function main() {
   window.addEventListener("message", (event) => {
     if (event.source !== window.top) return;
     const msg = event.data || {};
-    if (msg.type === "easel-whiteboard:init" && !initialized && typeof msg.channelId === "string" && msg.channelId) {
+    if (msg.type === "liesel-whiteboard:init" && !initialized && typeof msg.channelId === "string" && msg.channelId) {
       initialized = true;
       state.channelId = msg.channelId;
       buildShell(msg.theme === "dark" ? "dark" : "light", msg.mode === "inline" ? "inline" : "overlay");
       handleInit(msg);
     }
     if (!initialized || msg.channelId !== state.channelId) return;
-    if (msg.type === "easel-whiteboard:sourceChanged") handleSourceChanged(msg);
-    if (msg.type === "easel-whiteboard:prepareTeardown") prepareTeardown(msg);
-    if (msg.type === "easel-whiteboard:flush") flushSaveNow(msg);
-    if (msg.type === "easel-whiteboard:saveResult") handleSaveResult(msg);
-    if (msg.type === "easel-whiteboard:queueResult") {
+    if (msg.type === "liesel-whiteboard:sourceChanged") handleSourceChanged(msg);
+    if (msg.type === "liesel-whiteboard:prepareTeardown") prepareTeardown(msg);
+    if (msg.type === "liesel-whiteboard:flush") flushSaveNow(msg);
+    if (msg.type === "liesel-whiteboard:saveResult") handleSaveResult(msg);
+    if (msg.type === "liesel-whiteboard:queueResult") {
       resetQueueButton();
       if (msg.ok) {
         const note = /** @type {HTMLInputElement | null} */ (document.getElementById("wbNote"));
@@ -737,7 +737,7 @@ function main() {
       }
     }
   });
-  post({ type: "easel-whiteboard:ready" });
+  post({ type: "liesel-whiteboard:ready" });
 }
 
 main();

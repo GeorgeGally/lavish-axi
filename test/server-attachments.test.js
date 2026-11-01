@@ -5,8 +5,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-process.env.EASEL_HOST = "127.0.0.1";
-process.env.EASEL_LINK_HOST = "127.0.0.1";
+process.env.LIESEL_HOST = "127.0.0.1";
+process.env.LIESEL_LINK_HOST = "127.0.0.1";
 
 import { isAttachmentUploadApiPath, serve } from "../src/server.js";
 
@@ -21,7 +21,7 @@ const PNG_2x1 = Buffer.from(
  * @param {{ env?: Record<string, string>, allowedHosts?: string[] }} [options]
  */
 async function withSession(run, { env, allowedHosts } = {}) {
-  const dir = await mkdtemp(path.join(tmpdir(), "easel-attach-srv-"));
+  const dir = await mkdtemp(path.join(tmpdir(), "liesel-attach-srv-"));
   const artifact = path.join(dir, "artifact.html");
   await writeFile(artifact, "<!doctype html><html><body></body></html>");
   const saved = {};
@@ -377,7 +377,7 @@ test("upload rejects bytes over the configured per-image cap with 413", async ()
       const res = await uploadImage(base, key, PNG_2x1);
       assert.equal(res.status, 413);
     },
-    { env: { EASEL_MAX_ATTACHMENT_BYTES: "8" } },
+    { env: { LIESEL_MAX_ATTACHMENT_BYTES: "8" } },
   );
 });
 
@@ -403,12 +403,12 @@ test("export still works and leaks no attachment data when a prompt references a
     const html = await res.text();
     assert.doesNotMatch(html, new RegExp(attachment.id));
     assert.doesNotMatch(html, /\/api\/[0-9a-f]{16}\/attachments/);
-    assert.doesNotMatch(html, /easel:uploadAttachment/);
+    assert.doesNotMatch(html, /liesel:uploadAttachment/);
   });
 });
 
 test("the server sweeps an expired, unreferenced attachment at startup", async () => {
-  const dir = await mkdtemp(path.join(tmpdir(), "easel-attach-sweep-"));
+  const dir = await mkdtemp(path.join(tmpdir(), "liesel-attach-sweep-"));
   const stateFile = path.join(dir, "state.json");
   const key = "0123456789abcdef";
   const id = "a".repeat(64) + ".png";
@@ -419,8 +419,8 @@ test("the server sweeps an expired, unreferenced attachment at startup", async (
   const old = Date.now() - 30 * 24 * 60 * 60 * 1000;
   await utimes(attachmentFile, new Date(old), new Date(old));
 
-  const saved = process.env.EASEL_ATTACHMENT_TTL_MS;
-  process.env.EASEL_ATTACHMENT_TTL_MS = "1000";
+  const saved = process.env.LIESEL_ATTACHMENT_TTL_MS;
+  process.env.LIESEL_ATTACHMENT_TTL_MS = "1000";
   const server = await serve({ port: 0, stateFile, version: "9.9.9-test" });
   try {
     const deadline = Date.now() + 2000;
@@ -437,8 +437,8 @@ test("the server sweeps an expired, unreferenced attachment at startup", async (
     assert.ok(gone, "expired orphan attachment should be swept on startup");
   } finally {
     await server.close();
-    if (saved === undefined) delete process.env.EASEL_ATTACHMENT_TTL_MS;
-    else process.env.EASEL_ATTACHMENT_TTL_MS = saved;
+    if (saved === undefined) delete process.env.LIESEL_ATTACHMENT_TTL_MS;
+    else process.env.LIESEL_ATTACHMENT_TTL_MS = saved;
     await rm(dir, { recursive: true, force: true });
   }
 });

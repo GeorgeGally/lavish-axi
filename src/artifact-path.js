@@ -1,10 +1,10 @@
 import { realpath, stat } from "node:fs/promises";
 import path from "node:path";
 
-export const ARTIFACT_HTML_ERROR = "Easel expects an HTML file";
+export const ARTIFACT_HTML_ERROR = "Liesel expects an HTML file";
 
 /**
- * Match the CLI: Easel reviews HTML files, so only `.html` / `.htm` (any case) count.
+ * Match the CLI: Liesel reviews HTML files, so only `.html` / `.htm` (any case) count.
  * @param {unknown} file
  * @returns {boolean}
  */

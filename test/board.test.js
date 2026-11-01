@@ -26,7 +26,7 @@ import {
 import { createBoardAddOutput, createBoardOpenOutput, createBoardStatusOutput } from "../src/cli.js";
 
 async function boardDir(t) {
-  const dir = await mkdtemp(path.join(tmpdir(), "easel-board-"));
+  const dir = await mkdtemp(path.join(tmpdir(), "liesel-board-"));
   t.after(() => rm(dir, { recursive: true, force: true }));
   return dir;
 }
@@ -149,7 +149,7 @@ test("pairItems locks and unlocks two known items", () => {
 });
 
 test("extractTuneSpec reads declared controls and refuses a non-custom property", () => {
-  const html = `<html><body><script type="application/easel-tune">
+  const html = `<html><body><script type="application/liesel-tune">
   [{"id":"radius","label":"Radius","type":"number","css":"--radius","min":0,"max":40,"step":1,"value":12,"unit":"px"},
    {"id":"accent","label":"Accent","type":"color","css":"--accent","value":"#111111"},
    {"id":"bad","css":"color"}]
@@ -162,13 +162,13 @@ test("extractTuneSpec reads declared controls and refuses a non-custom property"
   assert.equal(spec[0].unit, "px");
   assert.equal(spec[0].max, 40);
   assert.equal(extractTuneSpec("<html>no declarations</html>").length, 0);
-  assert.equal(extractTuneSpec('<script type="application/easel-tune">nope</script>').length, 0);
+  assert.equal(extractTuneSpec('<script type="application/liesel-tune">nope</script>').length, 0);
 });
 
 test("tuneCssValues appends the declared unit and tuneInstruction names the file", () => {
   const board = normalizeBoard({ items: [{ id: "v1", file: "v1.html", tune: { radius: "18" } }] }, "b");
   const spec = extractTuneSpec(
-    '<script type="application/easel-tune">[{"id":"radius","label":"Radius","type":"number","css":"--radius","value":12,"unit":"px"}]</script>',
+    '<script type="application/liesel-tune">[{"id":"radius","label":"Radius","type":"number","css":"--radius","value":12,"unit":"px"}]</script>',
   );
   assert.deepEqual(tuneCssValues(board, "v1", spec, {}), { "--radius": "18px" });
   const instruction = tuneInstruction(board.items[0], spec);
@@ -178,7 +178,7 @@ test("tuneCssValues appends the declared unit and tuneInstruction names the file
 });
 
 test("advanced tune declarations survive extraction and handoff", () => {
-  const spec = extractTuneSpec(`<script type="application/easel-tune">[
+  const spec = extractTuneSpec(`<script type="application/liesel-tune">[
     {"id":"spring","type":"spring","css":"--spring","value":{"stiffness":180,"damping":20,"mass":1}},
     {"id":"curve","type":"easing","css":"--curve","value":"cubic-bezier(0.25, 0.1, 0.25, 1)"},
     {"id":"position","type":"pad","css":"--position","value":{"x":0.5,"y":0.25}},
@@ -241,7 +241,7 @@ test("board CLI outputs stay small and name the poll command", async (t) => {
   addItem(board, { file: "v2.html", label: "Hero · B" });
   const open = createBoardOpenOutput({ dir, url: "http://127.0.0.1:1/board/k", board });
   assert.equal(open.board.items.length, 2);
-  assert.match(open.next_step, /easel poll/);
+  assert.match(open.next_step, /liesel poll/);
   assert.match(open.next_step, /board add/);
   assert.equal(open.board.items[0].tune, undefined);
 

@@ -1,9 +1,9 @@
 import readline from "node:readline";
 
 /**
- * `easel mcp`: a Model Context Protocol server over stdio, for chat apps and agents that
- * speak MCP instead of running shell commands. It exposes the same loop `easel poll` and
- * `easel reply` give a terminal agent - open a board, wait for its notes, answer them -
+ * `liesel mcp`: a Model Context Protocol server over stdio, for chat apps and agents that
+ * speak MCP instead of running shell commands. It exposes the same loop `liesel poll` and
+ * `liesel reply` give a terminal agent - open a board, wait for its notes, answer them -
  * as tools. Messages are newline-delimited JSON-RPC 2.0; stdout carries nothing else.
  */
 
@@ -21,7 +21,7 @@ export const MCP_PROTOCOL_VERSIONS = ["2025-06-18", "2025-03-26", "2024-11-05"];
 /**
  * @param {{ tools: McpTool[], name?: string, version?: string, instructions?: string }} options
  */
-export function createMcpHandler({ tools, name = "easel", version = "", instructions = "" }) {
+export function createMcpHandler({ tools, name = "liesel", version = "", instructions = "" }) {
   const byName = new Map(tools.map((tool) => [tool.name, tool]));
   /**
    * @param {any} message
@@ -138,7 +138,7 @@ const BOARD_ARG = {
 };
 
 /**
- * The Easel tools, bound to the CLI's own board, poll and reply implementations.
+ * The Liesel tools, bound to the CLI's own board, poll and reply implementations.
  * @param {{
  *   openBoard: (args: { board: string, name?: string }) => Promise<unknown>,
  *   boardStatus: (args: { board: string }) => Promise<unknown>,
@@ -147,12 +147,12 @@ const BOARD_ARG = {
  * }} client
  * @returns {McpTool[]}
  */
-export function createEaselMcpTools(client) {
+export function createLieselMcpTools(client) {
   return [
     {
-      name: "easel_board_open",
+      name: "liesel_board_open",
       description:
-        "Open (or create) an Easel board for a folder of HTML designs and return its URL for the user. Every .html file in the folder becomes an item on the board.",
+        "Open (or create) a Liesel board for a folder of HTML designs and return its URL for the user. Every .html file in the folder becomes an item on the board.",
       inputSchema: {
         type: "object",
         properties: { board: BOARD_ARG, name: { type: "string", description: "Board name for a new board" } },
@@ -161,15 +161,15 @@ export function createEaselMcpTools(client) {
       call: (args) => client.openBoard({ board: String(args.board || ""), name: args.name }),
     },
     {
-      name: "easel_board_status",
+      name: "liesel_board_status",
       description: "List a board's tabs and items (id, label, file) so notes can be matched to HTML files.",
       inputSchema: { type: "object", properties: { board: BOARD_ARG }, required: ["board"] },
       call: (args) => client.boardStatus({ board: String(args.board || "") }),
     },
     {
-      name: "easel_poll",
+      name: "liesel_poll",
       description:
-        'Wait for the user\'s notes on a board. Returns {session:{status:"feedback"}, prompts:[...]} when notes arrive: each prompt names its item {id,label}, the pinned selector, the note text, and image attachment paths. Apply each note to that item\'s HTML file, then call easel_reply. Returns status "waiting" when timeout_seconds pass with no notes; call it again to keep waiting. Pass `reply` to answer the previous notes and keep waiting in one call.',
+        'Wait for the user\'s notes on a board. Returns {session:{status:"feedback"}, prompts:[...]} when notes arrive: each prompt names its item {id,label}, the pinned selector, the note text, and image attachment paths. Apply each note to that item\'s HTML file, then call liesel_reply. Returns status "waiting" when timeout_seconds pass with no notes; call it again to keep waiting. Pass `reply` to answer the previous notes and keep waiting in one call.',
       inputSchema: {
         type: "object",
         properties: {
@@ -190,7 +190,7 @@ export function createEaselMcpTools(client) {
         }),
     },
     {
-      name: "easel_reply",
+      name: "liesel_reply",
       description:
         "Post your answer to the board's chat. It settles every note delivered so far. Use `thread` to answer one note's thread, and `pending` with an item id when you promise a new version of that item.",
       inputSchema: {
@@ -214,5 +214,5 @@ export function createEaselMcpTools(client) {
   ];
 }
 
-export const EASEL_MCP_INSTRUCTIONS =
-  "Easel shows a folder of HTML designs on one board where the user pins notes. Open a board with easel_board_open and give the user its URL. Then loop: easel_poll waits for notes; apply each note to the HTML file of the item it names; answer with easel_reply (or easel_poll with reply to answer and keep waiting).";
+export const LIESEL_MCP_INSTRUCTIONS =
+  "Liesel shows a folder of HTML designs on one board where the user pins notes. Open a board with liesel_board_open and give the user its URL. Then loop: liesel_poll waits for notes; apply each note to the HTML file of the item it names; answer with liesel_reply (or liesel_poll with reply to answer and keep waiting).";

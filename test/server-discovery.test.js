@@ -20,7 +20,7 @@ import { SERVER_APP_ID } from "../src/brand.js";
 const UNBINDABLE_HOST = "192.0.2.1";
 
 // A second concrete address on this machine, standing in for the Tailscale or LAN address one
-// agent pins with EASEL_HOST while another agent on the same machine sets nothing.
+// agent pins with LIESEL_HOST while another agent on the same machine sets nothing.
 function otherLocalIpv4() {
   for (const entries of Object.values(networkInterfaces())) {
     for (const entry of entries || []) {
@@ -31,7 +31,7 @@ function otherLocalIpv4() {
 }
 
 async function withTempDir(fn) {
-  const dir = await mkdtemp(path.join(tmpdir(), "easel-discovery-"));
+  const dir = await mkdtemp(path.join(tmpdir(), "liesel-discovery-"));
   try {
     return await fn(dir);
   } finally {
@@ -67,12 +67,12 @@ async function withEnv(overrides, fn) {
 
 function cliEnv(dir, port, host) {
   return {
-    EASEL_PORT: String(port),
-    EASEL_HOST: host,
-    EASEL_STATE_DIR: dir,
-    EASEL_NO_OPEN: "1",
-    EASEL_TELEMETRY: "0",
-    EASEL_IDLE_TIMEOUT_MS: "60000",
+    LIESEL_PORT: String(port),
+    LIESEL_HOST: host,
+    LIESEL_STATE_DIR: dir,
+    LIESEL_NO_OPEN: "1",
+    LIESEL_TELEMETRY: "0",
+    LIESEL_IDLE_TIMEOUT_MS: "60000",
   };
 }
 
@@ -259,7 +259,7 @@ test(
         port,
         stateFile: path.join(dir, "state.json"),
         version: "9.9.9-test",
-        env: { EASEL_HOST: otherHost },
+        env: { LIESEL_HOST: otherHost },
         log: (line) => logs.push(line),
         idleTimeoutMs: null,
         bindRecoveryDelaysMs: [100],
@@ -343,7 +343,7 @@ test(
   },
 );
 
-test("a second server for a port whose loopback an Easel server owns refuses to start", async (t) => {
+test("a second server for a port whose loopback a Liesel server owns refuses to start", async (t) => {
   const otherHost = otherLocalIpv4();
   if (!otherHost) {
     t.skip("host has no non-loopback IPv4 address");
@@ -366,11 +366,11 @@ test("a second server for a port whose loopback an Easel server owns refuses to 
           port: owner.port,
           stateFile: path.join(dir, "state.json"),
           version: "9.9.9-test",
-          env: { EASEL_HOST: otherHost },
+          env: { LIESEL_HOST: otherHost },
           log: () => {},
           idleTimeoutMs: null,
         }),
-        /Another Easel server .* already owns port/,
+        /Another Liesel server .* already owns port/,
       );
       // The loser must not have taken the other address on its way out: a split daemon pair on one
       // port is exactly what the loopback owner check exists to prevent.
@@ -396,7 +396,7 @@ test("a foreign loopback listener prevents a pinned server from claiming the sam
         port,
         stateFile: path.join(dir, "state.json"),
         version: "9.9.9-test",
-        env: { EASEL_HOST: otherHost },
+        env: { LIESEL_HOST: otherHost },
         log: () => {},
         idleTimeoutMs: null,
       }).then(
@@ -426,7 +426,7 @@ test("a symlinked state directory adopts the daemon started at its target", asyn
       port,
       stateFile: path.join(dir, "state.json"),
       version: VERSION,
-      env: { EASEL_HOST: "127.0.0.1" },
+      env: { LIESEL_HOST: "127.0.0.1" },
       detectTailscale: null,
       log: () => {},
       idleTimeoutMs: null,
@@ -482,7 +482,7 @@ test(
 );
 
 test(
-  "switching EASEL_HOST from loopback to another address replaces the server once and keeps its sessions",
+  "switching LIESEL_HOST from loopback to another address replaces the server once and keeps its sessions",
   { timeout: 30_000 },
   async (t) => {
     const otherHost = otherLocalIpv4();
@@ -498,7 +498,7 @@ test(
         port,
         stateFile: path.join(dir, "state.json"),
         version: VERSION,
-        env: { EASEL_HOST: "127.0.0.1" },
+        env: { LIESEL_HOST: "127.0.0.1" },
         log: () => {},
         idleTimeoutMs: null,
       });
@@ -529,7 +529,7 @@ test(
 );
 
 test(
-  "switching EASEL_HOST from another address to loopback adopts the running server",
+  "switching LIESEL_HOST from another address to loopback adopts the running server",
   { timeout: 20_000 },
   async (t) => {
     const otherHost = otherLocalIpv4();
@@ -545,7 +545,7 @@ test(
         port,
         stateFile: path.join(dir, "state.json"),
         version: VERSION,
-        env: { EASEL_HOST: otherHost },
+        env: { LIESEL_HOST: otherHost },
         log: () => {},
         idleTimeoutMs: null,
       });
@@ -586,7 +586,7 @@ test(
         log: () => {},
         idleTimeoutMs: null,
       });
-      const otherInstallDir = await mkdtemp(path.join(tmpdir(), "easel-discovery-other-"));
+      const otherInstallDir = await mkdtemp(path.join(tmpdir(), "liesel-discovery-other-"));
       const otherInstall = await serve({
         port,
         stateFile: path.join(otherInstallDir, "state.json"),
@@ -641,7 +641,7 @@ test(
 test("another installation's server on loopback is never used or stopped", { timeout: 20_000 }, async () => {
   await withTempDir(async (dir) => {
     const artifact = await writeArtifact(dir);
-    const otherInstallDir = await mkdtemp(path.join(tmpdir(), "easel-discovery-other-"));
+    const otherInstallDir = await mkdtemp(path.join(tmpdir(), "liesel-discovery-other-"));
     const port = await freePort();
     const otherInstall = await serve({
       port,
@@ -767,7 +767,7 @@ test(
       const artifact = await writeArtifact(dir);
       const port = await freePort(otherHost);
       // A loopback-only server of this installation that another CLI restarts every time this one
-      // shuts it down: after each /shutdown it answers like an Easel server still starting (503),
+      // shuts it down: after each /shutdown it answers like a Liesel server still starting (503),
       // which frees the port for this CLI's probes but makes the server it spawns stand down.
       let shutdowns = 0;
       let startingUntil = 0;
@@ -803,7 +803,7 @@ test(
         assert.equal(shutdowns, 2, "expected the initial replacement plus exactly one retry");
         assert.match(output, /SERVER_ERROR/);
         assert.ok(output.includes(otherHost), `expected the missing address in ${output}`);
-        assert.match(output, /easel stop/);
+        assert.match(output, /liesel stop/);
       } finally {
         await new Promise((resolve) => loopbackOnly.close(() => resolve(undefined)));
         await shutdownAt(otherHost, port);
@@ -882,7 +882,7 @@ test(
         port,
         stateFile: path.join(dir, "state.json"),
         version: "0.0.1",
-        env: { EASEL_HOST: otherHost },
+        env: { LIESEL_HOST: otherHost },
         extraListenHosts: ["::1"],
         log: () => {},
         idleTimeoutMs: null,
@@ -930,7 +930,7 @@ test(
         port,
         stateFile: path.join(dir, "state.json"),
         version: "0.0.1",
-        env: { EASEL_HOST: otherHost },
+        env: { LIESEL_HOST: otherHost },
         log: () => {},
         idleTimeoutMs: null,
       });
@@ -962,7 +962,7 @@ test(
   async () => {
     await withTempDir(async (dir) => {
       const artifact = await writeArtifact(dir);
-      const unresolvable = "easel-unresolvable.invalid";
+      const unresolvable = "liesel-unresolvable.invalid";
       const port = await freePort();
       const loopbackOnly = await serve({
         port,
@@ -1074,13 +1074,13 @@ test(
     await withTempDir(async (dir) => {
       const artifact = await writeArtifact(dir);
       const port = await freePort(otherHost);
-      const name = "easel-recovering.test";
+      const name = "liesel-recovering.test";
       let dnsUp = false;
       const server = await serve({
         port,
         stateFile: path.join(dir, "state.json"),
         version: VERSION,
-        env: { EASEL_HOST: name },
+        env: { LIESEL_HOST: name },
         lookupHost: async (host) => {
           if (host !== name) return [{ address: host, family: host.includes(":") ? 6 : 4 }];
           if (!dnsUp) throw Object.assign(new Error(`getaddrinfo ENOTFOUND ${host}`), { code: "ENOTFOUND" });
@@ -1115,7 +1115,7 @@ function lsofAvailable() {
 }
 
 // A child process listening at host:port. The script's file name is what `ps` shows, so a
-// pre-handshake Easel server is one whose name says easel and an unrelated one is not.
+// pre-handshake Liesel server is one whose name says liesel and an unrelated one is not.
 async function spawnListener(dir, name, host, port, source) {
   const script = path.join(dir, name);
   await writeFile(script, source);
@@ -1140,7 +1140,7 @@ test("stopping a pre-handshake server signals only the process at its own addres
     // Answers /health with no app or version and has no /shutdown, like the oldest releases.
     const preHandshake = await spawnListener(
       dir,
-      "easel-pre-handshake.mjs",
+      "liesel-pre-handshake.mjs",
       "127.0.0.1",
       port,
       `import { createServer } from "node:http";
@@ -1190,14 +1190,14 @@ os.networkInterfaces = () => ({ ...networkInterfaces(), blackhole: [{ address: "
     const started = Date.now();
     const child = spawn(
       process.execPath,
-      [fileURLToPath(new URL("../bin/easel.js", import.meta.url)), "stop", "--port", String(port)],
+      [fileURLToPath(new URL("../bin/liesel.js", import.meta.url)), "stop", "--port", String(port)],
       {
         env: {
           ...process.env,
           NODE_OPTIONS: `--import=${pathToFileURL(preload).href}`,
-          EASEL_STATE_DIR: dir,
-          EASEL_TELEMETRY: "0",
-          EASEL_HOST: "127.0.0.1",
+          LIESEL_STATE_DIR: dir,
+          LIESEL_TELEMETRY: "0",
+          LIESEL_HOST: "127.0.0.1",
         },
         stdio: ["ignore", "pipe", "pipe"],
       },

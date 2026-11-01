@@ -5,7 +5,7 @@ installServerStdioTimestamps();
 let fatalExitScheduled = false;
 function handleFatalServerError(kind, error) {
   const detail = error instanceof Error ? error.stack || error.message : String(error);
-  console.error(`[easel] ${kind}: ${detail}`);
+  console.error(`[liesel] ${kind}: ${detail}`);
   if (fatalExitScheduled) return;
   fatalExitScheduled = true;
   process.exitCode = 1;
@@ -17,7 +17,7 @@ function handleFatalServerError(kind, error) {
 process.on("uncaughtException", (error) => handleFatalServerError("uncaught exception", error));
 
 try {
-  await import("./easel.js");
+  await import("./liesel.js");
 } catch (error) {
   handleFatalServerError("server startup failed", error);
 }

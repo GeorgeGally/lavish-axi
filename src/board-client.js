@@ -1,11 +1,11 @@
 /* global CSS, document, window, location, Element, HTMLElement, requestAnimationFrame, cancelAnimationFrame */
 
-const bootstrap = JSON.parse(document.getElementById("easel-board")?.textContent || "{}");
+const bootstrap = JSON.parse(document.getElementById("liesel-board")?.textContent || "{}");
 const key = String(bootstrap.key || "");
-const cameraStorageKey = `easel:camera2:${key}`;
-const deviceStorageKey = `easel:device:${key}`;
-const heightStorageKey = `easel:heights:${key}`;
-const panelStorageKey = `easel:panel:${key}`;
+const cameraStorageKey = `liesel:camera2:${key}`;
+const deviceStorageKey = `liesel:device:${key}`;
+const heightStorageKey = `liesel:heights:${key}`;
+const panelStorageKey = `liesel:panel:${key}`;
 const MIN_ZOOM = 0.02;
 const MAX_ZOOM = 4;
 // Pinch arrives as ctrl+wheel. Zoom is exp(-delta * k): continuous, no steps.
@@ -36,8 +36,8 @@ const MEMBER_GAP = { all: 200, ultrawide: 200, desktop: 140, ipad: 100, phone: 7
 const DEVICE_GAP = MEMBER_GAP.all;
 // An ultrawide artboard is as wide as the other three together, so the All view leaves
 // it out until it is switched on.
-const ultrawideStorageKey = `easel:ultrawide:${key}`;
-const annotateHintStorageKey = `easel:gesture-hint:${key}`;
+const ultrawideStorageKey = `liesel:ultrawide:${key}`;
+const annotateHintStorageKey = `liesel:gesture-hint:${key}`;
 
 const state = {
   tabs: Array.isArray(bootstrap.tabs) ? bootstrap.tabs : [],
@@ -242,7 +242,7 @@ function derivedLabel(item, parent) {
 }
 
 /**
- * The version a new, unpaired file grew from: its `easel-parent` meta, or else the
+ * The version a new, unpaired file grew from: its `liesel-parent` meta, or else the
  * paired version with the same NN prefix whose name it shares most of (today first).
  */
 function parentOf(item, pairedItems) {
@@ -479,7 +479,7 @@ function explainContent(group) {
     }
     inner.append(list);
   }
-  // What the latest edit changed, from each file's `easel-changed` meta.
+  // What the latest edit changed, from each file's `liesel-changed` meta.
   for (const change of group.changes || []) {
     const row = element("p", { class: "explain-changed" });
     row.append(
@@ -1296,7 +1296,7 @@ document.getElementById("historyToggle")?.addEventListener("click", () => {
 });
 
 // Answered notes parked in the gutter can be hidden; open notes always stay on the design.
-const oldNotesStorageKey = `easel:old-notes:${key}`;
+const oldNotesStorageKey = `liesel:old-notes:${key}`;
 let showOldNotes = readStorage(oldNotesStorageKey) !== "off";
 
 function renderOldNotesToggle() {
@@ -1471,7 +1471,7 @@ function renderCompare(board, first, member, framed, layout) {
         event.stopPropagation();
         record.iframe.contentWindow?.postMessage(
           {
-            channel: "easel",
+            channel: "liesel",
             item: record.itemId,
             device: record.device.id,
             type: "scroll",
@@ -1519,7 +1519,7 @@ function renderCompare(board, first, member, framed, layout) {
 /** A compared build sizes itself and asks for its stylesheets like a live frame. */
 window.addEventListener("message", (event) => {
   const data = event.data;
-  if (!data || data.channel !== "easel") return;
+  if (!data || data.channel !== "liesel") return;
   const frame = [...compareFrames.values()].find((entry) => entry.iframe.contentWindow === event.source);
   if (!frame) return;
   if (data.type === "stylesheet") sendStylesheet(frame, frame.itemId, String(data.href || ""));
@@ -1539,7 +1539,7 @@ function continueFromBuild(item, build) {
     [
       `Continue ${item.label} (${item.file}) from the build saved at ${build.at || "an earlier round"}`,
       build.label ? `(${build.label})` : "",
-      `— its snapshot is .easel-builds/${item.id}/${build.hash}.html in the board folder.`,
+      `— its snapshot is .liesel-builds/${item.id}/${build.hash}.html in the board folder.`,
       "Build the next version from that, not from a fresh page.",
     ]
       .filter(Boolean)
@@ -1667,7 +1667,7 @@ function renderPlaceholder(board, first, framed, layout) {
 // disk reloads in place (camera untouched) and is marked "Updated just now" until it
 // has been on screen long enough to be seen. What this browser has seen is kept per
 // board, so an edit made while the board was closed is still marked on the next visit.
-const seenStorageKey = `easel:seen:${key}`;
+const seenStorageKey = `liesel:seen:${key}`;
 /** @type {Map<string, string>} */
 const knownStamps = new Map();
 /** @type {Set<string>} */
@@ -1798,7 +1798,7 @@ function focusBoards(boards) {
 // A reply is linked to the versions whose files changed between the previous reply
 // and shortly after this one: that is what the agent just did. Links are kept per
 // reply in this browser, so a later edit does not move an old reply's link.
-const linkStorageKey = `easel:links:${key}`;
+const linkStorageKey = `liesel:links:${key}`;
 function replyLinks(entry, previousAt) {
   let stored;
   try {
@@ -2523,7 +2523,7 @@ function setDeviceMode(mode) {
 function postToArtboard(itemId, deviceId, message) {
   const record = state.artboards.get(artboardKey(itemId, deviceId));
   if (!record || !record.iframe.contentWindow) return;
-  record.iframe.contentWindow.postMessage({ channel: "easel", item: itemId, device: deviceId, ...message }, "*");
+  record.iframe.contentWindow.postMessage({ channel: "liesel", item: itemId, device: deviceId, ...message }, "*");
 }
 
 /** A note whose thread carries the agent's answer: its Done stamp. */
@@ -2786,7 +2786,7 @@ function sendItemNote(item, text, selector, tag = "image") {
       refreshBoard();
     })
     .catch(() => {
-      dockStatus.textContent = "Could not reach Easel. The image is still swapped.";
+      dockStatus.textContent = "Could not reach Liesel. The image is still swapped.";
     });
 }
 
@@ -3172,7 +3172,7 @@ function sendPromptsNow(noteIds, message, images, context = {}) {
         delete entry.note.prompt_id;
         postPins(entry.item.id, noteDevice(entry.note));
       }
-      dockStatus.textContent = "Could not reach Easel. Your notes are still here.";
+      dockStatus.textContent = "Could not reach Liesel. Your notes are still here.";
       renderChatPanel();
       return false;
     });
@@ -3383,7 +3383,7 @@ let laidOutPending = "";
 // an agent reply joins the threads it names (`--thread`) or else those of the notes it
 // settled, which carry its own time as `done_at`.
 const AGENT_NAME = String(bootstrap.agentName || "Agent");
-const readStorageKey = `easel:read:${key}`;
+const readStorageKey = `liesel:read:${key}`;
 /** @type {{ id: string, mode: "reply" | "edit", field: HTMLTextAreaElement } | null} */
 let threadComposer = null;
 let confirmingDelete = "";
@@ -3793,7 +3793,7 @@ function sendFollowup(threadId, followup, text) {
       return true;
     })
     .catch(() => {
-      dockStatus.textContent = "Could not reach Easel. Try again.";
+      dockStatus.textContent = "Could not reach Liesel. Try again.";
       return false;
     });
 }
@@ -4950,7 +4950,7 @@ function sendTune() {
     })
     .catch(() => {
       markTuneSent(false);
-      dockStatus.textContent = "Could not reach Easel. Your values are still here.";
+      dockStatus.textContent = "Could not reach Liesel. Your values are still here.";
     });
 }
 
@@ -5149,7 +5149,7 @@ function createTuneControl(item, control, onChange) {
     spring = { type: "spring", stiffness: 180, damping: 20, mass: 1, ...spring };
     const host = element("div", { class: "dialkit-root", "data-theme": "light" });
     wrapper.append(host);
-    const panelId = `easel-${item.id}-${control.id}`;
+    const panelId = `liesel-${item.id}-${control.id}`;
     const kit = dial.createDialKit(control.label, { motion: spring }, { id: panelId });
     dial.DialStore.updateSpringMode(panelId, "motion", "advanced");
     let mounted;
@@ -5382,7 +5382,7 @@ function renderVersions(item, spec) {
     frame.src = itemUrl(item, tuneDeviceId);
     frame.addEventListener("load", () => {
       frame.contentWindow?.postMessage(
-        { channel: "easel", item: item.id, type: "tune", values: tuneCss(item, spec, version.values) },
+        { channel: "liesel", item: item.id, type: "tune", values: tuneCss(item, spec, version.values) },
         "*",
       );
     });
@@ -5573,7 +5573,7 @@ function sendStylesheet(record, itemId, href) {
   const base = `/board/${encodeURIComponent(key)}/item/${encodeURIComponent(itemId)}/`;
   const reply = (text) =>
     record.iframe.contentWindow?.postMessage(
-      { channel: "easel", item: itemId, device: record.device.id, type: "stylesheet", href, text },
+      { channel: "liesel", item: itemId, device: record.device.id, type: "stylesheet", href, text },
       "*",
     );
   if (url.origin !== location.origin || !url.pathname.startsWith(base)) {
@@ -5598,7 +5598,7 @@ function sendStylesheet(record, itemId, href) {
 /** @param {MessageEvent} event */
 function onArtboardMessage(event) {
   const data = event.data;
-  if (!data || data.channel !== "easel") return;
+  if (!data || data.channel !== "liesel") return;
   const itemId = String(data.item || "");
   const deviceId = String(data.device || "");
   const record = state.artboards.get(artboardKey(itemId, deviceId));

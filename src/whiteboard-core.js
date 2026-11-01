@@ -184,7 +184,7 @@ export function restoreMermaidLabelLineBreaks(elements, { measure } = {}) {
   return fitContainersToBoundText(sized);
 }
 
-// Library icon nodes. A `%% easel-icon` directive turns a flowchart vertex
+// Library icon nodes. A `%% liesel-icon` directive turns a flowchart vertex
 // into a library icon above its label. The vertex keeps its Mermaid id,
 // bindings, and label so edit summaries still speak in Mermaid node ids; it
 // only grows to fit the icon and turns transparent.
@@ -201,7 +201,7 @@ const LIBRARY_ICON_PADDING = 8;
 const LIBRARY_ICON_LABEL_GAP = 6;
 const LIBRARY_ICON_ARROW_GAP = 4;
 const LIBRARY_ICON_LABEL_BOTTOM_PADDING = 5;
-const ICON_NODE_CUSTOM_DATA_KEY = "easelIconNode";
+const ICON_NODE_CUSTOM_DATA_KEY = "lieselIconNode";
 
 // Axis-aligned bounds as drawn. Excalidraw rotates an element about the
 // centre of its unrotated box (for linear elements, the box of its points).

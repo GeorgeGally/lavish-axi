@@ -39,9 +39,9 @@ function doc({ registry = null, marked = [], ids = {} } = {}) {
   if (loose.length > 0) element("html", {}, [element("body", {}, loose)]);
   return {
     querySelector: (selector) =>
-      selector === "script[data-easel-revisions]" && registry !== null ? { textContent: registry } : null,
+      selector === "script[data-liesel-revisions]" && registry !== null ? { textContent: registry } : null,
     querySelectorAll: (selector) => {
-      if (selector === "[data-easel-revision]") return marked;
+      if (selector === "[data-liesel-revision]") return marked;
       // `ids` says how many elements in this fake document carry each id, so a
       // test can express a document with duplicate ids. Unlisted ids that some
       // element actually carries are unique by default.
@@ -56,7 +56,7 @@ function doc({ registry = null, marked = [], ids = {} } = {}) {
 }
 
 function marked(id, { tag = "p", text = "" } = {}) {
-  return element(tag, { "data-easel-revision": id, textContent: text });
+  return element(tag, { "data-liesel-revision": id, textContent: text });
 }
 
 function registryJson(entries) {
@@ -314,7 +314,7 @@ test("a detached subtree yields no selector, because its chain names no document
 
 test("a mark whose selector cannot be rooted is dropped instead of revealed wrongly", () => {
   const limits = revisionLimits();
-  const target = element("p", { "data-easel-revision": "r1" });
+  const target = element("p", { "data-liesel-revision": "r1" });
   let node = target;
   for (let depth = 0; depth < limits.selectorDepth + 2; depth += 1) {
     node = element("div", {}, [node]);

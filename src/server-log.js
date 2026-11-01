@@ -9,7 +9,7 @@ export function formatServerLogLine(line, now = new Date()) {
   return `${now.toISOString()} ${line}`;
 }
 
-const STDIO_STAMPED = Symbol.for("easel.stdio-timestamped");
+const STDIO_STAMPED = Symbol.for("liesel.stdio-timestamped");
 
 export function serverStdioIsTimestamped() {
   return Boolean(globalThis[STDIO_STAMPED]);

@@ -4,8 +4,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-process.env.EASEL_HOST = "127.0.0.1";
-process.env.EASEL_LINK_HOST = "127.0.0.1";
+process.env.LIESEL_HOST = "127.0.0.1";
+process.env.LIESEL_LINK_HOST = "127.0.0.1";
 
 import { addItem, boardFilePath, placeItem, readBoard } from "../src/board.js";
 import { serve } from "../src/server.js";
@@ -13,7 +13,7 @@ import { serve } from "../src/server.js";
 const ITEM_HTML = `<!doctype html>
 <html><head><title>Variant A</title><link rel="stylesheet" href="item.css"></head>
 <body><h1>The whole fleet</h1><p class="lede">One place.</p>
-<script type="application/easel-tune">
+<script type="application/liesel-tune">
 [{"id":"radius","label":"Radius","type":"number","css":"--radius","min":0,"max":40,"step":1,"value":12,"unit":"px"},
  {"id":"accent","label":"Accent","type":"color","css":"--accent","value":"#111111"},
  {"id":"density","label":"Density","type":"select","css":"--density","options":["cozy","compact"],"value":"cozy"}]
@@ -21,7 +21,7 @@ const ITEM_HTML = `<!doctype html>
 </body></html>`;
 
 async function setup(t, { env = {} } = {}) {
-  const dir = await mkdtemp(path.join(tmpdir(), "easel-board-server-"));
+  const dir = await mkdtemp(path.join(tmpdir(), "liesel-board-server-"));
   const boardDirectory = path.join(dir, "hero");
   await mkdir(boardDirectory, { recursive: true });
   await writeFile(path.join(boardDirectory, "v1.html"), ITEM_HTML);
@@ -75,7 +75,7 @@ test("a board registers as a session and renders one page for its items", async 
   const page = await fetch(registered.url);
   assert.equal(page.status, 200);
   const html = await page.text();
-  assert.match(html, /Easel/);
+  assert.match(html, /Liesel/);
   assert.match(html, /\/board-client\.js/);
   assert.match(html, /\/dialkit\/browser\.global\.js/);
   const dialkit = await fetch(`${base}/dialkit/browser.global.js`);
@@ -122,7 +122,7 @@ test("advanced tune values persist and appear in the agent instruction", async (
   const { base, boardDirectory } = await setup(t);
   await writeFile(
     path.join(boardDirectory, "v1.html"),
-    `<script type="application/easel-tune">[
+    `<script type="application/liesel-tune">[
     {"id":"spring","type":"spring","css":"--spring","value":{"stiffness":180,"damping":20,"mass":1}},
     {"id":"curve","type":"easing","css":"--curve","value":"cubic-bezier(0, 0, 1, 1)"},
     {"id":"position","type":"pad","css":"--position","value":{"x":0,"y":0}},
@@ -156,15 +156,15 @@ test("advanced tune values persist and appear in the agent instruction", async (
   assert.match(item.tuneInstruction, /1s/);
 });
 
-test("a board item's explanation comes from its own easel metas", async (t) => {
+test("a board item's explanation comes from its own liesel metas", async (t) => {
   const { base, boardDirectory } = await setup(t);
   await writeFile(
     path.join(boardDirectory, "01-hero-today.html"),
-    '<!doctype html><html><head><meta name="easel-caption" content="Hero today: two identical buttons."></head><body></body></html>',
+    '<!doctype html><html><head><meta name="liesel-caption" content="Hero today: two identical buttons."></head><body></body></html>',
   );
   await writeFile(
     path.join(boardDirectory, "01-hero-proposed-b.html"),
-    '<!doctype html><html><head><meta name="easel-title" content="Hero buttons"><meta name="easel-explain" content="One button &amp; a link."></head><body></body></html>',
+    '<!doctype html><html><head><meta name="liesel-title" content="Hero buttons"><meta name="liesel-explain" content="One button &amp; a link."></head><body></body></html>',
   );
   const registered = await register(base, boardDirectory);
   const state = await fetch(`${base}/api/boards/${registered.key}`).then((response) => response.json());
@@ -375,11 +375,11 @@ test("a pin prompt keeps the item and pin it belongs to, and earns its receipts"
   assert.ok(done.chat.find((entry) => entry.prompt_id === "p-1").done_at, "the note reads Done after a reply");
 });
 
-test("the server home page is Easel and lists the boards it has open", async (t) => {
+test("the server home page is Liesel and lists the boards it has open", async (t) => {
   const { base, boardDirectory } = await setup(t);
   const empty = await (await fetch(`${base}/`, { headers: { accept: "text/html" } })).text();
-  assert.match(empty, /<title>Easel<\/title>/);
-  assert.match(empty, /<h1>Easel<\/h1>/);
+  assert.match(empty, /<title>Liesel<\/title>/);
+  assert.match(empty, /<h1>Liesel<\/h1>/);
   assert.doesNotMatch(empty, /lavish/i);
   assert.match(empty, /No boards are open/);
   assert.match(empty, /<form[^>]*id="newBoard"/);
@@ -502,7 +502,7 @@ async function notifyScript(scratch, out) {
   const script = path.join(scratch, "notify.sh");
   await writeFile(
     script,
-    `#!/bin/sh\nprintf '%s|%s|%s|%s|%s|%s|%s|%s|%s\\n' "$#" "$EASEL_BOARD_DIR" "$EASEL_BOARD_ID" "$EASEL_NOTE_COUNT" "$1" "$2" "$3" "$EASEL_BOARD" "$EASEL_SUBMISSION_ID" >> '${out}'\n`,
+    `#!/bin/sh\nprintf '%s|%s|%s|%s|%s|%s|%s|%s|%s\\n' "$#" "$LIESEL_BOARD_DIR" "$LIESEL_BOARD_ID" "$LIESEL_NOTE_COUNT" "$1" "$2" "$3" "$LIESEL_BOARD" "$LIESEL_SUBMISSION_ID" >> '${out}'\n`,
   );
   await chmod(script, 0o755);
   return script;
@@ -517,12 +517,12 @@ async function queueNote(base, key, text) {
   assert.equal(queued.status, 200);
 }
 
-test("a board note runs EASEL_NOTIFY_CMD debounced, with the board in argv and env, and leaves the feedback for poll", async (t) => {
-  const scratch = await mkdtemp(path.join(tmpdir(), "easel-notify-"));
+test("a board note runs LIESEL_NOTIFY_CMD debounced, with the board in argv and env, and leaves the feedback for poll", async (t) => {
+  const scratch = await mkdtemp(path.join(tmpdir(), "liesel-notify-"));
   t.after(() => rm(scratch, { recursive: true, force: true }));
   const out = path.join(scratch, "calls.txt");
   const script = await notifyScript(scratch, out);
-  const { base, boardDirectory } = await setup(t, { env: { EASEL_NOTIFY_CMD: script } });
+  const { base, boardDirectory } = await setup(t, { env: { LIESEL_NOTIFY_CMD: script } });
   const registered = await register(base, boardDirectory);
 
   // A burst: the first note runs at once, the rest collapse into one trailing run.
@@ -531,7 +531,7 @@ test("a board note runs EASEL_NOTIFY_CMD debounced, with the board in argv and e
   }
   const first = await readNotifyCalls(out, 1);
   assert.equal(first.length, 1, "the first note runs at once");
-  assert.equal(first[0][3], "1", "EASEL_NOTE_COUNT counts the notes waiting at run time");
+  assert.equal(first[0][3], "1", "LIESEL_NOTE_COUNT counts the notes waiting at run time");
   await new Promise((resolve) => setTimeout(resolve, 3500));
   const calls = await readNotifyCalls(out, 2);
   assert.equal(calls.length, 2, "the burst collapses into one trailing run");
@@ -562,11 +562,11 @@ test("a board note runs EASEL_NOTIFY_CMD debounced, with the board in argv and e
 });
 
 test("the notify hook stays off when unset and can come from the state directory's config.json", async (t) => {
-  const scratch = await mkdtemp(path.join(tmpdir(), "easel-notify-"));
+  const scratch = await mkdtemp(path.join(tmpdir(), "liesel-notify-"));
   t.after(() => rm(scratch, { recursive: true, force: true }));
   const out = path.join(scratch, "calls.txt");
   const script = await notifyScript(scratch, out);
-  const { base, boardDirectory, dir } = await setup(t, { env: { EASEL_NOTIFY_CMD: "" } });
+  const { base, boardDirectory, dir } = await setup(t, { env: { LIESEL_NOTIFY_CMD: "" } });
   const registered = await register(base, boardDirectory);
 
   await queueNote(base, registered.key, "Nobody is listening");
@@ -652,7 +652,7 @@ test("a board's conversation survives losing the session transcript", async (t) 
   });
   assert.equal(queued.status, 200);
 
-  const history = JSON.parse(await readFile(path.join(boardDirectory, ".easel-history.json"), "utf8"));
+  const history = JSON.parse(await readFile(path.join(boardDirectory, ".liesel-history.json"), "utf8"));
   assert.equal(history.chat.length, 1);
   assert.equal(history.chat[0].text, "Tighten the headline");
 
@@ -674,7 +674,7 @@ test("a changed item file leaves a build on its timeline", async (t) => {
   const registered = await register(base, boardDirectory);
   await writeFile(
     path.join(boardDirectory, "v1.html"),
-    ITEM_HTML.replace("<h1>The whole fleet</h1>", '<meta name="easel-build" content="Round 2"><h1>Second round</h1>'),
+    ITEM_HTML.replace("<h1>The whole fleet</h1>", '<meta name="liesel-build" content="Round 2"><h1>Second round</h1>'),
   );
   const page = await fetch(`${base}/api/boards/${registered.key}`).then((response) => response.json());
   const item = page.items.find((entry) => entry.id === "v1");
@@ -727,7 +727,7 @@ test("a saved build lays out beside its item: sized by the SDK, reading the item
 });
 
 test("a build's thumbnail is served once taken, and never without Chrome", async (t) => {
-  const { base, boardDirectory } = await setup(t, { env: { EASEL_CHROME: path.join(tmpdir(), "easel-no-chrome") } });
+  const { base, boardDirectory } = await setup(t, { env: { LIESEL_CHROME: path.join(tmpdir(), "liesel-no-chrome") } });
   const registered = await register(base, boardDirectory);
   const item = (await fetch(`${base}/api/boards/${registered.key}`).then((response) => response.json())).items.find(
     (entry) => entry.id === "v1",
@@ -751,7 +751,7 @@ test("a build's thumbnail is served once taken, and never without Chrome", async
 
   // A thumbnail on disk beside the build's snapshot is reported and served.
   const png = Buffer.from("89504e470d0a1a0a0000000d49484452", "hex");
-  await writeFile(path.join(boardDirectory, ".easel-builds", "v1", `${hash}.png`), png);
+  await writeFile(path.join(boardDirectory, ".liesel-builds", "v1", `${hash}.png`), png);
   const again = await fetch(`${base}/api/boards/${registered.key}/thumbs`, {
     method: "POST",
     headers: write(base),

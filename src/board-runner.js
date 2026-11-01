@@ -207,13 +207,13 @@ export function createRunnerConfigStore(stateRoot) {
 export function buildRunnerPrompt({ boardDir, boardName, items, prompts, cwd }) {
   const byId = new Map(items.map((item) => [item.id, item]));
   const lines = [
-    `You are the agent for an Easel board: a folder of HTML designs that the user is reviewing in a browser.`,
+    `You are the agent for a Liesel board: a folder of HTML designs that the user is reviewing in a browser.`,
     `Board: ${boardName}`,
     `Board folder: ${boardDir}`,
     ...(cwd !== boardDir ? [`Working folder: ${cwd}`] : []),
     "",
     "The user sent the notes below. Apply each one by editing the HTML file of the item it names, in place; the board reloads a file as soon as it is saved. board.json holds only positions, labels and notes, never an item's content, so do not edit it. Open any image path listed under a note to see what the user means.",
-    "Do not run `easel poll` or `easel reply`: Easel posts your final message to the user as your reply when you exit.",
+    "Do not run `liesel poll` or `liesel reply`: Liesel posts your final message to the user as your reply when you exit.",
     "When you are done, end with a short message to the user (one to three sentences) saying what you changed, or what you need from them.",
     "",
     "Notes:",
@@ -301,7 +301,7 @@ export function agentInvocation({ config, executable, prompt, boardDir, outputFi
       };
     case "custom":
       // The command line is the user's own; the prompt arrives on stdin and as a file
-      // path in EASEL_PROMPT_FILE, never spliced into the shell text.
+      // path in LIESEL_PROMPT_FILE, never spliced into the shell text.
       return platform === "win32"
         ? { file: String(config.command || ""), args: [], stdin: prompt, shell: true }
         : { file: "/bin/sh", args: ["-c", String(config.command || "")], stdin: prompt, shell: false };
@@ -341,7 +341,7 @@ export async function runAgent({
   spawnFn = crossSpawn,
   platform = process.platform,
 }) {
-  const scratch = await mkdtemp(path.join(os.tmpdir(), "easel-run-"));
+  const scratch = await mkdtemp(path.join(os.tmpdir(), "liesel-run-"));
   const promptFile = path.join(scratch, "prompt.txt");
   const outputFile = path.join(scratch, "last-message.txt");
   await writeFile(promptFile, prompt, { encoding: "utf8", mode: 0o600 });
@@ -351,8 +351,8 @@ export async function runAgent({
     ...env,
     ...(binDir ? { PATH: [binDir, env.PATH || ""].filter(Boolean).join(path.delimiter) } : {}),
     ...extraEnv,
-    EASEL_PROMPT_FILE: promptFile,
-    EASEL_RUNNER: "1",
+    LIESEL_PROMPT_FILE: promptFile,
+    LIESEL_RUNNER: "1",
   };
   let output = "";
   let stdout = "";

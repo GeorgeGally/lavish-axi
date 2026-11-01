@@ -51,11 +51,11 @@ jobs:
       - run: pnpm run build
         if: ${{ steps.release.outputs.release_created }}
         env:
-          EASEL_UMAMI_HOST: ${{ vars.EASEL_UMAMI_HOST }}
-          EASEL_UMAMI_WEBSITE_ID: ${{ vars.EASEL_UMAMI_WEBSITE_ID }}
+          LIESEL_UMAMI_HOST: ${{ vars.LIESEL_UMAMI_HOST }}
+          LIESEL_UMAMI_WEBSITE_ID: ${{ vars.LIESEL_UMAMI_WEBSITE_ID }}
 
       - run: npm publish --access public --provenance
         if: ${{ steps.release.outputs.release_created }}
         env:
-          EASEL_UMAMI_HOST: ${{ vars.EASEL_UMAMI_HOST }}
-          EASEL_UMAMI_WEBSITE_ID: ${{ vars.EASEL_UMAMI_WEBSITE_ID }}
+          LIESEL_UMAMI_HOST: ${{ vars.LIESEL_UMAMI_HOST }}
+          LIESEL_UMAMI_WEBSITE_ID: ${{ vars.LIESEL_UMAMI_WEBSITE_ID }}

@@ -4,8 +4,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-process.env.EASEL_HOST = "127.0.0.1";
-process.env.EASEL_LINK_HOST = "127.0.0.1";
+process.env.LIESEL_HOST = "127.0.0.1";
+process.env.LIESEL_LINK_HOST = "127.0.0.1";
 
 import { boardFilePath } from "../src/board.js";
 import { serve } from "../src/server.js";
@@ -33,7 +33,7 @@ process.stdin.on("end", async () => {
 `;
 
 async function setup(t, { delay = "" } = {}) {
-  const dir = await realpath(await mkdtemp(path.join(tmpdir(), "easel-runner-server-")));
+  const dir = await realpath(await mkdtemp(path.join(tmpdir(), "liesel-runner-server-")));
   const boardDirectory = path.join(dir, "hero");
   await mkdir(boardDirectory, { recursive: true });
   await writeFile(
@@ -49,7 +49,7 @@ async function setup(t, { delay = "" } = {}) {
     version: "9.9.9-test",
     detectTailscale: async () => null,
     idleTimeoutMs: null,
-    env: { ...process.env, FAKE_AGENT_LOG: agentLog, FAKE_AGENT_DELAY: delay, EASEL_NOTIFY_CMD: "" },
+    env: { ...process.env, FAKE_AGENT_LOG: agentLog, FAKE_AGENT_DELAY: delay, LIESEL_NOTIFY_CMD: "" },
     log: () => {},
   });
   const base = `http://127.0.0.1:${server.port}`;

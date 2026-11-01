@@ -7,7 +7,7 @@ minimumReleaseAge: 10080
 minimumReleaseAgeStrict: true
 minimumReleaseAgeExclude:
   - axi-sdk-js
-  - easel
+  - liesel
 onlyBuiltDependencies:
   - esbuild
 allowBuilds:

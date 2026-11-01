@@ -9,12 +9,12 @@ import { PassThrough } from "node:stream";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { createEaselMcpTools, createMcpHandler, runMcpStdio } from "../src/mcp.js";
+import { createLieselMcpTools, createMcpHandler, runMcpStdio } from "../src/mcp.js";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 function fakeTools(calls = []) {
-  return createEaselMcpTools({
+  return createLieselMcpTools({
     openBoard: async (args) => (calls.push(["open", args]), { board: { url: "http://x/board/k" } }),
     boardStatus: async (args) => (calls.push(["status", args]), { board: {} }),
     poll: async (args) => (calls.push(["poll", args]), { session: { status: "waiting" } }),
@@ -28,10 +28,10 @@ function fakeTools(calls = []) {
 
 test("the MCP handler answers initialize, ping, tools/list and tools/call", async () => {
   const calls = [];
-  const handle = createMcpHandler({ tools: fakeTools(calls), name: "easel", version: "1.2.3", instructions: "hi" });
+  const handle = createMcpHandler({ tools: fakeTools(calls), name: "liesel", version: "1.2.3", instructions: "hi" });
   const init = await handle({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-03-26" } });
   assert.equal(init.result.protocolVersion, "2025-03-26");
-  assert.deepEqual(init.result.serverInfo, { name: "easel", version: "1.2.3" });
+  assert.deepEqual(init.result.serverInfo, { name: "liesel", version: "1.2.3" });
   assert.ok(init.result.capabilities.tools);
   const unknownVersion = await handle({
     jsonrpc: "2.0",
@@ -45,7 +45,7 @@ test("the MCP handler answers initialize, ping, tools/list and tools/call", asyn
   const listed = await handle({ jsonrpc: "2.0", id: 4, method: "tools/list" });
   assert.deepEqual(
     listed.result.tools.map((tool) => tool.name),
-    ["easel_board_open", "easel_board_status", "easel_poll", "easel_reply"],
+    ["liesel_board_open", "liesel_board_status", "liesel_poll", "liesel_reply"],
   );
   for (const tool of listed.result.tools) assert.equal(tool.inputSchema.type, "object");
 
@@ -53,7 +53,7 @@ test("the MCP handler answers initialize, ping, tools/list and tools/call", asyn
     jsonrpc: "2.0",
     id: 5,
     method: "tools/call",
-    params: { name: "easel_poll", arguments: { board: "/b", timeout_seconds: 5, reply: "  " } },
+    params: { name: "liesel_poll", arguments: { board: "/b", timeout_seconds: 5, reply: "  " } },
   });
   assert.deepEqual(JSON.parse(polled.result.content[0].text), { session: { status: "waiting" } });
   assert.deepEqual(calls.at(-1), ["poll", { board: "/b", timeout_seconds: 5 }], "a blank reply is not sent");
@@ -62,7 +62,7 @@ test("the MCP handler answers initialize, ping, tools/list and tools/call", asyn
     jsonrpc: "2.0",
     id: 6,
     method: "tools/call",
-    params: { name: "easel_reply", arguments: { board: "/b", message: "" } },
+    params: { name: "liesel_reply", arguments: { board: "/b", message: "" } },
   });
   assert.equal(failed.result.isError, true);
   assert.equal(JSON.parse(failed.result.content[0].text).code, "VALIDATION_ERROR");
@@ -100,26 +100,26 @@ async function freePort() {
   return address.port;
 }
 
-test("easel mcp drives a real board: open, poll a note, reply", { timeout: 60_000 }, async (t) => {
-  const temp = await realpath(await mkdtemp(path.join(tmpdir(), "easel-mcp-")));
+test("liesel mcp drives a real board: open, poll a note, reply", { timeout: 60_000 }, async (t) => {
+  const temp = await realpath(await mkdtemp(path.join(tmpdir(), "liesel-mcp-")));
   const board = path.join(temp, "board");
   await mkdir(board, { recursive: true });
   await writeFile(path.join(board, "01-hero.html"), "<!doctype html><html><body><h1>Hi</h1></body></html>");
   const port = await freePort();
   const env = {
     ...process.env,
-    EASEL_PORT: String(port),
-    EASEL_STATE_DIR: path.join(temp, "state"),
-    EASEL_NO_OPEN: "1",
-    EASEL_TELEMETRY: "0",
-    EASEL_HOST: "127.0.0.1",
-    EASEL_LINK_HOST: "127.0.0.1",
-    EASEL_NOTIFY_CMD: "",
+    LIESEL_PORT: String(port),
+    LIESEL_STATE_DIR: path.join(temp, "state"),
+    LIESEL_NO_OPEN: "1",
+    LIESEL_TELEMETRY: "0",
+    LIESEL_HOST: "127.0.0.1",
+    LIESEL_LINK_HOST: "127.0.0.1",
+    LIESEL_NOTIFY_CMD: "",
   };
-  const child = spawn(process.execPath, ["bin/easel.js", "mcp"], { cwd: repoRoot, env, stdio: "pipe" });
+  const child = spawn(process.execPath, ["bin/liesel.js", "mcp"], { cwd: repoRoot, env, stdio: "pipe" });
   t.after(async () => {
     child.kill();
-    spawnSync(process.execPath, ["bin/easel.js", "stop"], { cwd: repoRoot, env, timeout: 15_000 });
+    spawnSync(process.execPath, ["bin/liesel.js", "stop"], { cwd: repoRoot, env, timeout: 15_000 });
     await rm(temp, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   });
   /** @type {Map<number, (value: any) => void>} */
@@ -151,23 +151,23 @@ test("easel mcp drives a real board: open, poll a note, reply", { timeout: 60_00
   };
 
   const init = await rpc("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "t" } });
-  assert.equal(init.result.serverInfo.name, "easel");
+  assert.equal(init.result.serverInfo.name, "liesel");
   child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" })}\n`);
 
-  const opened = await call("easel_board_open", { board });
+  const opened = await call("liesel_board_open", { board });
   assert.match(opened.board.url, /\/board\/[0-9a-f]+$/);
   const key = opened.board.url.split("/").pop();
-  const status = await call("easel_board_status", { board });
+  const status = await call("liesel_board_status", { board });
   assert.deepEqual(
     status.board.items.map((item) => item.file),
     ["01-hero.html"],
   );
 
-  const waitingPoll = await call("easel_poll", { board, timeout_seconds: 1 });
+  const waitingPoll = await call("liesel_poll", { board, timeout_seconds: 1 });
   assert.equal(waitingPoll.session.status, "waiting");
 
   const base = `http://127.0.0.1:${port}`;
-  const poll = call("easel_poll", { board, timeout_seconds: 20 });
+  const poll = call("liesel_poll", { board, timeout_seconds: 20 });
   await new Promise((resolve) => setTimeout(resolve, 300));
   const queued = await fetch(`${base}/api/${key}/prompts`, {
     method: "POST",
@@ -183,9 +183,9 @@ test("easel mcp drives a real board: open, poll a note, reply", { timeout: 60_00
   const feedback = await poll;
   assert.equal(feedback.session.status, "feedback");
   assert.equal(feedback.prompts[0].prompt, "Bigger headline");
-  assert.match(feedback.next_step, /easel_reply/);
+  assert.match(feedback.next_step, /liesel_reply/);
 
-  const replied = await call("easel_reply", { board, message: "Made it bigger." });
+  const replied = await call("liesel_reply", { board, message: "Made it bigger." });
   assert.equal(replied.reply.status, "sent");
   const after = await fetch(`${base}/api/boards/${key}`).then((response) => response.json());
   assert.equal(after.chat.at(-1).text, "Made it bigger.");

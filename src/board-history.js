@@ -8,7 +8,7 @@ import path from "node:path";
  * different machine. So the transcript is mirrored into a sidecar beside board.json
  * and merged back in when the board opens.
  */
-export const BOARD_HISTORY_FILE = ".easel-history.json";
+export const BOARD_HISTORY_FILE = ".liesel-history.json";
 const MAX_ENTRIES = 2000;
 const MAX_TEXT = 8000;
 

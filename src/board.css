@@ -417,7 +417,7 @@ body[data-pan="true"] .shield {
   color: var(--ink);
 }
 
-/* What the latest edit changed, from the file's easel-changed meta. */
+/* What the latest edit changed, from the file's liesel-changed meta. */
 .explain-changed {
   margin: 0.7em 0 0;
   color: var(--ink-2);

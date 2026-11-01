@@ -17,7 +17,7 @@ const CAPTURE_TIMEOUT_MS = 20000;
 
 /** @param {NodeJS.ProcessEnv} [env] */
 export function findChrome(env = process.env) {
-  const configured = String(env.EASEL_CHROME || "").trim();
+  const configured = String(env.LIESEL_CHROME || "").trim();
   if (configured) return existsSync(configured) ? configured : "";
   const candidates =
     process.platform === "darwin"
@@ -78,8 +78,8 @@ iframe { position: absolute; left: ${-box.x}px; top: ${-box.y}px; width: ${devic
 addEventListener("message", (event) => {
   const frame = document.querySelector("iframe");
   const data = event.data;
-  if (!frame || event.source !== frame.contentWindow || !data || data.channel !== "easel" || data.type !== "stylesheet") return;
-  const reply = (text) => frame.contentWindow.postMessage({ channel: "easel", type: "stylesheet", href: data.href, text }, "*");
+  if (!frame || event.source !== frame.contentWindow || !data || data.channel !== "liesel" || data.type !== "stylesheet") return;
+  const reply = (text) => frame.contentWindow.postMessage({ channel: "liesel", type: "stylesheet", href: data.href, text }, "*");
   let url;
   try { url = new URL(String(data.href || ""), location.href); } catch { reply(null); return; }
   if (url.origin !== location.origin || !url.pathname.startsWith(${itemBase})) { reply(null); return; }
@@ -96,7 +96,7 @@ addEventListener("message", (event) => {
  * @returns {Promise<Buffer | null>}
  */
 export async function captureCrop({ chrome, url, width, height, timeoutMs = CAPTURE_TIMEOUT_MS }) {
-  const dir = await mkdtemp(path.join(os.tmpdir(), "easel-crop-"));
+  const dir = await mkdtemp(path.join(os.tmpdir(), "liesel-crop-"));
   const out = path.join(dir, "crop.png");
   try {
     const ok = await new Promise((resolve) => {

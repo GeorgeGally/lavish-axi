@@ -23,9 +23,9 @@ This repo still owns its `on:`, `paths-ignore`, `concurrency`, `permissions`, jo
 Workflow requires `no-mistakes` v1.46.0 or newer.
 Earlier versions can route pushes to a fork, but they do not write the pipeline attestation required by this repository's PR gate.
 
-1. Fork the repo, then clone the parent repo or set your local `origin` back to the parent repo (`git@github.com:GeorgeGally/lavish-axi.git`).
+1. Fork the repo, then clone the parent repo or set your local `origin` back to the parent repo (`git@github.com:GeorgeGally/liesel.git`).
 2. Create a branch and make your changes.
-3. Initialize or refresh the gate with your fork as the push target: `no-mistakes init --fork-url git@github.com:<you>/easel.git`.
+3. Initialize or refresh the gate with your fork as the push target: `no-mistakes init --fork-url git@github.com:<you>/liesel.git`.
 4. Commit your changes.
 5. Push through the gate instead of pushing to `origin`:
 
@@ -44,7 +44,7 @@ See the [no-mistakes quick start](https://kunchenguid.github.io/no-mistakes/star
 - Run `pnpm run check` before pushing.
 - Do not reformat repo-provided `.agents/` skill content; `.prettierignore` excludes it intentionally.
 - Do not hand-edit `CHANGELOG.md` or `.release-please-manifest.json`.
-- User-facing telemetry docs should stay minimal: anonymous usage telemetry, no sensitive content, and `EASEL_TELEMETRY=0` opt-out.
+- User-facing telemetry docs should stay minimal: anonymous usage telemetry, no sensitive content, and `LIESEL_TELEMETRY=0` opt-out.
 
 ## Questions
 

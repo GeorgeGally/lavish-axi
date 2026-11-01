@@ -12,8 +12,8 @@ import WebSocket from "ws";
 
 import { AxiError } from "axi-sdk-js";
 
-process.env.EASEL_HOST = "127.0.0.1";
-process.env.EASEL_LINK_HOST = "127.0.0.1";
+process.env.LIESEL_HOST = "127.0.0.1";
+process.env.LIESEL_LINK_HOST = "127.0.0.1";
 
 import {
   collapseHomeDirectory,
@@ -87,7 +87,7 @@ async function waitForPollListening(base, key, timeoutMs = 10_000) {
 function setupHooksEnv(homeDir, stateDir) {
   // eslint-disable-next-line no-unused-vars
   const { COPILOT_HOME, ...env } = process.env;
-  return { ...env, HOME: homeDir, EASEL_STATE_DIR: stateDir };
+  return { ...env, HOME: homeDir, LIESEL_STATE_DIR: stateDir };
 }
 
 function assertObservablePollWakePath(text) {
@@ -106,16 +106,16 @@ function assertObservablePollWakePath(text) {
   assert.doesNotMatch(text, /foreground command may run.*run the poll as a background task/i);
 }
 
-test("home help names EASEL_ALLOWED_HOSTS for the 403 forbidden host case", () => {
-  const output = createHomeOutput({ bin: "easel", sessions: [] });
-  const hostHelp = output.help.find((item) => item.includes("EASEL_ALLOWED_HOSTS"));
+test("home help names LIESEL_ALLOWED_HOSTS for the 403 forbidden host case", () => {
+  const output = createHomeOutput({ bin: "liesel", sessions: [] });
+  const hostHelp = output.help.find((item) => item.includes("LIESEL_ALLOWED_HOSTS"));
 
   assert.ok(hostHelp, "home help names the allowlist variable");
   assert.match(hostHelp, /403 `forbidden host`/);
   assert.match(hostHelp, /reverse-proxy/);
   assert.match(hostHelp, /README's Allowed hosts section/);
   assert.doesNotMatch(hostHelp, /whitespace-separated/);
-  assert.match(hostHelp, /`easel stop`/);
+  assert.match(hostHelp, /`liesel stop`/);
 });
 
 test("CLI version tracks package.json so release-please bumps reach the published binary", async () => {
@@ -123,13 +123,13 @@ test("CLI version tracks package.json so release-please bumps reach the publishe
   assert.equal(VERSION, packageJson.version);
 });
 
-test("home output teaches agents when and how to use Easel", () => {
-  const output = createHomeOutput({ bin: `${os.homedir()}/.local/bin/easel`, sessions: [] });
+test("home output teaches agents when and how to use Liesel", () => {
+  const output = createHomeOutput({ bin: `${os.homedir()}/.local/bin/liesel`, sessions: [] });
 
-  assert.equal(output.bin, "~/.local/bin/easel");
-  assert.match(output.description, /Easel/);
+  assert.equal(output.bin, "~/.local/bin/liesel");
+  assert.match(output.description, /Liesel/);
   assert.match(output.description, /complex response/);
-  assert.match(output.description, /consider using Easel/);
+  assert.match(output.description, /consider using Liesel/);
   assert.match(output.description, /First generate an interactive HTML artifact/);
   assert.deepEqual(output.sessions, []);
   assert.equal("use_cases" in output, false);
@@ -154,15 +154,15 @@ test("home output teaches agents when and how to use Easel", () => {
     output.playbooks.find((item) => item.id === "input")?.use_when,
     "Must be used when the agent needs to collect user input on decisions, choices, preferences, triage, scope, or other structured feedback from within the artifact",
   );
-  assert.ok(output.help.some((item) => item.includes("easel <html-file>")));
-  assert.ok(output.help.some((item) => item.includes("`.easel/`")));
-  assert.ok(output.help.some((item) => item.includes("easel playbook <playbook_id>")));
+  assert.ok(output.help.some((item) => item.includes("liesel <html-file>")));
+  assert.ok(output.help.some((item) => item.includes("`.liesel/`")));
+  assert.ok(output.help.some((item) => item.includes("liesel playbook <playbook_id>")));
   assert.ok(output.help.some((item) => item.includes("combines several playbooks")));
   assert.ok(output.help.some((item) => item.includes("MUST open each matching playbook")));
   assert.ok(output.help.some((item) => item.includes("reference other filesystem assets")));
   assert.ok(output.help.some((item) => item.includes("same directory as the HTML file")));
   assert.ok(output.help.includes(DESIGN_SYSTEM_HINT), "home help carries the single-sourced design rule verbatim");
-  assert.ok(!output.help.some((item) => item.includes('<meta name="easel-design" content="off">')));
+  assert.ok(!output.help.some((item) => item.includes('<meta name="liesel-design" content="off">')));
   assert.ok(!output.help.some((item) => item.includes("Known IDs")));
   assert.ok(output.help.some((item) => item.includes("technical plan")));
 });
@@ -186,7 +186,7 @@ test("the design-priority rule is single-sourced and keeps its three-step semant
   assert.ok(DESIGN_SYSTEM_HINT.includes(DESIGN_PRIORITY_RULE), "the home hint embeds the rule");
   assert.match(DESIGN_SYSTEM_HINT, /does not auto-inject/);
   assert.match(DESIGN_SYSTEM_HINT, /portable/);
-  assert.match(DESIGN_SYSTEM_HINT, /easel design/);
+  assert.match(DESIGN_SYSTEM_HINT, /liesel design/);
   assert.match(DESIGN_SYSTEM_HINT, /state which of the three design sources/);
 });
 
@@ -202,7 +202,7 @@ test("design output is the sole emitted concise explicit-background guidance", (
   assert.ok(!diagramSurface.includes(instruction));
   assert.match(diagramSurface, /render-verify/i);
   const otherAgentSurfaces = [
-    JSON.stringify(createHomeOutput({ bin: "easel", sessions: [] })),
+    JSON.stringify(createHomeOutput({ bin: "liesel", sessions: [] })),
     getCommandHelp("design"),
     createSkillMarkdown(),
     ...createPlaybookOutput([])
@@ -227,7 +227,7 @@ test("open output flags an artifact that never paints its own page surface", () 
   assert.equal(warned.self_paint_warning, SELF_PAINT_WARNING);
   assert.match(warned.next_step, /^First fix the unpainted page surface flagged in self_paint_warning/);
   assert.match(warned.next_step, /live-reloads the artifact automatically/);
-  assert.match(warned.next_step, /easel poll \/tmp\/artifact\.html/, "the poll contract stays intact");
+  assert.match(warned.next_step, /liesel poll \/tmp\/artifact\.html/, "the poll contract stays intact");
 
   const clean = createOpenOutput({
     file: "/tmp/artifact.html",
@@ -258,7 +258,7 @@ test("export and share outputs flag an unpainted page surface before it reaches 
   });
   assert.equal(exported.self_paint_warning, SELF_PAINT_WARNING);
   assert.match(exported.next_step, /^Fix the unpainted page surface flagged in self_paint_warning/);
-  assert.match(exported.next_step, /no Easel server/, "the export contract stays intact");
+  assert.match(exported.next_step, /no Liesel server/, "the export contract stays intact");
 
   const shared = createShareOutput({
     source: "/tmp/report.html",
@@ -282,8 +282,8 @@ test("export and share outputs flag an unpainted page surface before it reaches 
 });
 
 test("home output warns agents that poll needs an observable wake path", () => {
-  const output = createHomeOutput({ bin: "easel", sessions: [] });
-  const pollHelp = output.help.find((item) => item.includes("easel poll <html-file>"));
+  const output = createHomeOutput({ bin: "liesel", sessions: [] });
+  const pollHelp = output.help.find((item) => item.includes("liesel poll <html-file>"));
 
   assert.ok(pollHelp, "home help mentions the poll command");
   assert.match(pollHelp, /long-poll/);
@@ -301,15 +301,15 @@ test("home output warns agents that poll needs an observable wake path", () => {
 test("ambient and per-artifact output never nags about installing the plugin", () => {
   // Home output loads on every session and open/poll run constantly; setup belongs in the
   // setup surfaces only, so an install prompt here would be pure recurring token cost.
-  const home = createHomeOutput({ bin: "easel", sessions: [] });
+  const home = createHomeOutput({ bin: "liesel", sessions: [] });
 
   assert.doesNotMatch(JSON.stringify(home), /setup plugin/);
   assert.doesNotMatch(JSON.stringify(home), /setup hooks/);
 });
 
 test("home output tailors poll guidance when invoked under Codex", () => {
-  const output = createHomeOutput({ bin: "easel", sessions: [], agent: "codex" });
-  const pollHelp = output.help.find((item) => item.includes("easel poll <html-file>"));
+  const output = createHomeOutput({ bin: "liesel", sessions: [], agent: "codex" });
+  const pollHelp = output.help.find((item) => item.includes("liesel poll <html-file>"));
 
   assertObservablePollWakePath(pollHelp);
   assert.match(pollHelp, /Codex detected/);
@@ -317,8 +317,8 @@ test("home output tailors poll guidance when invoked under Codex", () => {
 });
 
 test("home output keeps static skill poll guidance safe and agent-neutral", () => {
-  const output = createHomeOutput({ bin: "easel", sessions: [], agent: "static" });
-  const pollHelp = output.help.find((item) => item.includes("easel poll <html-file>"));
+  const output = createHomeOutput({ bin: "liesel", sessions: [], agent: "static" });
+  const pollHelp = output.help.find((item) => item.includes("liesel poll <html-file>"));
 
   assertObservablePollWakePath(pollHelp);
   assert.doesNotMatch(pollHelp, /keep the poll attached to the active turn/i);
@@ -335,26 +335,30 @@ test("invoking agent detection recognizes Codex runtime markers only", () => {
 });
 
 test("top-level help renders static home output without dynamic sessions", async () => {
-  const stateDir = await mkdtemp(`${os.tmpdir()}/easel-help-test-`);
+  const stateDir = await mkdtemp(`${os.tmpdir()}/liesel-help-test-`);
   try {
-    const result = spawnSync(process.execPath, [fileURLToPath(new URL("../bin/easel.js", import.meta.url)), "--help"], {
-      cwd: fileURLToPath(new URL("..", import.meta.url)),
-      encoding: "utf8",
-      env: { ...process.env, EASEL_STATE_DIR: stateDir },
-    });
+    const result = spawnSync(
+      process.execPath,
+      [fileURLToPath(new URL("../bin/liesel.js", import.meta.url)), "--help"],
+      {
+        cwd: fileURLToPath(new URL("..", import.meta.url)),
+        encoding: "utf8",
+        env: { ...process.env, LIESEL_STATE_DIR: stateDir },
+      },
+    );
 
     assert.equal(result.status, 0, result.stderr || result.stdout);
     assert.match(result.stdout, /playbooks\[8\]/);
-    assert.match(result.stdout, /easel playbook <playbook_id>/);
+    assert.match(result.stdout, /liesel playbook <playbook_id>/);
     assert.match(result.stdout, /reference other filesystem assets/);
     assert.match(result.stdout, /same directory as the HTML file/);
     assert.match(result.stdout, /Tailwind CSS browser runtime v4/);
-    assert.match(result.stdout, /easel design/);
+    assert.match(result.stdout, /liesel design/);
     assert.match(result.stdout, /strict priority order/);
     assert.match(result.stdout, /never kill it/);
     assert.match(result.stdout, /feedback remains queued until delivery/);
     assert.doesNotMatch(result.stdout, /above 10 minutes/);
-    assert.doesNotMatch(result.stdout, /easel-design/);
+    assert.doesNotMatch(result.stdout, /liesel-design/);
     assert.doesNotMatch(result.stdout, /sessions\[/);
     assert.doesNotMatch(result.stdout, /Known IDs/);
   } finally {
@@ -451,7 +455,7 @@ test("playbook index output lists known playbooks with concise descriptions", ()
     "Must be used when the agent needs to collect user input on decisions, choices, preferences, triage, scope, or other structured feedback from within the artifact",
   );
   assert.ok(output.playbooks.every((playbook) => playbook.use_when.length > 20));
-  assert.ok(output.help.some((item) => item.includes("easel playbook <playbook_id>")));
+  assert.ok(output.help.some((item) => item.includes("liesel playbook <playbook_id>")));
   assert.ok(output.help.some((item) => item.includes("combines several playbooks")));
   assert.ok(output.help.some((item) => item.includes("MUST open each matching playbook")));
 });
@@ -497,7 +501,7 @@ test("diagram playbook owns assume-nothing and one-concept-per-diagram guidance"
 
   const playbookIds = createPlaybookOutput([]).playbooks.map((playbook) => playbook.id);
   const otherSurfaces = [
-    JSON.stringify(createHomeOutput({ bin: "easel", sessions: [] })),
+    JSON.stringify(createHomeOutput({ bin: "liesel", sessions: [] })),
     JSON.stringify(createDesignOutput()),
     createSkillMarkdown(),
     ...playbookIds.filter((id) => id !== "diagram").map((id) => JSON.stringify(createPlaybookOutput([id]).playbook)),
@@ -508,15 +512,15 @@ test("diagram playbook owns assume-nothing and one-concept-per-diagram guidance"
     assert.doesNotMatch(surface, /presume/i);
   }
 
-  const stateDir = await mkdtemp(`${os.tmpdir()}/easel-playbook-diagram-`);
+  const stateDir = await mkdtemp(`${os.tmpdir()}/liesel-playbook-diagram-`);
   try {
     const result = spawnSync(
       process.execPath,
-      [fileURLToPath(new URL("../bin/easel.js", import.meta.url)), "playbook", "diagram"],
+      [fileURLToPath(new URL("../bin/liesel.js", import.meta.url)), "playbook", "diagram"],
       {
         cwd: fileURLToPath(new URL("..", import.meta.url)),
         encoding: "utf8",
-        env: { ...process.env, EASEL_STATE_DIR: stateDir },
+        env: { ...process.env, LIESEL_STATE_DIR: stateDir },
       },
     );
     assert.equal(result.status, 0, result.stderr || result.stdout);
@@ -532,7 +536,7 @@ test("diagram playbook routes whiteboard Mermaid through the theme-aware design 
 
   assert.ok(
     output.playbook.design_rules.some(
-      (item) => /mermaid/i.test(item) && /theme-aware/i.test(item) && /`easel design`/.test(item),
+      (item) => /mermaid/i.test(item) && /theme-aware/i.test(item) && /`liesel design`/.test(item),
     ),
     "the whiteboard opt-in must still theme Mermaid through the design snippet instead of hardcoding one theme",
   );
@@ -768,7 +772,7 @@ test("Mermaid after evidence embeds the shipped theme-aware snippet", async () =
   );
 });
 
-test("playbook detail output returns focused Easel-native guidance", () => {
+test("playbook detail output returns focused Liesel-native guidance", () => {
   const output = createPlaybookOutput(["input"]);
 
   assert.equal(output.playbook.id, "input");
@@ -779,20 +783,20 @@ test("playbook detail output returns focused Easel-native guidance", () => {
   assert.ok(output.playbook.design_rules.some((item) => item.includes("queuePrompt")));
   assert.ok(output.playbook.design_rules.some((item) => item.includes("per-question form submit")));
   assert.ok(output.playbook.design_rules.some((item) => item.includes("radio change handlers")));
-  assert.ok(output.playbook.design_rules.some((item) => item.includes("data-easel-action")));
-  assert.ok(output.playbook.design_rules.some((item) => item.includes("data-easel-question")));
+  assert.ok(output.playbook.design_rules.some((item) => item.includes("data-liesel-action")));
+  assert.ok(output.playbook.design_rules.some((item) => item.includes("data-liesel-question")));
   assert.ok(output.playbook.design_rules.some((item) => item.includes("queueKey")));
-  assert.ok(output.playbook.easel_notes.some((item) => item.includes("window.easel.queuePrompt")));
-  assert.ok(output.playbook.easel_notes.some((item) => item.includes("onsubmit")));
+  assert.ok(output.playbook.liesel_notes.some((item) => item.includes("window.liesel.queuePrompt")));
+  assert.ok(output.playbook.liesel_notes.some((item) => item.includes("onsubmit")));
   assert.ok(output.playbook.pitfalls.some((item) => item.includes("unclear")));
   assert.ok(output.playbook.pitfalls.some((item) => item.includes("radio change")));
-  assert.ok(output.playbook.easel_notes.some((item) => item.includes("Easel")));
+  assert.ok(output.playbook.liesel_notes.some((item) => item.includes("Liesel")));
 });
 
 test("input playbook defines an opt-in tracked batch handoff", () => {
   const output = createPlaybookOutput(["input"]);
   const guidance = JSON.stringify(output.playbook);
-  const example = output.playbook.easel_notes.find((item) => /tag: ['"]tracked-batch/.test(item));
+  const example = output.playbook.liesel_notes.find((item) => /tag: ['"]tracked-batch/.test(item));
 
   assert.match(guidance, /multi-item/);
   assert.match(guidance, /stable, visible ID/);
@@ -806,7 +810,7 @@ test("input playbook defines an opt-in tracked batch handoff", () => {
   assert.match(example, /<form/);
   assert.match(example, /type="checkbox"/);
   assert.match(example, /onsubmit=/);
-  assert.equal(example.match(/window\.easel\.queuePrompt/g)?.length, 1);
+  assert.equal(example.match(/window\.liesel\.queuePrompt/g)?.length, 1);
   assert.match(example, /items: selected/);
   assert.match(example, /id:/);
   assert.match(example, /label:/);
@@ -817,7 +821,7 @@ test("table playbook routes multi-row actions to the input tracked-batch pattern
   const output = createPlaybookOutput(["table"]);
 
   assert.ok(
-    output.playbook.easel_notes.some(
+    output.playbook.liesel_notes.some(
       (item) => item.includes("multiple rows") && item.includes("input") && item.includes("tracked batch"),
     ),
   );
@@ -851,7 +855,7 @@ test("unknown playbook ids produce an actionable validation error", () => {
       assert.ok(error instanceof AxiError);
       assert.equal(error.code, "VALIDATION_ERROR");
       assert.match(error.message, /Unknown playbook/);
-      assert.ok(error.suggestions.some((item) => item.includes("easel playbook")));
+      assert.ok(error.suggestions.some((item) => item.includes("liesel playbook")));
       return true;
     },
   );
@@ -859,12 +863,12 @@ test("unknown playbook ids produce an actionable validation error", () => {
 
 test("home directory collapse tolerates Windows mixed separators", () => {
   assert.equal(
-    collapseHomeDirectory("C:\\Users\\runneradmin/.local/bin/easel", "C:\\Users\\runneradmin"),
-    "~/.local/bin/easel",
+    collapseHomeDirectory("C:\\Users\\runneradmin/.local/bin/liesel", "C:\\Users\\runneradmin"),
+    "~/.local/bin/liesel",
   );
   assert.equal(
-    collapseHomeDirectory("C:\\Users\\runneradmin\\.local\\bin\\easel", "C:\\Users\\runneradmin"),
-    "~/.local/bin/easel",
+    collapseHomeDirectory("C:\\Users\\runneradmin\\.local\\bin\\liesel", "C:\\Users\\runneradmin"),
+    "~/.local/bin/liesel",
   );
 });
 
@@ -884,9 +888,9 @@ test("open output keeps the user URL in session data and next_step focused on po
   assert.doesNotMatch(output.next_step, /Tell the user (?:to open|to visit)/i);
   assert.doesNotMatch(output.next_step, /http:\/\/localhost:4387\/session\/abc123/);
   assert.match(output.next_step, /Do not respond to the user just yet\. Now you must run/);
-  assert.match(output.next_step, /easel poll \/tmp\/artifact\.html/);
+  assert.match(output.next_step, /liesel poll \/tmp\/artifact\.html/);
   assert.match(output.next_step, /keep waiting for more feedback/);
-  assert.match(output.next_step, /easel reply \/tmp\/artifact\.html --agent-reply/);
+  assert.match(output.next_step, /liesel reply \/tmp\/artifact\.html --agent-reply/);
   assert.match(output.next_step, /without starting another long-poll/);
   assert.match(output.next_step, /Layout issues inbox/);
   assert.doesNotMatch(output.next_step, /layout_warnings/);
@@ -920,10 +924,10 @@ test("a user-ended open refuses with a status agents can branch on, not a URL to
 
   assert.equal(output.session.file, "/tmp/artifact.html");
   assert.equal(output.session.status, "user-ended");
-  assert.match(output.next_step, /user explicitly ended this Easel session from the browser/);
+  assert.match(output.next_step, /user explicitly ended this Liesel session from the browser/);
   assert.match(output.next_step, /did not reopen it/);
   assert.match(output.next_step, /Do not reopen unless the user asks for further review/);
-  assert.match(output.next_step, /easel \/tmp\/artifact\.html --reopen/);
+  assert.match(output.next_step, /liesel \/tmp\/artifact\.html --reopen/);
 });
 
 test("export output reports the written file and reassures it needs no server", () => {
@@ -938,7 +942,7 @@ test("export output reports the written file and reassures it needs no server", 
   assert.equal(output.export.output, "/tmp/report.export.html");
   assert.equal(output.export.unresolved_local_assets, 0);
   assert.equal(output.export.bytes, Buffer.byteLength("<html></html>"));
-  assert.match(output.next_step, /no Easel server/);
+  assert.match(output.next_step, /no Liesel server/);
   assert.match(output.next_step, /remote CDN\/font references are left as links/);
 });
 
@@ -990,7 +994,7 @@ test("export output separates unresolved assets from notices", () => {
 });
 
 test("export command writes a portable HTML file next to the artifact", async () => {
-  const dir = await mkdtemp(`${os.tmpdir()}/easel-export-test-`);
+  const dir = await mkdtemp(`${os.tmpdir()}/liesel-export-test-`);
   const artifact = `${dir}/report.html`;
   await writeFile(`${dir}/theme.css`, ".btn{color:rebeccapurple}", "utf8");
   await writeFile(
@@ -1002,10 +1006,10 @@ test("export command writes a portable HTML file next to the artifact", async ()
   try {
     const result = spawnSync(
       process.execPath,
-      [fileURLToPath(new URL("../bin/easel.js", import.meta.url)), "export", artifact],
+      [fileURLToPath(new URL("../bin/liesel.js", import.meta.url)), "export", artifact],
       {
         cwd: fileURLToPath(new URL("..", import.meta.url)),
-        env: { ...process.env, EASEL_STATE_DIR: dir, EASEL_TELEMETRY: "0" },
+        env: { ...process.env, LIESEL_STATE_DIR: dir, LIESEL_TELEMETRY: "0" },
         encoding: "utf8",
       },
     );
@@ -1023,17 +1027,17 @@ test("export command writes a portable HTML file next to the artifact", async ()
 });
 
 test("export command treats --out value as an option operand, not the source file", async () => {
-  const dir = await mkdtemp(`${os.tmpdir()}/easel-export-test-`);
+  const dir = await mkdtemp(`${os.tmpdir()}/liesel-export-test-`);
   const artifact = `${dir}/report.html`;
   const output = `${dir}/custom.html`;
   await writeFile(artifact, "<!doctype html><html><body><h1>Hi</h1></body></html>", "utf8");
   try {
     const result = spawnSync(
       process.execPath,
-      [fileURLToPath(new URL("../bin/easel.js", import.meta.url)), "export", "--out", output, artifact],
+      [fileURLToPath(new URL("../bin/liesel.js", import.meta.url)), "export", "--out", output, artifact],
       {
         cwd: fileURLToPath(new URL("..", import.meta.url)),
-        env: { ...process.env, EASEL_STATE_DIR: dir, EASEL_TELEMETRY: "0" },
+        env: { ...process.env, LIESEL_STATE_DIR: dir, LIESEL_TELEMETRY: "0" },
         encoding: "utf8",
       },
     );
@@ -1061,7 +1065,7 @@ test("share output reports the public url and the secret update key", () => {
   assert.match(output.next_step, /PUBLIC/);
   assert.match(output.next_step, /update_key/);
   assert.match(output.next_step, /x\.ht-ml\.app/);
-  assert.match(output.next_step, /ht-ml\.app \(https:\/\/ht-ml\.app\), a third-party host not part of Easel/);
+  assert.match(output.next_step, /ht-ml\.app \(https:\/\/ht-ml\.app\), a third-party host not part of Liesel/);
 });
 
 test("password-protected share output tells viewers they also need the password", () => {
@@ -1077,7 +1081,7 @@ test("password-protected share output tells viewers they also need the password"
   assert.equal(output.share.visibility, "private");
   assert.match(output.next_step, /PASSWORD-PROTECTED/);
   assert.match(output.next_step, /viewers also need the password/);
-  assert.match(output.next_step, /ht-ml\.app \(https:\/\/ht-ml\.app\), a third-party host not part of Easel/);
+  assert.match(output.next_step, /ht-ml\.app \(https:\/\/ht-ml\.app\), a third-party host not part of Liesel/);
   assert.doesNotMatch(output.next_step, /anyone with the link can view/);
 });
 
@@ -1091,7 +1095,7 @@ test("share output surfaces local assets that could not be inlined", () => {
   assert.equal(output.share.unresolved_local_assets, 1);
   assert.deepEqual(output.unresolved_local_assets, [{ kind: "load-failed", ref: "./missing.png" }]);
   assert.match(output.next_step, /LOCAL assets could not be inlined/);
-  assert.match(output.next_step, /ht-ml\.app \(https:\/\/ht-ml\.app\), a third-party host not part of Easel/);
+  assert.match(output.next_step, /ht-ml\.app \(https:\/\/ht-ml\.app\), a third-party host not part of Liesel/);
   assert.doesNotMatch(output.next_step, /share this URL/);
 });
 
@@ -1129,20 +1133,20 @@ test("password-protected share output with unresolved assets still mentions the 
   assert.equal(output.share.visibility, "private");
   assert.match(output.next_step, /PASSWORD-PROTECTED/);
   assert.match(output.next_step, /viewers also need the password/);
-  assert.match(output.next_step, /ht-ml\.app \(https:\/\/ht-ml\.app\), a third-party host not part of Easel/);
+  assert.match(output.next_step, /ht-ml\.app \(https:\/\/ht-ml\.app\), a third-party host not part of Liesel/);
   assert.doesNotMatch(output.next_step, /anyone with the link can view/);
 });
 
 test("share dispatches create, republish, and unpublish to the right host request", async () => {
-  const dir = await mkdtemp(`${os.tmpdir()}/easel-share-dispatch-`);
+  const dir = await mkdtemp(`${os.tmpdir()}/liesel-share-dispatch-`);
   const artifact = `${dir}/report.html`;
   const marker = "SECRET-ARTIFACT-BODY";
   await writeFile(artifact, `<!doctype html><html><body><h1>${marker}</h1></body></html>`, "utf8");
 
   const requests = [];
   const htmlApp = await startFakeHtmlApp(requests);
-  const previousApiUrl = process.env.EASEL_HTML_APP_API_URL;
-  process.env.EASEL_HTML_APP_API_URL = `http://127.0.0.1:${htmlApp.port}`;
+  const previousApiUrl = process.env.LIESEL_HTML_APP_API_URL;
+  process.env.LIESEL_HTML_APP_API_URL = `http://127.0.0.1:${htmlApp.port}`;
   try {
     await shareCommand([artifact]);
     await shareCommand([artifact, "--site", "abc123", "--update-key", "uk_secret"]);
@@ -1175,8 +1179,8 @@ test("share dispatches create, republish, and unpublish to the right host reques
     assert.ok(unpublish.body.password, "the placeholder must be locked behind a password");
   } finally {
     await htmlApp.close();
-    if (previousApiUrl === undefined) delete process.env.EASEL_HTML_APP_API_URL;
-    else process.env.EASEL_HTML_APP_API_URL = previousApiUrl;
+    if (previousApiUrl === undefined) delete process.env.LIESEL_HTML_APP_API_URL;
+    else process.env.LIESEL_HTML_APP_API_URL = previousApiUrl;
     await rm(dir, { recursive: true, force: true });
   }
 });
@@ -1199,12 +1203,12 @@ async function startFailingHtmlApp(status, detail) {
 
 const PASSWORD_SHAPE = /[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4}/;
 
-// A recovery hint is only recovery if the CLI accepts it. Pull the command Easel printed out of
+// A recovery hint is only recovery if the CLI accepts it. Pull the command Liesel printed out of
 // the text it printed and run it back through the real argument parser, so a hint that drifts into
 // a usage error - `--site`/`--update-key` with no HTML file was one - fails here instead of on the
 // user's next paste.
 function parseSuggestedShareCommand(text) {
-  const match = /`easel share ([^`]+)`/.exec(String(text));
+  const match = /`liesel share ([^`]+)`/.exec(String(text));
   assert.ok(match, `expected a suggested share command in: ${text}`);
   const argv = match[1].trim().split(/\s+/);
   const request = resolveShareRequest(argv);
@@ -1220,7 +1224,7 @@ function parseSuggestedShareCommand(text) {
 }
 
 test("an indeterminate republish failure reads as unknown, with the generated password only when there is one", async () => {
-  const dir = await mkdtemp(`${os.tmpdir()}/easel-share-rotate-fail-`);
+  const dir = await mkdtemp(`${os.tmpdir()}/liesel-share-rotate-fail-`);
   const artifact = `${dir}/report.html`;
   await writeFile(artifact, "<!doctype html><html><body><h1>Hi</h1></body></html>", "utf8");
 
@@ -1228,8 +1232,8 @@ test("an indeterminate republish failure reads as unknown, with the generated pa
   // landed and a generated password that dies with the error leaves the page gated by a secret
   // nobody holds.
   const failing = await startFailingHtmlApp(503, "upstream exploded");
-  const previousApiUrl = process.env.EASEL_HTML_APP_API_URL;
-  process.env.EASEL_HTML_APP_API_URL = `http://127.0.0.1:${failing.port}`;
+  const previousApiUrl = process.env.LIESEL_HTML_APP_API_URL;
+  process.env.LIESEL_HTML_APP_API_URL = `http://127.0.0.1:${failing.port}`;
   try {
     await assert.rejects(
       () => shareCommand([artifact, "--site", "abc123", "--update-key", "uk_secret", "--private"]),
@@ -1289,22 +1293,22 @@ test("an indeterminate republish failure reads as unknown, with the generated pa
     );
   } finally {
     await failing.close();
-    if (previousApiUrl === undefined) delete process.env.EASEL_HTML_APP_API_URL;
-    else process.env.EASEL_HTML_APP_API_URL = previousApiUrl;
+    if (previousApiUrl === undefined) delete process.env.LIESEL_HTML_APP_API_URL;
+    else process.env.LIESEL_HTML_APP_API_URL = previousApiUrl;
     await rm(dir, { recursive: true, force: true });
   }
 });
 
 test("a republish the host rejected never offers the generated password as if it applied", async () => {
-  const dir = await mkdtemp(`${os.tmpdir()}/easel-share-rejected-`);
+  const dir = await mkdtemp(`${os.tmpdir()}/liesel-share-rejected-`);
   const artifact = `${dir}/report.html`;
   await writeFile(artifact, "<!doctype html><html><body><h1>Hi</h1></body></html>", "utf8");
 
   // A mistyped update_key is the likeliest failure here. The host wrote nothing, so the generated
   // password gates nothing, and relaying it would send the user chasing a page that never changed.
   const rejecting = await startFailingHtmlApp(401, "");
-  const previousApiUrl = process.env.EASEL_HTML_APP_API_URL;
-  process.env.EASEL_HTML_APP_API_URL = `http://127.0.0.1:${rejecting.port}`;
+  const previousApiUrl = process.env.LIESEL_HTML_APP_API_URL;
+  process.env.LIESEL_HTML_APP_API_URL = `http://127.0.0.1:${rejecting.port}`;
   try {
     await assert.rejects(
       () => shareCommand([artifact, "--site", "abc123", "--update-key", "WRONG", "--private"]),
@@ -1320,8 +1324,8 @@ test("a republish the host rejected never offers the generated password as if it
     );
   } finally {
     await rejecting.close();
-    if (previousApiUrl === undefined) delete process.env.EASEL_HTML_APP_API_URL;
-    else process.env.EASEL_HTML_APP_API_URL = previousApiUrl;
+    if (previousApiUrl === undefined) delete process.env.LIESEL_HTML_APP_API_URL;
+    else process.env.LIESEL_HTML_APP_API_URL = previousApiUrl;
     await rm(dir, { recursive: true, force: true });
   }
 });
@@ -1330,8 +1334,8 @@ test("an indeterminate --unpublish failure says the takedown may already have la
   // Same window as a republish: a 5xx can follow a PUT the origin already committed, so reporting
   // a flat failure tells the user the old content is still readable when it may already be gone.
   const failing = await startFailingHtmlApp(503, "upstream exploded");
-  const previousApiUrl = process.env.EASEL_HTML_APP_API_URL;
-  process.env.EASEL_HTML_APP_API_URL = `http://127.0.0.1:${failing.port}`;
+  const previousApiUrl = process.env.LIESEL_HTML_APP_API_URL;
+  process.env.LIESEL_HTML_APP_API_URL = `http://127.0.0.1:${failing.port}`;
   try {
     await assert.rejects(
       () => shareCommand(["--unpublish", "--site", "abc123", "--update-key", "uk_secret"]),
@@ -1350,15 +1354,15 @@ test("an indeterminate --unpublish failure says the takedown may already have la
     );
   } finally {
     await failing.close();
-    if (previousApiUrl === undefined) delete process.env.EASEL_HTML_APP_API_URL;
-    else process.env.EASEL_HTML_APP_API_URL = previousApiUrl;
+    if (previousApiUrl === undefined) delete process.env.LIESEL_HTML_APP_API_URL;
+    else process.env.LIESEL_HTML_APP_API_URL = previousApiUrl;
   }
 });
 
 test("an --unpublish the host rejected reports a plain failure, not an unknown outcome", async () => {
   const rejecting = await startFailingHtmlApp(401, "");
-  const previousApiUrl = process.env.EASEL_HTML_APP_API_URL;
-  process.env.EASEL_HTML_APP_API_URL = `http://127.0.0.1:${rejecting.port}`;
+  const previousApiUrl = process.env.LIESEL_HTML_APP_API_URL;
+  process.env.LIESEL_HTML_APP_API_URL = `http://127.0.0.1:${rejecting.port}`;
   try {
     await assert.rejects(
       () => shareCommand(["--unpublish", "--site", "abc123", "--update-key", "WRONG"]),
@@ -1372,8 +1376,8 @@ test("an --unpublish the host rejected reports a plain failure, not an unknown o
     );
   } finally {
     await rejecting.close();
-    if (previousApiUrl === undefined) delete process.env.EASEL_HTML_APP_API_URL;
-    else process.env.EASEL_HTML_APP_API_URL = previousApiUrl;
+    if (previousApiUrl === undefined) delete process.env.LIESEL_HTML_APP_API_URL;
+    else process.env.LIESEL_HTML_APP_API_URL = previousApiUrl;
   }
 });
 
@@ -1387,7 +1391,7 @@ test("a literal password placeholder would be accepted, which is why no suggesti
 });
 
 test("an indeterminate create failure says the page may be live and unreclaimable", async () => {
-  const dir = await mkdtemp(`${os.tmpdir()}/easel-share-create-fail-`);
+  const dir = await mkdtemp(`${os.tmpdir()}/liesel-share-create-fail-`);
   const artifact = `${dir}/report.html`;
   await writeFile(artifact, "<!doctype html><html><body><h1>Hi</h1></body></html>", "utf8");
 
@@ -1395,8 +1399,8 @@ test("an indeterminate create failure says the page may be live and unreclaimabl
   // publicly hosted while the only copy of its update_key dies with the response, so the page can
   // never be republished or unpublished. Reporting a flat failure hides a permanent public page.
   const failing = await startFailingHtmlApp(503, "upstream exploded");
-  const previousApiUrl = process.env.EASEL_HTML_APP_API_URL;
-  process.env.EASEL_HTML_APP_API_URL = `http://127.0.0.1:${failing.port}`;
+  const previousApiUrl = process.env.LIESEL_HTML_APP_API_URL;
+  process.env.LIESEL_HTML_APP_API_URL = `http://127.0.0.1:${failing.port}`;
   try {
     await assert.rejects(
       () => shareCommand([artifact]),
@@ -1427,8 +1431,8 @@ test("an indeterminate create failure says the page may be live and unreclaimabl
     );
   } finally {
     await failing.close();
-    if (previousApiUrl === undefined) delete process.env.EASEL_HTML_APP_API_URL;
-    else process.env.EASEL_HTML_APP_API_URL = previousApiUrl;
+    if (previousApiUrl === undefined) delete process.env.LIESEL_HTML_APP_API_URL;
+    else process.env.LIESEL_HTML_APP_API_URL = previousApiUrl;
     await rm(dir, { recursive: true, force: true });
   }
 });
@@ -1450,7 +1454,7 @@ async function startIncompleteHtmlApp(body) {
 }
 
 test("a 200 with a malformed body is reported as published, not as an unknown outcome", async () => {
-  const dir = await mkdtemp(`${os.tmpdir()}/easel-share-incomplete-`);
+  const dir = await mkdtemp(`${os.tmpdir()}/liesel-share-incomplete-`);
   const artifact = `${dir}/report.html`;
   await writeFile(artifact, "<!doctype html><html><body><h1>Hi</h1></body></html>", "utf8");
 
@@ -1458,8 +1462,8 @@ test("a 200 with a malformed body is reported as published, not as an unknown ou
   // published" throws away the one thing worth saying: here is the live URL, and its write
   // credential is gone forever.
   const noKey = await startIncompleteHtmlApp({ site_id: "abc123", url: "https://abc123.ht-ml.app/" });
-  const previousApiUrl = process.env.EASEL_HTML_APP_API_URL;
-  process.env.EASEL_HTML_APP_API_URL = `http://127.0.0.1:${noKey.port}`;
+  const previousApiUrl = process.env.LIESEL_HTML_APP_API_URL;
+  process.env.LIESEL_HTML_APP_API_URL = `http://127.0.0.1:${noKey.port}`;
   try {
     await assert.rejects(
       () => shareCommand([artifact]),
@@ -1468,7 +1472,7 @@ test("a 200 with a malformed body is reported as published, not as an unknown ou
         const hints = (error.suggestions || []).join(" ");
         assert.doesNotMatch(hints, /may or may not have published/i, "a 200 is not an unknown outcome");
         assert.match(hints, /the page IS live/i);
-        assert.match(hints, /https:\/\/abc123\.ht-ml\.app\//, "the URL Easel knows must be handed over");
+        assert.match(hints, /https:\/\/abc123\.ht-ml\.app\//, "the URL Liesel knows must be handed over");
         assert.match(hints, /no recovery/i, "the lost update_key has none");
         assert.match(hints, /SECOND page/);
         return true;
@@ -1476,14 +1480,14 @@ test("a 200 with a malformed body is reported as published, not as an unknown ou
     );
   } finally {
     await noKey.close();
-    if (previousApiUrl === undefined) delete process.env.EASEL_HTML_APP_API_URL;
-    else process.env.EASEL_HTML_APP_API_URL = previousApiUrl;
+    if (previousApiUrl === undefined) delete process.env.LIESEL_HTML_APP_API_URL;
+    else process.env.LIESEL_HTML_APP_API_URL = previousApiUrl;
   }
 
   // The mirror case: no url came back, but the update_key did, so the page IS still changeable and
   // saying "no recovery" would be the opposite error.
   const noUrl = await startIncompleteHtmlApp({ site_id: "abc123", update_key: "uk_secret" });
-  process.env.EASEL_HTML_APP_API_URL = `http://127.0.0.1:${noUrl.port}`;
+  process.env.LIESEL_HTML_APP_API_URL = `http://127.0.0.1:${noUrl.port}`;
   try {
     await assert.rejects(
       () => shareCommand([artifact, "--private"]),
@@ -1499,14 +1503,14 @@ test("a 200 with a malformed body is reported as published, not as an unknown ou
     );
   } finally {
     await noUrl.close();
-    if (previousApiUrl === undefined) delete process.env.EASEL_HTML_APP_API_URL;
-    else process.env.EASEL_HTML_APP_API_URL = previousApiUrl;
+    if (previousApiUrl === undefined) delete process.env.LIESEL_HTML_APP_API_URL;
+    else process.env.LIESEL_HTML_APP_API_URL = previousApiUrl;
     await rm(dir, { recursive: true, force: true });
   }
 });
 
 test("a create whose host returns no usable site_id says the page can never be republished", async () => {
-  const dir = await mkdtemp(`${os.tmpdir()}/easel-share-nosite-`);
+  const dir = await mkdtemp(`${os.tmpdir()}/liesel-share-nosite-`);
   const artifact = `${dir}/report.html`;
   await writeFile(artifact, "<!doctype html><html><body><h1>Hi</h1></body></html>", "utf8");
 
@@ -1519,8 +1523,8 @@ test("a create whose host returns no usable site_id says the page can never be r
     update_key: "uk_secret",
     status: "active",
   });
-  const previousApiUrl = process.env.EASEL_HTML_APP_API_URL;
-  process.env.EASEL_HTML_APP_API_URL = `http://127.0.0.1:${hostile.port}`;
+  const previousApiUrl = process.env.LIESEL_HTML_APP_API_URL;
+  process.env.LIESEL_HTML_APP_API_URL = `http://127.0.0.1:${hostile.port}`;
   try {
     const output = await shareCommand([artifact]);
     const share = /** @type {any} */ (output.share);
@@ -1531,16 +1535,16 @@ test("a create whose host returns no usable site_id says the page can never be r
     assert.doesNotMatch(output.next_step, /--password/, "and no flag may ride in through the echo");
   } finally {
     await hostile.close();
-    if (previousApiUrl === undefined) delete process.env.EASEL_HTML_APP_API_URL;
-    else process.env.EASEL_HTML_APP_API_URL = previousApiUrl;
+    if (previousApiUrl === undefined) delete process.env.LIESEL_HTML_APP_API_URL;
+    else process.env.LIESEL_HTML_APP_API_URL = previousApiUrl;
     await rm(dir, { recursive: true, force: true });
   }
 });
 
 test("a site_id the host echoes cannot inject flags into the suggested republish command", async () => {
-  const dir = await mkdtemp(`${os.tmpdir()}/easel-share-echo-`);
+  const dir = await mkdtemp(`${os.tmpdir()}/liesel-share-echo-`);
   try {
-    // next_step is text an agent may run. A backend reached through EASEL_HTML_APP_API_URL
+    // next_step is text an agent may run. A backend reached through LIESEL_HTML_APP_API_URL
     // answering with `abc123 --password evil` would otherwise append a flag that gates the page
     // behind a value nobody chose, and ht-ml.app cannot clear a password.
     const hostile = await startIncompleteHtmlApp({
@@ -1549,19 +1553,19 @@ test("a site_id the host echoes cannot inject flags into the suggested republish
       update_key: "uk_secret",
       status: "active",
     });
-    const previousApiUrl = process.env.EASEL_HTML_APP_API_URL;
-    process.env.EASEL_HTML_APP_API_URL = `http://127.0.0.1:${hostile.port}`;
+    const previousApiUrl = process.env.LIESEL_HTML_APP_API_URL;
+    process.env.LIESEL_HTML_APP_API_URL = `http://127.0.0.1:${hostile.port}`;
     try {
       const output = await shareCommand(["--unpublish", "--site", "abc123", "--update-key", "uk_secret"]);
 
       assert.doesNotMatch(output.next_step, /--password/, "no flag may be smuggled in through the echo");
       const suggested = parseSuggestedShareCommand(output.next_step);
       assert.equal(suggested.siteId, "abc123", "the command names the id the request was addressed to");
-      assert.equal(suggested.generatedPassword, true, "only --private, whose password Easel mints and reports");
+      assert.equal(suggested.generatedPassword, true, "only --private, whose password Liesel mints and reports");
     } finally {
       await hostile.close();
-      if (previousApiUrl === undefined) delete process.env.EASEL_HTML_APP_API_URL;
-      else process.env.EASEL_HTML_APP_API_URL = previousApiUrl;
+      if (previousApiUrl === undefined) delete process.env.LIESEL_HTML_APP_API_URL;
+      else process.env.LIESEL_HTML_APP_API_URL = previousApiUrl;
     }
   } finally {
     await rm(dir, { recursive: true, force: true });
@@ -1569,15 +1573,15 @@ test("a site_id the host echoes cannot inject flags into the suggested republish
 });
 
 test("a create the host rejected reports a plain failure, not an unknown outcome", async () => {
-  const dir = await mkdtemp(`${os.tmpdir()}/easel-share-create-rejected-`);
+  const dir = await mkdtemp(`${os.tmpdir()}/liesel-share-create-rejected-`);
   const artifact = `${dir}/report.html`;
   await writeFile(artifact, "<!doctype html><html><body><h1>Hi</h1></body></html>", "utf8");
 
   // A 400 is an answer: nothing was published, so claiming a page might be live would send the
   // user hunting for a URL that does not exist.
   const rejecting = await startFailingHtmlApp(400, "bad request");
-  const previousApiUrl = process.env.EASEL_HTML_APP_API_URL;
-  process.env.EASEL_HTML_APP_API_URL = `http://127.0.0.1:${rejecting.port}`;
+  const previousApiUrl = process.env.LIESEL_HTML_APP_API_URL;
+  process.env.LIESEL_HTML_APP_API_URL = `http://127.0.0.1:${rejecting.port}`;
   try {
     await assert.rejects(
       () => shareCommand([artifact, "--private"]),
@@ -1592,21 +1596,21 @@ test("a create the host rejected reports a plain failure, not an unknown outcome
     );
   } finally {
     await rejecting.close();
-    if (previousApiUrl === undefined) delete process.env.EASEL_HTML_APP_API_URL;
-    else process.env.EASEL_HTML_APP_API_URL = previousApiUrl;
+    if (previousApiUrl === undefined) delete process.env.LIESEL_HTML_APP_API_URL;
+    else process.env.LIESEL_HTML_APP_API_URL = previousApiUrl;
     await rm(dir, { recursive: true, force: true });
   }
 });
 
 test("share reports a bad --site as a usage error before reading the artifact", async () => {
-  const dir = await mkdtemp(`${os.tmpdir()}/easel-share-siteid-`);
+  const dir = await mkdtemp(`${os.tmpdir()}/liesel-share-siteid-`);
   const artifact = `${dir}/report.html`;
   await writeFile(artifact, "<!doctype html><html><body><h1>Hi</h1></body></html>", "utf8");
 
   const requests = [];
   const htmlApp = await startFakeHtmlApp(requests);
-  const previousApiUrl = process.env.EASEL_HTML_APP_API_URL;
-  process.env.EASEL_HTML_APP_API_URL = `http://127.0.0.1:${htmlApp.port}`;
+  const previousApiUrl = process.env.LIESEL_HTML_APP_API_URL;
+  process.env.LIESEL_HTML_APP_API_URL = `http://127.0.0.1:${htmlApp.port}`;
   try {
     // Pasting the share URL is the likeliest mistake here, since the URL is what the user holds.
     for (const site of ["https://abc123.ht-ml.app/", "not a site id", ".."]) {
@@ -1623,14 +1627,14 @@ test("share reports a bad --site as a usage error before reading the artifact", 
     assert.equal(requests.length, 0, "a rejected site id must never reach the host");
   } finally {
     await htmlApp.close();
-    if (previousApiUrl === undefined) delete process.env.EASEL_HTML_APP_API_URL;
-    else process.env.EASEL_HTML_APP_API_URL = previousApiUrl;
+    if (previousApiUrl === undefined) delete process.env.LIESEL_HTML_APP_API_URL;
+    else process.env.LIESEL_HTML_APP_API_URL = previousApiUrl;
     await rm(dir, { recursive: true, force: true });
   }
 });
 
 test("share command publishes the artifact to ht-ml.app and returns the public url", async () => {
-  const dir = await mkdtemp(`${os.tmpdir()}/easel-share-test-`);
+  const dir = await mkdtemp(`${os.tmpdir()}/liesel-share-test-`);
   const artifact = `${dir}/report.html`;
   await writeFile(`${dir}/theme.css`, ".btn{color:teal}", "utf8");
   await writeFile(
@@ -1646,14 +1650,14 @@ test("share command publishes the artifact to ht-ml.app and returns the public u
     // on this process's event loop, which spawnSync would block, deadlocking the request.
     const child = spawn(
       process.execPath,
-      [fileURLToPath(new URL("../bin/easel.js", import.meta.url)), "share", "--password", "pw", artifact],
+      [fileURLToPath(new URL("../bin/liesel.js", import.meta.url)), "share", "--password", "pw", artifact],
       {
         cwd: fileURLToPath(new URL("..", import.meta.url)),
         env: {
           ...process.env,
-          EASEL_STATE_DIR: dir,
-          EASEL_TELEMETRY: "0",
-          EASEL_HTML_APP_API_URL: `http://127.0.0.1:${htmlApp.port}`,
+          LIESEL_STATE_DIR: dir,
+          LIESEL_TELEMETRY: "0",
+          LIESEL_HTML_APP_API_URL: `http://127.0.0.1:${htmlApp.port}`,
         },
       },
     );
@@ -1682,7 +1686,7 @@ test("share command publishes the artifact to ht-ml.app and returns the public u
 });
 
 test("share command refuses a whitespace-only password instead of quietly publishing a public page", async () => {
-  const dir = await mkdtemp(`${os.tmpdir()}/easel-share-test-`);
+  const dir = await mkdtemp(`${os.tmpdir()}/liesel-share-test-`);
   const artifact = `${dir}/report.html`;
   await writeFile(artifact, "<!doctype html><html><body><h1>Hi</h1></body></html>", "utf8");
 
@@ -1691,14 +1695,14 @@ test("share command refuses a whitespace-only password instead of quietly publis
   try {
     const child = spawn(
       process.execPath,
-      [fileURLToPath(new URL("../bin/easel.js", import.meta.url)), "share", "--password", "   ", artifact],
+      [fileURLToPath(new URL("../bin/liesel.js", import.meta.url)), "share", "--password", "   ", artifact],
       {
         cwd: fileURLToPath(new URL("..", import.meta.url)),
         env: {
           ...process.env,
-          EASEL_STATE_DIR: dir,
-          EASEL_TELEMETRY: "0",
-          EASEL_HTML_APP_API_URL: `http://127.0.0.1:${htmlApp.port}`,
+          LIESEL_STATE_DIR: dir,
+          LIESEL_TELEMETRY: "0",
+          LIESEL_HTML_APP_API_URL: `http://127.0.0.1:${htmlApp.port}`,
         },
       },
     );
@@ -1751,8 +1755,8 @@ test("poll help is Codex-aware when requested", () => {
 
 test("share help distinguishes public default from password-protected shares", () => {
   const help = getCommandHelp("share");
-  const home = createHomeOutput({ bin: "easel", sessions: [] });
-  const homeShareHelp = home.help.find((item) => item.includes("easel share <html-file>"));
+  const home = createHomeOutput({ bin: "liesel", sessions: [] });
+  const homeShareHelp = home.help.find((item) => item.includes("liesel share <html-file>"));
 
   assert.match(help, /PUBLIC by default/);
   assert.match(help, /Pass --private to publish a PRIVATE page behind a generated password/);
@@ -1763,7 +1767,7 @@ test("share help distinguishes public default from password-protected shares", (
   assert.doesNotMatch(help, /EVERYTHING PUBLISHED IS PUBLIC/);
   assert.doesNotMatch(help, /load fine/);
   assert.match(homeShareHelp, /PUBLIC by default/);
-  assert.match(homeShareHelp, /Pass --private to publish a PRIVATE page behind a password Easel generates/);
+  assert.match(homeShareHelp, /Pass --private to publish a PRIVATE page behind a password Liesel generates/);
   assert.match(homeShareHelp, /shared secret/);
   assert.doesNotMatch(homeShareHelp, /Everything published is public/);
 });
@@ -1791,10 +1795,10 @@ test("home share guidance defers republish and unpublish mechanics to share --he
   // Home output is paid on every no-argument invocation, so it may name the update_key and point
   // at the command that owns it, but must not restate that command's flag mechanics.
   const help = getCommandHelp("share");
-  const home = createHomeOutput({ bin: "easel", sessions: [] });
-  const homeShareHelp = home.help.find((item) => item.includes("easel share <html-file>"));
+  const home = createHomeOutput({ bin: "liesel", sessions: [] });
+  const homeShareHelp = home.help.find((item) => item.includes("liesel share <html-file>"));
 
-  assert.match(homeShareHelp, /run `easel share --help` before using it/);
+  assert.match(homeShareHelp, /run `liesel share --help` before using it/);
   assert.doesNotMatch(homeShareHelp, /--site/);
   assert.doesNotMatch(homeShareHelp, /--update-key/);
   assert.doesNotMatch(homeShareHelp, /--unpublish/);
@@ -1821,7 +1825,7 @@ test("feedback next step keeps the next poll completion observable", () => {
 });
 
 test("poll feedback and the next step are emitted before the bulky DOM snapshot", async () => {
-  const stateDir = await mkdtemp(`${os.tmpdir()}/easel-poll-output-test-`);
+  const stateDir = await mkdtemp(`${os.tmpdir()}/liesel-poll-output-test-`);
   const artifact = `${stateDir}/artifact.html`;
   await writeFile(artifact, "<html><body>hello</body></html>", "utf8");
   const response = {
@@ -1850,10 +1854,10 @@ test("poll feedback and the next step are emitted before the bulky DOM snapshot"
     assert.ok(address && typeof address !== "string");
     const child = spawn(
       process.execPath,
-      [fileURLToPath(new URL("../bin/easel.js", import.meta.url)), "poll", artifact, "--timeout-ms", "1000"],
+      [fileURLToPath(new URL("../bin/liesel.js", import.meta.url)), "poll", artifact, "--timeout-ms", "1000"],
       {
         cwd: fileURLToPath(new URL("..", import.meta.url)),
-        env: { ...process.env, EASEL_STATE_DIR: stateDir, EASEL_PORT: String(address.port) },
+        env: { ...process.env, LIESEL_STATE_DIR: stateDir, LIESEL_PORT: String(address.port) },
       },
     );
     let stdout = "";
@@ -1913,9 +1917,9 @@ test("detected layout warnings never appear in poll output", () => {
   assert.equal("layout_warnings" in output, false);
   assert.equal("artifact_failures" in output, false);
   assert.match(output.next_step, /Apply the requested changes/);
-  assert.match(output.next_step, /easel poll \/tmp\/report\.html --agent-reply/);
+  assert.match(output.next_step, /liesel poll \/tmp\/report\.html --agent-reply/);
   assert.match(output.next_step, /continuing to wait for feedback/);
-  assert.match(output.next_step, /easel reply \/tmp\/report\.html --agent-reply/);
+  assert.match(output.next_step, /liesel reply \/tmp\/report\.html --agent-reply/);
   assert.match(output.next_step, /without starting another long-poll/);
 });
 
@@ -2070,11 +2074,11 @@ test("a poll reporting the session ended by the user tells the agent to stop and
 
   assert.equal(output.session.status, "ended");
   assert.equal(output.session.ended_by, "user");
-  assert.match(output.next_step, /user ended this Easel session/);
+  assert.match(output.next_step, /user ended this Liesel session/);
   assert.match(output.next_step, /Stop polling/);
-  assert.match(output.next_step, /do not run `easel \/tmp\/report\.html` to reopen it/);
+  assert.match(output.next_step, /do not run `liesel \/tmp\/report\.html` to reopen it/);
   assert.match(output.next_step, /deliver any remaining updates directly in this conversation/i);
-  assert.match(output.next_step, /easel \/tmp\/report\.html --reopen/);
+  assert.match(output.next_step, /liesel \/tmp\/report\.html --reopen/);
 });
 
 test("a poll reporting an agent-ended session allows a plain reopen if still needed", () => {
@@ -2085,7 +2089,7 @@ test("a poll reporting an agent-ended session allows a plain reopen if still nee
 
   assert.equal(output.session.ended_by, "agent");
   assert.match(output.next_step, /Stop polling/);
-  assert.match(output.next_step, /easel \/tmp\/report\.html`\s+to open a fresh session/);
+  assert.match(output.next_step, /liesel \/tmp\/report\.html`\s+to open a fresh session/);
   assert.doesNotMatch(output.next_step, /--reopen/);
 });
 
@@ -2105,7 +2109,7 @@ test("the final feedback batch before a user end flags session_ended and skips t
   assert.equal(output.session.ended_by, "user");
   assert.match(output.next_step, /last feedback before the user ended the session/);
   assert.match(output.next_step, /Stop polling \/tmp\/report\.html and do not reopen it/);
-  assert.match(output.next_step, /easel \/tmp\/report\.html --reopen/);
+  assert.match(output.next_step, /liesel \/tmp\/report\.html --reopen/);
   assert.doesNotMatch(output.next_step, /reload or re-open/);
 });
 
@@ -2123,10 +2127,10 @@ test("the final feedback batch before an agent end preserves ended_by and allows
 
   assert.equal(output.session.session_ended, true);
   assert.equal(output.session.ended_by, "agent");
-  assert.match(output.next_step, /last feedback before the Easel session ended/);
-  assert.match(output.next_step, /easel \/tmp\/report\.html`\s+to open a fresh session/);
+  assert.match(output.next_step, /last feedback before the Liesel session ended/);
+  assert.match(output.next_step, /liesel \/tmp\/report\.html`\s+to open a fresh session/);
   assert.doesNotMatch(output.next_step, /--reopen/);
-  assert.doesNotMatch(output.next_step, /user ended this Easel session/);
+  assert.doesNotMatch(output.next_step, /user ended this Liesel session/);
 });
 
 test("final user-ended feedback still reports a fatal artifact failure without reopening", () => {
@@ -2142,7 +2146,7 @@ test("final user-ended feedback still reports a fatal artifact failure without r
   });
 
   assert.match(output.next_step, /fatal artifact failure/);
-  assert.match(output.next_step, /confirm it renders without reopening this ended Easel session/);
+  assert.match(output.next_step, /confirm it renders without reopening this ended Liesel session/);
   assert.doesNotMatch(output.next_step, /--reopen/);
 });
 
@@ -2164,31 +2168,31 @@ test("final agent-ended feedback points a fatal artifact failure at a fresh sess
 
 test("poll wait messages tell watching agents the silence is normal", () => {
   const banner = pollWaitBannerText("/tmp/report.html");
-  assert.match(banner, /\[easel\]/);
+  assert.match(banner, /\[liesel\]/);
   assert.match(banner, /Long-polling for user feedback/);
   assert.match(banner, /stays silent/);
   assert.match(banner, /leave it running/i);
   assert.match(banner, /feedback remains queued until delivery/);
 
   const tick = pollWaitTickText(3 * 60_000);
-  assert.match(tick, /\[easel\]/);
+  assert.match(tick, /\[liesel\]/);
   assert.match(tick, /Still waiting for user feedback \(3m\)/);
   assert.match(tick, /leave this running/i);
 
   const interrupted = pollInterruptedText("/tmp/report.html");
-  assert.match(interrupted, /\[easel\]/);
+  assert.match(interrupted, /\[liesel\]/);
   assert.match(interrupted, /Poll interrupted/);
   assert.match(interrupted, /user may still be reviewing/);
-  assert.match(interrupted, /easel poll \/tmp\/report\.html/);
+  assert.match(interrupted, /liesel poll \/tmp\/report\.html/);
   assert.match(interrupted, /feedback remains queued until delivery/);
 });
 
-test("Herdr poll chime is disabled unless both Easel and Herdr opt in", () => {
+test("Herdr poll chime is disabled unless both Liesel and Herdr opt in", () => {
   assert.equal(herdrPollChimeEnabled({}), false);
   assert.equal(herdrPollChimeEnabled({ HERDR_ENV: "1" }), false);
-  assert.equal(herdrPollChimeEnabled({ EASEL_HERDR_CHIME: "1" }), false);
-  assert.equal(herdrPollChimeEnabled({ HERDR_ENV: "1", EASEL_HERDR_CHIME: "0" }), false);
-  assert.equal(herdrPollChimeEnabled({ HERDR_ENV: "1", EASEL_HERDR_CHIME: "1" }), true);
+  assert.equal(herdrPollChimeEnabled({ LIESEL_HERDR_CHIME: "1" }), false);
+  assert.equal(herdrPollChimeEnabled({ HERDR_ENV: "1", LIESEL_HERDR_CHIME: "0" }), false);
+  assert.equal(herdrPollChimeEnabled({ HERDR_ENV: "1", LIESEL_HERDR_CHIME: "1" }), true);
 });
 
 test("Herdr poll chime requests attention without making notification failure fatal", async () => {
@@ -2196,7 +2200,7 @@ test("Herdr poll chime requests attention without making notification failure fa
   /** @type {import("node:child_process").ChildProcess | undefined} */
   let child;
   const notified = notifyHerdrPollReady({
-    env: { HERDR_ENV: "1", EASEL_HERDR_CHIME: "1" },
+    env: { HERDR_ENV: "1", LIESEL_HERDR_CHIME: "1" },
     runner(command, args, options) {
       calls.push({ command, args, options });
       child = spawn(process.execPath, ["-e", "process.exit(0)"], options);
@@ -2214,9 +2218,9 @@ test("Herdr poll chime requests attention without making notification failure fa
       args: [
         "notification",
         "show",
-        "Easel review ready",
+        "Liesel review ready",
         "--body",
-        "The artifact is open and Easel is polling for your feedback.",
+        "The artifact is open and Liesel is polling for your feedback.",
         "--sound",
         "request",
       ],
@@ -2226,7 +2230,7 @@ test("Herdr poll chime requests attention without making notification failure fa
 
   assert.equal(
     notifyHerdrPollReady({
-      env: { HERDR_ENV: "1", EASEL_HERDR_CHIME: "1" },
+      env: { HERDR_ENV: "1", LIESEL_HERDR_CHIME: "1" },
       runner() {
         throw new Error("Herdr unavailable");
       },
@@ -2237,7 +2241,7 @@ test("Herdr poll chime requests attention without making notification failure fa
 
 test("Herdr failures and a stalled notification do not delay poll feedback", { timeout: 10_000 }, async (t) => {
   const server = createServer((_req, res) => {
-    res.setHeader("Easel-Poll-State", "listening");
+    res.setHeader("Liesel-Poll-State", "listening");
     res.end(JSON.stringify({ status: "feedback", prompts: [{ text: "Review this" }] }));
   });
   server.listen(0, "127.0.0.1");
@@ -2245,7 +2249,7 @@ test("Herdr failures and a stalled notification do not delay poll feedback", { t
   t.after(() => server.close());
   const address = server.address();
   assert.ok(address && typeof address === "object");
-  const env = { HERDR_ENV: "1", EASEL_HERDR_CHIME: "1" };
+  const env = { HERDR_ENV: "1", LIESEL_HERDR_CHIME: "1" };
 
   for (const behavior of ["missing", "rejected", "stalled"]) {
     await t.test(behavior, async () => {
@@ -2354,7 +2358,7 @@ test("shouldNarratePollWaitTicks heartbeats only in an interactive terminal", ()
 });
 
 test("spawned poll with piped stderr banners once and leaves re-run guidance when killed", async () => {
-  const stateDir = await mkdtemp(`${os.tmpdir()}/easel-poll-wait-test-`);
+  const stateDir = await mkdtemp(`${os.tmpdir()}/liesel-poll-wait-test-`);
   const artifact = `${stateDir}/artifact.html`;
   await writeFile(artifact, "<html><body>hello</body></html>", "utf8");
   const server = await serve({ port: 0, stateFile: `${stateDir}/state.json`, version: VERSION });
@@ -2371,10 +2375,10 @@ test("spawned poll with piped stderr banners once and leaves re-run guidance whe
 
     const child = spawn(
       process.execPath,
-      [fileURLToPath(new URL("../bin/easel.js", import.meta.url)), "poll", artifact],
+      [fileURLToPath(new URL("../bin/liesel.js", import.meta.url)), "poll", artifact],
       {
         cwd: fileURLToPath(new URL("..", import.meta.url)),
-        env: { ...process.env, EASEL_STATE_DIR: stateDir, EASEL_PORT: String(server.port) },
+        env: { ...process.env, LIESEL_STATE_DIR: stateDir, LIESEL_PORT: String(server.port) },
       },
     );
 
@@ -2421,7 +2425,7 @@ test("browser-disconnected poll output asks before reopening or ending the resum
   assert.match(output.next_step, /reopen/i);
   assert.match(output.next_step, /end the session/i);
   assert.match(output.next_step, /remains open|resumable/i);
-  assert.doesNotMatch(output.next_step, /Run `easel \/tmp\/report\.html`/);
+  assert.doesNotMatch(output.next_step, /Run `liesel \/tmp\/report\.html`/);
 });
 
 test("waiting next step reassures agents that re-running poll loses nothing", () => {
@@ -2430,7 +2434,7 @@ test("waiting next step reassures agents that re-running poll loses nothing", ()
     response: { status: "waiting" },
   });
 
-  assert.match(output.next_step, /easel poll \/tmp\/report\.html/);
+  assert.match(output.next_step, /liesel poll \/tmp\/report\.html/);
   assert.match(output.next_step, /without --timeout-ms/);
   assert.match(output.next_step, /feedback remains queued until delivery/);
 });
@@ -2454,8 +2458,8 @@ test("SDK reserved commands pass through instead of normalizing to open", () => 
 
 test("setup hooks resolves HOME before platform-specific user profile variables", () => {
   assert.equal(
-    resolveHookHomeDir({ HOME: "/tmp/easel-home", USERPROFILE: "C:\\Users\\runneradmin" }, "/fallback"),
-    "/tmp/easel-home",
+    resolveHookHomeDir({ HOME: "/tmp/liesel-home", USERPROFILE: "C:\\Users\\runneradmin" }, "/fallback"),
+    "/tmp/liesel-home",
   );
 });
 
@@ -2485,7 +2489,7 @@ test("setup hooks creates a Copilot CLI hook that injects additional context", (
   assert.equal(updated.hooks.sessionStart[0].bash, "echo keep-me");
   assert.match(updated.hooks.sessionStart[1].bash, /additionalContext/);
   assert.match(updated.hooks.sessionStart[1].powershell, /additionalContext/);
-  assert.match(updated.hooks.sessionStart[1].bash, /easel/);
+  assert.match(updated.hooks.sessionStart[1].bash, /liesel/);
   assert.equal(updated.hooks.sessionStart[1].timeoutSec, 10);
 
   const [unchanged, unchangedFlag] = computeCopilotCliHookUpdate(updated, hook);
@@ -2493,10 +2497,10 @@ test("setup hooks creates a Copilot CLI hook that injects additional context", (
   assert.equal(unchanged, updated);
 });
 
-test("Copilot CLI ambient context script wraps easel output as hook JSON", async () => {
-  const tempDir = await mkdtemp(`${os.tmpdir()}/easel-copilot-hook-`);
+test("Copilot CLI ambient context script wraps liesel output as hook JSON", async () => {
+  const tempDir = await mkdtemp(`${os.tmpdir()}/liesel-copilot-hook-`);
   try {
-    const fakeCli = path.join(tempDir, "fake-easel.js");
+    const fakeCli = path.join(tempDir, "fake-liesel.js");
     await writeFile(fakeCli, 'console.log("sessions: []");\n', "utf8");
     const command = `"${process.execPath}" "${fakeCli}"`;
     const result = spawnSync(process.execPath, ["-e", createCopilotCliAmbientContextScript(command)], {
@@ -2505,7 +2509,7 @@ test("Copilot CLI ambient context script wraps easel output as hook JSON", async
 
     assert.equal(result.status, 0, result.stderr || result.stdout);
     const output = JSON.parse(result.stdout);
-    assert.match(output.additionalContext, /## AXI ambient context: easel/);
+    assert.match(output.additionalContext, /## AXI ambient context: liesel/);
     assert.match(output.additionalContext, /sessions: \[\]/);
   } finally {
     await rm(tempDir, { force: true, recursive: true });
@@ -2513,12 +2517,12 @@ test("Copilot CLI ambient context script wraps easel output as hook JSON", async
 });
 
 test("setup hooks installs agent session hooks explicitly", async () => {
-  const stateDir = await mkdtemp(`${os.tmpdir()}/easel-setup-state-`);
-  const homeDir = await mkdtemp(`${os.tmpdir()}/easel-setup-home-`);
+  const stateDir = await mkdtemp(`${os.tmpdir()}/liesel-setup-state-`);
+  const homeDir = await mkdtemp(`${os.tmpdir()}/liesel-setup-home-`);
   try {
     const result = spawnSync(
       process.execPath,
-      [fileURLToPath(new URL("../bin/easel.js", import.meta.url)), "setup", "hooks"],
+      [fileURLToPath(new URL("../bin/liesel.js", import.meta.url)), "setup", "hooks"],
       {
         cwd: fileURLToPath(new URL("..", import.meta.url)),
         encoding: "utf8",
@@ -2532,9 +2536,9 @@ test("setup hooks installs agent session hooks explicitly", async () => {
     assert.match(result.stdout, /GitHub Copilot CLI/);
     assert.match(result.stdout, /Restart your agent session/);
     assert.ok(existsSync(`${homeDir}/.claude/settings.json`));
-    assert.ok(existsSync(`${homeDir}/.copilot/hooks/easel.json`));
+    assert.ok(existsSync(`${homeDir}/.copilot/hooks/liesel.json`));
 
-    const copilotHook = JSON.parse(await readFile(`${homeDir}/.copilot/hooks/easel.json`, "utf8"));
+    const copilotHook = JSON.parse(await readFile(`${homeDir}/.copilot/hooks/liesel.json`, "utf8"));
     assert.equal(copilotHook.version, 1);
     assert.equal(copilotHook.hooks.sessionStart.length, 1);
     assert.match(copilotHook.hooks.sessionStart[0].bash, /additionalContext/);
@@ -2546,15 +2550,15 @@ test("setup hooks installs agent session hooks explicitly", async () => {
 });
 
 test("setup hooks exits with an error when hook installation fails", async () => {
-  const stateDir = await mkdtemp(`${os.tmpdir()}/easel-setup-fail-state-`);
-  const homeDir = await mkdtemp(`${os.tmpdir()}/easel-setup-fail-home-`);
+  const stateDir = await mkdtemp(`${os.tmpdir()}/liesel-setup-fail-state-`);
+  const homeDir = await mkdtemp(`${os.tmpdir()}/liesel-setup-fail-home-`);
   try {
     await mkdir(`${homeDir}/.claude`, { recursive: true });
     await writeFile(`${homeDir}/.claude/settings.json`, "{ invalid json", "utf8");
 
     const result = spawnSync(
       process.execPath,
-      [fileURLToPath(new URL("../bin/easel.js", import.meta.url)), "setup", "hooks"],
+      [fileURLToPath(new URL("../bin/liesel.js", import.meta.url)), "setup", "hooks"],
       {
         cwd: fileURLToPath(new URL("..", import.meta.url)),
         encoding: "utf8",
@@ -2582,7 +2586,7 @@ function setupPluginEnv(homeDir, stateDir, pathDir) {
 }
 
 function runSetupPlugin(homeDir, stateDir, pathDir) {
-  return spawnSync(process.execPath, [fileURLToPath(new URL("../bin/easel.js", import.meta.url)), "setup", "plugin"], {
+  return spawnSync(process.execPath, [fileURLToPath(new URL("../bin/liesel.js", import.meta.url)), "setup", "plugin"], {
     cwd: fileURLToPath(new URL("..", import.meta.url)),
     encoding: "utf8",
     env: setupPluginEnv(homeDir, stateDir, pathDir),
@@ -2599,11 +2603,11 @@ if (command === "plugins list") {
   if (options.invalidList) {
     process.stdout.write("not json\\n");
   } else {
-    const records = [{ kind: "plugin", name: "easel-tools", source: "direct" }];
+    const records = [{ kind: "plugin", name: "liesel-tools", source: "direct" }];
     if (options.installedSource && fs.existsSync(options.installedSource)) {
       records.push(options.listSourcePath
-        ? { kind: "plugin", name: "easel", sourcePath: fs.readFileSync(options.installedSource, "utf8") }
-        : { kind: "plugin", name: "easel", source: "direct" });
+        ? { kind: "plugin", name: "liesel", sourcePath: fs.readFileSync(options.installedSource, "utf8") }
+        : { kind: "plugin", name: "liesel", source: "direct" });
     }
     process.stdout.write(JSON.stringify(records));
   }
@@ -2618,7 +2622,7 @@ if (command === "plugin install") {
   if (options.installedSource) fs.writeFileSync(options.installedSource, pluginRoot);
   if (options.copilotConfig) {
     fs.writeFileSync(options.copilotConfig, JSON.stringify({
-      installedPlugins: [{ name: "easel", source: { source: "local", path: pluginRoot } }],
+      installedPlugins: [{ name: "liesel", source: { source: "local", path: pluginRoot } }],
     }));
   }
   if (options.installLog) fs.appendFileSync(options.installLog, "install\\n");
@@ -2639,26 +2643,26 @@ process.exit(1);
 }
 
 test("setup plugin registers the installed package in the clients that are present", async () => {
-  const stateDir = await mkdtemp(`${os.tmpdir()}/easel-plugin-state-`);
-  const homeDir = await mkdtemp(`${os.tmpdir()}/easel-plugin-home-`);
-  const pathDir = await mkdtemp(`${os.tmpdir()}/easel-plugin-path-`);
+  const stateDir = await mkdtemp(`${os.tmpdir()}/liesel-plugin-state-`);
+  const homeDir = await mkdtemp(`${os.tmpdir()}/liesel-plugin-home-`);
+  const pathDir = await mkdtemp(`${os.tmpdir()}/liesel-plugin-path-`);
   try {
     await mkdir(`${homeDir}/.cursor`, { recursive: true });
 
     const result = runSetupPlugin(homeDir, stateDir, pathDir);
 
     assert.equal(result.status, 0, result.stderr || result.stdout);
-    assert.match(result.stdout, /name: easel/);
+    assert.match(result.stdout, /name: liesel/);
     assert.match(result.stdout, /cursor,registered/);
     // No VS Code settings and no copilot binary in this environment.
     assert.match(result.stdout, /vscode,absent/);
     assert.match(result.stdout, /copilot,absent/);
 
     // The registered slot points at the package root, which is where plugin.json lives.
-    const linked = await realpath(`${homeDir}/.cursor/plugins/local/easel`);
+    const linked = await realpath(`${homeDir}/.cursor/plugins/local/liesel`);
     assert.equal(linked, await realpath(fileURLToPath(new URL("..", import.meta.url))));
     assert.ok(existsSync(`${linked}/plugin.json`));
-    assert.ok(existsSync(`${linked}/skills/easel/SKILL.md`));
+    assert.ok(existsSync(`${linked}/skills/liesel/SKILL.md`));
   } finally {
     await rm(stateDir, { force: true, recursive: true });
     await rm(homeDir, { force: true, recursive: true });
@@ -2667,9 +2671,9 @@ test("setup plugin registers the installed package in the clients that are prese
 });
 
 test("setup plugin registers VS Code without disturbing existing settings", async () => {
-  const stateDir = await mkdtemp(`${os.tmpdir()}/easel-plugin-vs-state-`);
-  const homeDir = await mkdtemp(`${os.tmpdir()}/easel-plugin-vs-home-`);
-  const pathDir = await mkdtemp(`${os.tmpdir()}/easel-plugin-vs-path-`);
+  const stateDir = await mkdtemp(`${os.tmpdir()}/liesel-plugin-vs-state-`);
+  const homeDir = await mkdtemp(`${os.tmpdir()}/liesel-plugin-vs-home-`);
+  const pathDir = await mkdtemp(`${os.tmpdir()}/liesel-plugin-vs-path-`);
   const settingsFile = resolveVsCodeSettingsFile({}, homeDir);
   try {
     await mkdir(path.dirname(settingsFile), { recursive: true });
@@ -2698,9 +2702,9 @@ test("setup plugin registers VS Code without disturbing existing settings", asyn
 });
 
 test("setup plugin creates VS Code settings for a fresh installation", async () => {
-  const stateDir = await mkdtemp(`${os.tmpdir()}/easel-plugin-vs-fresh-state-`);
-  const homeDir = await mkdtemp(`${os.tmpdir()}/easel-plugin-vs-fresh-home-`);
-  const pathDir = await mkdtemp(`${os.tmpdir()}/easel-plugin-vs-fresh-path-`);
+  const stateDir = await mkdtemp(`${os.tmpdir()}/liesel-plugin-vs-fresh-state-`);
+  const homeDir = await mkdtemp(`${os.tmpdir()}/liesel-plugin-vs-fresh-home-`);
+  const pathDir = await mkdtemp(`${os.tmpdir()}/liesel-plugin-vs-fresh-path-`);
   const settingsFile = resolveVsCodeSettingsFile({}, homeDir);
   try {
     await mkdir(path.dirname(settingsFile), { recursive: true });
@@ -2721,9 +2725,9 @@ test("setup plugin creates VS Code settings for a fresh installation", async () 
 });
 
 test("setup plugin leaves unparseable VS Code settings alone", async () => {
-  const stateDir = await mkdtemp(`${os.tmpdir()}/easel-plugin-jsonc-state-`);
-  const homeDir = await mkdtemp(`${os.tmpdir()}/easel-plugin-jsonc-home-`);
-  const pathDir = await mkdtemp(`${os.tmpdir()}/easel-plugin-jsonc-path-`);
+  const stateDir = await mkdtemp(`${os.tmpdir()}/liesel-plugin-jsonc-state-`);
+  const homeDir = await mkdtemp(`${os.tmpdir()}/liesel-plugin-jsonc-home-`);
+  const pathDir = await mkdtemp(`${os.tmpdir()}/liesel-plugin-jsonc-path-`);
   const settingsFile = resolveVsCodeSettingsFile({}, homeDir);
   const original = '{\n  // VS Code settings allow comments\n  "editor.fontSize": 13,\n}\n';
   try {
@@ -2743,9 +2747,9 @@ test("setup plugin leaves unparseable VS Code settings alone", async () => {
 });
 
 test("setup plugin repairs Copilot registration without trusting list text", async () => {
-  const stateDir = await mkdtemp(`${os.tmpdir()}/easel-plugin-copilot-state-`);
-  const homeDir = await mkdtemp(`${os.tmpdir()}/easel-plugin-copilot-home-`);
-  const pathDir = await mkdtemp(`${os.tmpdir()}/easel-plugin-copilot-path-`);
+  const stateDir = await mkdtemp(`${os.tmpdir()}/liesel-plugin-copilot-state-`);
+  const homeDir = await mkdtemp(`${os.tmpdir()}/liesel-plugin-copilot-home-`);
+  const pathDir = await mkdtemp(`${os.tmpdir()}/liesel-plugin-copilot-path-`);
   const installedSource = path.join(homeDir, "copilot-installed-source");
   const installLog = path.join(homeDir, "copilot-install-log");
   const copilotConfig = path.join(homeDir, ".copilot", "config.json");
@@ -2768,10 +2772,10 @@ test("setup plugin repairs Copilot registration without trusting list text", asy
     assert.equal(await realpath(await readFile(installedSource, "utf8")), pluginRoot);
     assert.equal(await readFile(installLog, "utf8"), "install\n");
 
-    await writeFile(installedSource, "/stale/easel");
+    await writeFile(installedSource, "/stale/liesel");
     await writeFile(
       copilotConfig,
-      '{"installedPlugins":[{"name":"easel","source":{"source":"local","path":"/stale/easel"}}]}',
+      '{"installedPlugins":[{"name":"liesel","source":{"source":"local","path":"/stale/liesel"}}]}',
     );
     const repaired = runSetupPlugin(homeDir, stateDir, pathDir);
 
@@ -2787,11 +2791,11 @@ test("setup plugin repairs Copilot registration without trusting list text", asy
 });
 
 test("setup plugin preserves Copilot registration when replacement fails", async () => {
-  const stateDir = await mkdtemp(`${os.tmpdir()}/easel-plugin-copilot-failure-state-`);
-  const homeDir = await mkdtemp(`${os.tmpdir()}/easel-plugin-copilot-failure-home-`);
-  const pathDir = await mkdtemp(`${os.tmpdir()}/easel-plugin-copilot-failure-path-`);
+  const stateDir = await mkdtemp(`${os.tmpdir()}/liesel-plugin-copilot-failure-state-`);
+  const homeDir = await mkdtemp(`${os.tmpdir()}/liesel-plugin-copilot-failure-home-`);
+  const pathDir = await mkdtemp(`${os.tmpdir()}/liesel-plugin-copilot-failure-path-`);
   const installedSource = path.join(homeDir, "copilot-installed-source");
-  const originalSource = "/working/easel";
+  const originalSource = "/working/liesel";
   try {
     await writeFile(installedSource, originalSource);
     await writeCopilotCommandStub(pathDir, { installedSource, listSourcePath: true, installFails: true });
@@ -2809,9 +2813,9 @@ test("setup plugin preserves Copilot registration when replacement fails", async
 });
 
 test("setup plugin does not install when Copilot records are invalid", async () => {
-  const stateDir = await mkdtemp(`${os.tmpdir()}/easel-plugin-copilot-invalid-state-`);
-  const homeDir = await mkdtemp(`${os.tmpdir()}/easel-plugin-copilot-invalid-home-`);
-  const pathDir = await mkdtemp(`${os.tmpdir()}/easel-plugin-copilot-invalid-path-`);
+  const stateDir = await mkdtemp(`${os.tmpdir()}/liesel-plugin-copilot-invalid-state-`);
+  const homeDir = await mkdtemp(`${os.tmpdir()}/liesel-plugin-copilot-invalid-home-`);
+  const pathDir = await mkdtemp(`${os.tmpdir()}/liesel-plugin-copilot-invalid-path-`);
   const installLog = path.join(homeDir, "copilot-install-log");
   try {
     await writeCopilotCommandStub(pathDir, { invalidList: true, installLog });
@@ -2829,14 +2833,14 @@ test("setup plugin does not install when Copilot records are invalid", async () 
 });
 
 test("setup plugin isolates a client it cannot register from the ones it can", async () => {
-  const stateDir = await mkdtemp(`${os.tmpdir()}/easel-plugin-iso-state-`);
-  const homeDir = await mkdtemp(`${os.tmpdir()}/easel-plugin-iso-home-`);
-  const pathDir = await mkdtemp(`${os.tmpdir()}/easel-plugin-iso-path-`);
+  const stateDir = await mkdtemp(`${os.tmpdir()}/liesel-plugin-iso-state-`);
+  const homeDir = await mkdtemp(`${os.tmpdir()}/liesel-plugin-iso-home-`);
+  const pathDir = await mkdtemp(`${os.tmpdir()}/liesel-plugin-iso-path-`);
   const settingsFile = resolveVsCodeSettingsFile({}, homeDir);
   try {
     // A real directory in Cursor's slot is unregisterable - the same reported (not thrown)
     // path a Windows box without Developer Mode takes when link creation is refused.
-    const occupied = `${homeDir}/.cursor/plugins/local/easel`;
+    const occupied = `${homeDir}/.cursor/plugins/local/liesel`;
     await mkdir(occupied, { recursive: true });
     await writeFile(`${occupied}/keep.txt`, "user content", "utf8");
     await mkdir(path.dirname(settingsFile), { recursive: true });
@@ -2859,12 +2863,12 @@ test("setup plugin isolates a client it cannot register from the ones it can", a
 });
 
 test("setup rejects an unknown action and names both supported ones", async () => {
-  const stateDir = await mkdtemp(`${os.tmpdir()}/easel-setup-unknown-state-`);
-  const homeDir = await mkdtemp(`${os.tmpdir()}/easel-setup-unknown-home-`);
+  const stateDir = await mkdtemp(`${os.tmpdir()}/liesel-setup-unknown-state-`);
+  const homeDir = await mkdtemp(`${os.tmpdir()}/liesel-setup-unknown-home-`);
   try {
     const result = spawnSync(
       process.execPath,
-      [fileURLToPath(new URL("../bin/easel.js", import.meta.url)), "setup", "everything"],
+      [fileURLToPath(new URL("../bin/liesel.js", import.meta.url)), "setup", "everything"],
       {
         cwd: fileURLToPath(new URL("..", import.meta.url)),
         encoding: "utf8",
@@ -2906,7 +2910,7 @@ test("server spawn options can persist detached server output to a log fd", () =
 });
 
 test("detached server entry dispatches the CLI", () => {
-  const entry = fileURLToPath(new URL("../bin/easel-server.js", import.meta.url));
+  const entry = fileURLToPath(new URL("../bin/liesel-server.js", import.meta.url));
   const result = spawnSync(process.execPath, [entry, "--version"], { encoding: "utf8" });
   assert.equal(result.status, 0);
   assert.match(result.stdout, /\d+\.\d+\.\d+/);
@@ -2916,8 +2920,8 @@ test("local built CLI opens force a server restart while source and installed ru
   const root = fileURLToPath(new URL("..", import.meta.url));
 
   assert.equal(shouldForceRestartForLocalBuild(`${root}/dist/cli.mjs`, true), true);
-  assert.equal(shouldForceRestartForLocalBuild(`${root}/bin/easel.js`, true), false);
-  assert.equal(shouldForceRestartForLocalBuild("/usr/local/lib/node_modules/easel/dist/cli.mjs", false), false);
+  assert.equal(shouldForceRestartForLocalBuild(`${root}/bin/liesel.js`, true), false);
+  assert.equal(shouldForceRestartForLocalBuild("/usr/local/lib/node_modules/liesel/dist/cli.mjs", false), false);
 });
 
 test("shouldRestartServer reuses a server running the same version", () => {
@@ -2930,7 +2934,7 @@ test("shouldRestartServer restarts a same-version server after a Tailscale trans
   assert.equal(serverReplacementReason("0.1.4", health), "");
 });
 
-test("shouldRestartServer restarts same-version Easel servers when forced", () => {
+test("shouldRestartServer restarts same-version Liesel servers when forced", () => {
   assert.equal(shouldRestartServer("0.1.4", { ok: true, app: SERVER_APP_ID, version: "0.1.4" }, true), true);
   assert.equal(shouldRestartServer("0.1.4", { ok: true, app: "other", version: "0.1.4" }, true), false);
 });
@@ -3013,21 +3017,21 @@ test("shouldKillProcessOnPort does not kill unidentified health responders", () 
   assert.equal(shouldKillProcessOnPort("0.1.4", { ok: true, app: "other", version: "0.1.3" }), false);
 });
 
-test("shouldKillProcessOnPort kills pre-handshake Easel servers after shutdown fails", () => {
+test("shouldKillProcessOnPort kills pre-handshake Liesel servers after shutdown fails", () => {
   assert.equal(shouldKillProcessOnPort("0.1.4", { ok: true }), true);
 });
 
-test("shouldKillProcessOnPort only kills Easel servers with a mismatched version", () => {
+test("shouldKillProcessOnPort only kills Liesel servers with a mismatched version", () => {
   assert.equal(shouldKillProcessOnPort("0.1.4", { ok: true, app: SERVER_APP_ID, version: "0.1.3" }), true);
   assert.equal(shouldKillProcessOnPort("0.1.4", { ok: true, app: SERVER_APP_ID, version: "0.1.4" }), false);
 });
 
-test("shouldKillProcessOnPort leaves an Easel server that is newer than the CLI", () => {
+test("shouldKillProcessOnPort leaves a Liesel server that is newer than the CLI", () => {
   assert.equal(shouldKillProcessOnPort("0.1.4", { ok: true, app: SERVER_APP_ID, version: "0.1.5" }), false);
   assert.equal(shouldKillProcessOnPort("0.1.10", { ok: true, app: SERVER_APP_ID, version: "0.1.9" }), true);
 });
 
-test("shutdownServerOnPort kills pre-handshake Easel servers when shutdown does not free the port", async () => {
+test("shutdownServerOnPort kills pre-handshake Liesel servers when shutdown does not free the port", async () => {
   let shutdowns = 0;
   let kills = 0;
   const portFreeResults = [false, true];
@@ -3044,7 +3048,7 @@ test("shutdownServerOnPort kills pre-handshake Easel servers when shutdown does 
       kills += 1;
       return true;
     },
-    processMatchesEasel: () => true,
+    processMatchesLiesel: () => true,
   });
 
   assert.equal(shutdowns, 1);
@@ -3068,19 +3072,19 @@ test("shutdownServerOnPort ignores unidentified health responders", async () => 
       kills += 1;
       return true;
     },
-    processMatchesEasel: () => false,
+    processMatchesLiesel: () => false,
   });
 
   assert.equal(shutdowns, 0);
   assert.equal(kills, 0);
-  assert.deepEqual(output, { server: { status: "not-easel", port: 4387 } });
+  assert.deepEqual(output, { server: { status: "not-liesel", port: 4387 } });
 });
 
 test("open can resume a session without opening another browser window", () => {
   assert.equal(shouldOpenBrowser(["--no-open", "artifact.html"], {}), false);
   assert.equal(shouldOpenBrowser(["artifact.html", "--no-open"], {}), false);
   assert.equal(shouldOpenBrowser(["--no-gate", "artifact.html"], {}), true);
-  assert.equal(shouldOpenBrowser(["artifact.html"], { EASEL_NO_OPEN: "1" }), false);
+  assert.equal(shouldOpenBrowser(["artifact.html"], { LIESEL_NO_OPEN: "1" }), false);
   assert.equal(shouldOpenBrowser(["artifact.html"], {}), true);
   assert.match(getCommandHelp("open"), /--no-open/);
   assert.match(getCommandHelp("open"), /--no-gate/);
@@ -3091,7 +3095,7 @@ test("open can resume a session without opening another browser window", () => {
   assert.doesNotMatch(getCommandHelp("playbook"), new RegExp(`${"di"}ff, input`));
   assert.doesNotMatch(getCommandHelp("playbook"), /interactive/);
   assert.match(getCommandHelp("design"), /DaisyUI/);
-  assert.match(getCommandHelp("design"), /easel design/);
+  assert.match(getCommandHelp("design"), /liesel design/);
   assert.match(getCommandHelp("design"), /portable/);
   assert.ok(getCommandHelp("design").includes(DESIGN_PRIORITY_RULE), "design help embeds the single-sourced rule");
   assert.match(getCommandHelp("design"), /fallback, not the default/i);
@@ -3105,21 +3109,21 @@ test("polling a file without an active session tells the agent to open it first"
     (error) => {
       assert.ok(error instanceof AxiError);
       assert.equal(error.code, "NOT_FOUND");
-      assert.match(error.message, /No active Easel session/);
-      assert.ok(error.suggestions.some((item) => item.includes("easel /tmp/report.html")));
+      assert.match(error.message, /No active Liesel session/);
+      assert.ok(error.suggestions.some((item) => item.includes("liesel /tmp/report.html")));
       return true;
     },
   );
 });
 
-test("network fetch failures become structured Easel server errors", async () => {
+test("network fetch failures become structured Liesel server errors", async () => {
   await assert.rejects(
     () => fetchJson("http://127.0.0.1:1/api/poll"),
     (error) => {
       assert.ok(error instanceof AxiError);
       assert.equal(error.code, "SERVER_ERROR");
-      assert.match(error.message, /Easel server connection failed/);
-      assert.ok(error.suggestions.some((item) => item.includes("easel server --verbose")));
+      assert.match(error.message, /Liesel server connection failed/);
+      assert.ok(error.suggestions.some((item) => item.includes("liesel server --verbose")));
       return true;
     },
   );
@@ -3182,25 +3186,25 @@ test("fetchJson reports interrupted response body failures without retrying", as
 });
 
 test("stop command shuts down the running server on the configured port", async () => {
-  const dir = await mkdtemp(`${os.tmpdir()}/easel-stop-test-`);
+  const dir = await mkdtemp(`${os.tmpdir()}/liesel-stop-test-`);
   const server = await serve({ port: 0, stateFile: `${dir}/state.json`, version: "9.9.9-test" });
-  const previousStateDir = process.env.EASEL_STATE_DIR;
-  process.env.EASEL_STATE_DIR = dir;
+  const previousStateDir = process.env.LIESEL_STATE_DIR;
+  process.env.LIESEL_STATE_DIR = dir;
   try {
     const output = await stopCommand(["--port", String(server.port)]);
     assert.deepEqual(output, { server: { status: "stopped", port: server.port } });
     await server.done;
     await assert.rejects(() => fetch(`http://127.0.0.1:${server.port}/health`), /fetch failed|ECONNREFUSED/);
   } finally {
-    if (previousStateDir === undefined) delete process.env.EASEL_STATE_DIR;
-    else process.env.EASEL_STATE_DIR = previousStateDir;
+    if (previousStateDir === undefined) delete process.env.LIESEL_STATE_DIR;
+    else process.env.LIESEL_STATE_DIR = previousStateDir;
     await server.close();
     await rm(dir, { force: true, recursive: true });
   }
 });
 
 test("stop command reports when no server is running", async () => {
-  const dir = await mkdtemp(`${os.tmpdir()}/easel-stop-test-`);
+  const dir = await mkdtemp(`${os.tmpdir()}/liesel-stop-test-`);
   try {
     // Bind then release a port so we know nothing is listening on it.
     const probe = await serve({ port: 0, stateFile: `${dir}/state.json` });
@@ -3273,7 +3277,7 @@ async function startShutdownRecorder(version = "0.0.0-previous") {
   return { bodies, port: address.port, close: () => server.close() };
 }
 
-test("easel stop tells the server it was stopped, and names no session to reload", async () => {
+test("liesel stop tells the server it was stopped, and names no session to reload", async () => {
   const recorder = await startShutdownRecorder();
   try {
     const output = await shutdownServerOnPort(recorder.port, {
@@ -3293,7 +3297,7 @@ test("easel stop tells the server it was stopped, and names no session to reload
 // one silently degrades the feature to "nobody reloads, everybody gets a banner".
 test("opening an artifact names that session as the one to reload across a version upgrade", async () => {
   const recorder = await startShutdownRecorder();
-  const dir = await mkdtemp(path.join(os.tmpdir(), "easel-open-reload-"));
+  const dir = await mkdtemp(path.join(os.tmpdir(), "liesel-open-reload-"));
   const stateDir = path.join(dir, "state");
   const nested = path.join(dir, "pages");
   await mkdir(nested, { recursive: true });
@@ -3308,7 +3312,7 @@ test("opening an artifact names that session as the one to reload across a versi
       process.execPath,
       // A path with a `..` hop: the key must come from the canonicalized file, not this spelling.
       [
-        fileURLToPath(new URL("../bin/easel.js", import.meta.url)),
+        fileURLToPath(new URL("../bin/liesel.js", import.meta.url)),
         path.join(nested, "..", "pages", "board.html"),
         "--no-open",
       ],
@@ -3316,9 +3320,9 @@ test("opening an artifact names that session as the one to reload across a versi
         cwd: fileURLToPath(new URL("..", import.meta.url)),
         env: {
           ...process.env,
-          EASEL_PORT: String(recorder.port),
-          EASEL_STATE_DIR: stateDir,
-          EASEL_TELEMETRY: "0",
+          LIESEL_PORT: String(recorder.port),
+          LIESEL_STATE_DIR: stateDir,
+          LIESEL_TELEMETRY: "0",
         },
         stdio: ["ignore", "pipe", "pipe"],
       },
@@ -3484,7 +3488,7 @@ test("createShareOutput never echoes a password the caller chose", () => {
 });
 
 test("createShareUpdateOutput reports what a plain republish did, not a password state it cannot know", () => {
-  // Easel persists no site state, so a republish of a page created without a password would be
+  // Liesel persists no site state, so a republish of a page created without a password would be
   // misreported by any claim that "the password was left unchanged".
   const output = createShareUpdateOutput({
     source: "/tmp/report.html",
@@ -3524,7 +3528,7 @@ test("createShareUpdateOutput surfaces a rotated password and never claims a pag
 
 test("createShareUpdateOutput does not present a newly set password as an instant gate", () => {
   // Probed live: locking a page that was public left it answering uncredentialed CDN requests for
-  // minutes, and Easel persists no site state, so it cannot know the page was not public.
+  // minutes, and Liesel persists no site state, so it cannot know the page was not public.
   const locked = createShareUpdateOutput({
     source: "/tmp/report.html",
     site: { url: "https://x.ht-ml.app/", site_id: "x", status: "active" },
@@ -3608,11 +3612,11 @@ function fixtureLibraries() {
 
 test("libraries output tells the user where to put files when none are installed", () => {
   const output = createLibrariesOutput({
-    dir: "/home/me/.easel/excalidraw-libraries",
+    dir: "/home/me/.liesel/excalidraw-libraries",
     libraries: [],
     skipped: [],
   });
-  assert.equal(output.dir, "/home/me/.easel/excalidraw-libraries");
+  assert.equal(output.dir, "/home/me/.liesel/excalidraw-libraries");
   assert.deepEqual(output.libraries, []);
   assert.match(output.help.join("\n"), /\.excalidrawlib/);
   assert.equal(output.items, undefined);
@@ -3631,8 +3635,8 @@ test("libraries output lists counts, skips, and points at item search", () => {
   assert.deepEqual(output.skipped, [{ file: "broken.excalidrawlib", reason: "not valid JSON" }]);
   assert.equal(output.items, undefined);
   const help = output.help.join("\n");
-  assert.match(help, /easel libraries --search <text>/);
-  assert.match(help, /easel design/);
+  assert.match(help, /liesel libraries --search <text>/);
+  assert.match(help, /liesel design/);
 });
 
 test("libraries output filters item refs by search terms and library", () => {
@@ -3670,22 +3674,22 @@ test("libraries output bounds long item listings", () => {
 
 test("libraries help documents the command and the directory", () => {
   const help = getCommandHelp("libraries");
-  assert.match(help, /easel libraries \[--search <text>\] \[--library <id>\]/);
+  assert.match(help, /liesel libraries \[--search <text>\] \[--library <id>\]/);
   assert.match(help, /excalidraw-libraries/);
   assert.equal(normalizeArgv(["libraries"])[0], "libraries");
 });
 
 test("design output owns the library icon directive and the diagram playbook points at it", () => {
   const icons = createDesignOutput().whiteboard_tooling.library_icons;
-  assert.match(icons.use_when, /easel libraries/);
-  assert.equal(icons.syntax, "%% easel-icon <node-id> <library-id>/<item name>");
+  assert.match(icons.use_when, /liesel libraries/);
+  assert.equal(icons.syntax, "%% liesel-icon <node-id> <library-id>/<item name>");
   assert.match(icons.example, /^flowchart /);
-  assert.match(icons.example, /%% easel-icon api /);
+  assert.match(icons.example, /%% liesel-icon api /);
   assert.match(icons.notes, /plain node/);
   assert.match(icons.notes, /Added library item/);
 
   const diagram = JSON.stringify(createPlaybookOutput(["diagram"]));
   assert.match(diagram, /whiteboard_tooling\.library_icons/);
-  assert.doesNotMatch(diagram, /%% easel-icon/, "the syntax has one owner surface");
-  assert.doesNotMatch(JSON.stringify(createHomeOutput({ bin: "easel", sessions: [] })), /easel-icon|libraries/);
+  assert.doesNotMatch(diagram, /%% liesel-icon/, "the syntax has one owner surface");
+  assert.doesNotMatch(JSON.stringify(createHomeOutput({ bin: "liesel", sessions: [] })), /liesel-icon|libraries/);
 });

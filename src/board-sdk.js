@@ -42,7 +42,7 @@
     }
   }
   pinWindowHeight();
-  const channel = "easel";
+  const channel = "liesel";
   const state = { pins: [], tuning: {} };
 
   function parentWindow() {
@@ -131,7 +131,7 @@
     const headings = document.querySelectorAll("h1, h2, h3, h4, h5, h6, [role='heading']");
     let found = null;
     for (const heading of headings) {
-      if (heading.closest("[data-easel-ui]")) continue;
+      if (heading.closest("[data-liesel-ui]")) continue;
       if (
         heading instanceof HTMLElement &&
         heading.offsetParent === null &&
@@ -156,11 +156,11 @@
   }
 
   function pinLayer() {
-    let layer = document.getElementById("easel-pins");
+    let layer = document.getElementById("liesel-pins");
     if (layer) return layer;
     layer = document.createElement("div");
-    layer.id = "easel-pins";
-    layer.setAttribute("data-easel-ui", "pins");
+    layer.id = "liesel-pins";
+    layer.setAttribute("data-liesel-ui", "pins");
     layer.style.cssText = "position:absolute;top:0;left:0;width:0;height:0;z-index:2147483000;";
     document.body.appendChild(layer);
     return layer;
@@ -183,7 +183,7 @@
       let element = layer.querySelector(`[data-pin="${CSS.escape(pin.id)}"]`);
       if (!element) {
         element = document.createElement("div");
-        element.className = "easel-pin";
+        element.className = "liesel-pin";
         element.dataset.pin = pin.id;
         element.style.cssText = [
           "position:absolute",
@@ -294,11 +294,11 @@
   }
 
   function hoverLayer() {
-    let layer = document.getElementById("easel-hover");
+    let layer = document.getElementById("liesel-hover");
     if (layer) return layer;
     layer = document.createElement("div");
-    layer.id = "easel-hover";
-    layer.setAttribute("data-easel-ui", "hover");
+    layer.id = "liesel-hover";
+    layer.setAttribute("data-liesel-ui", "hover");
     layer.style.cssText = [
       "position:absolute",
       "pointer-events:none",
@@ -444,7 +444,7 @@
       // value set only on :root, so the body carries the same value and wins.
       if (document.body) document.body.style.setProperty(property, next);
     }
-    window.dispatchEvent(new CustomEvent("easel:tune", { detail: { ...values } }));
+    window.dispatchEvent(new CustomEvent("liesel:tune", { detail: { ...values } }));
   }
 
   /* ---------------------------------------------------------- element tuning */
@@ -831,7 +831,7 @@
     if (element.id) return `${tag}#${element.id}`.slice(0, 40);
     const first = String(element.getAttribute("class") || "")
       .split(/\s+/)
-      .find((name) => name && !name.startsWith("easel"));
+      .find((name) => name && !name.startsWith("liesel"));
     return first ? `${tag}.${first}`.slice(0, 40) : tag;
   }
 
@@ -946,7 +946,7 @@
   function tunePick(x, y, depth = 0) {
     const leaf = document.elementFromPoint(x, y);
     let element =
-      leaf instanceof Element && !leaf.closest("[data-easel-ui]") && leaf !== document.documentElement
+      leaf instanceof Element && !leaf.closest("[data-liesel-ui]") && leaf !== document.documentElement
         ? leaf
         : document.body;
     const picked = element;
@@ -996,7 +996,7 @@
   function elementsFor(selector) {
     try {
       return [...document.querySelectorAll(selector)].filter(
-        (node) => (node instanceof HTMLElement || node instanceof SVGElement) && !node.closest("[data-easel-ui]"),
+        (node) => (node instanceof HTMLElement || node instanceof SVGElement) && !node.closest("[data-liesel-ui]"),
       );
     } catch {
       return [];
@@ -1066,7 +1066,7 @@
   /** @param {Element} node */
   function classPart(node) {
     return [...node.classList]
-      .filter((name) => /^[A-Za-z_-][\w-]*$/.test(name) && !name.startsWith("easel"))
+      .filter((name) => /^[A-Za-z_-][\w-]*$/.test(name) && !name.startsWith("liesel"))
       .slice(0, 3)
       .map((name) => `.${CSS.escape(name)}`)
       .join("");
@@ -1140,7 +1140,7 @@
     let scanned = 0;
     for (const node of element.querySelectorAll("*")) {
       if (++scanned > 800) break;
-      if (node.closest("[data-easel-ui]")) continue;
+      if (node.closest("[data-liesel-ui]")) continue;
       const ownText = [...node.childNodes].some((child) => child.nodeType === 3 && String(child.textContent).trim());
       if (!ownText || value(node) === own) continue;
       // Name the element that sets it, not each line of text that inherits it from there.
@@ -1170,15 +1170,15 @@
   let groupOutline = "";
   function drawGroupOutline(selector = groupOutline) {
     groupOutline = selector;
-    let layer = document.getElementById("easel-group");
+    let layer = document.getElementById("liesel-group");
     if (!selector) {
       layer?.remove();
       return;
     }
     if (!layer) {
       layer = document.createElement("div");
-      layer.id = "easel-group";
-      layer.setAttribute("data-easel-ui", "group");
+      layer.id = "liesel-group";
+      layer.setAttribute("data-liesel-ui", "group");
       layer.style.cssText = "position:absolute;left:0;top:0;pointer-events:none;z-index:2147482890";
       document.body.appendChild(layer);
     }
@@ -1293,7 +1293,7 @@
     } catch {
       element = null;
     }
-    if (!(element instanceof Element) || element.closest("[data-easel-ui]")) return;
+    if (!(element instanceof Element) || element.closest("[data-liesel-ui]")) return;
     reportTuneFor(element);
   }
 
@@ -1381,7 +1381,7 @@
         } catch {
           element = null;
         }
-        drawHover(element instanceof Element && !element.closest("[data-easel-ui]") ? element : null);
+        drawHover(element instanceof Element && !element.closest("[data-liesel-ui]") ? element : null);
         return;
       }
       if (data.type === "tune-element") {
@@ -1411,7 +1411,7 @@
         const target = document.elementFromPoint(x, y);
         // Empty page background still takes a note: it is about that part of the page.
         const usable =
-          target instanceof Element && !target.closest("[data-easel-ui]") && target !== document.documentElement;
+          target instanceof Element && !target.closest("[data-liesel-ui]") && target !== document.documentElement;
         if (data.hover && data.tune) {
           // The controls selector outlines what a click would pick, the whole page included,
           // and says how far up it could go so the board's Up and Down keys stay in range.
@@ -1675,16 +1675,17 @@
 
   function dropTargetAt(x, y) {
     const node = document.elementFromPoint(x, y);
-    if (!(node instanceof Element) || node.closest("[data-easel-ui]") || node === document.documentElement) return null;
+    if (!(node instanceof Element) || node.closest("[data-liesel-ui]") || node === document.documentElement)
+      return null;
     return imageTargetAt(node);
   }
 
   function dropBoxLayer() {
-    let layer = document.getElementById("easel-drop");
+    let layer = document.getElementById("liesel-drop");
     if (layer) return layer;
     layer = document.createElement("div");
-    layer.id = "easel-drop";
-    layer.setAttribute("data-easel-ui", "drop");
+    layer.id = "liesel-drop";
+    layer.setAttribute("data-liesel-ui", "drop");
     layer.style.cssText = [
       "position:fixed",
       "display:none",
@@ -1857,7 +1858,7 @@
     }
     let bottom = 0;
     for (const child of Array.from(body.children)) {
-      if (child.closest("[data-easel-ui]") || /^(SCRIPT|STYLE|LINK|TEMPLATE)$/.test(child.tagName)) continue;
+      if (child.closest("[data-liesel-ui]") || /^(SCRIPT|STYLE|LINK|TEMPLATE)$/.test(child.tagName)) continue;
       const style = getComputedStyle(child);
       if (style.display === "none" || style.position === "fixed") continue;
       const range = document.createRange();
@@ -1946,7 +1947,7 @@
   function requestStylesheet(sheet) {
     const link = sheet.ownerNode;
     if (!link || link.nodeName !== "LINK" || !sheet.href || sheetsPending.has(sheet.href)) return;
-    if (link.hasAttribute("data-easel-pinned")) return;
+    if (link.hasAttribute("data-liesel-pinned")) return;
     sheetsPending.set(sheet.href, link);
     post({ type: "stylesheet", href: sheet.href });
     // A board that never answers must not hold the size back for good.
@@ -1980,11 +1981,11 @@
           (_match, amount) => `${((Number(amount) * pinnedVh) / 100).toFixed(2)}px`,
         );
       const style = document.createElement("style");
-      style.setAttribute("data-easel-pinned", href);
+      style.setAttribute("data-liesel-pinned", href);
       if (link.media) style.media = link.media;
       style.textContent = css;
       link.after(style);
-      link.setAttribute("data-easel-pinned", "");
+      link.setAttribute("data-liesel-pinned", "");
       link.disabled = true;
     }
     if (sheetsPending.size === 0) scheduleSize();
@@ -2011,7 +2012,7 @@
   // still works. Only this served document changes, never the file.
   if (deviceId === "ipad" || deviceId === "phone") {
     const style = document.createElement("style");
-    style.setAttribute("data-easel-ui", "scrollbars");
+    style.setAttribute("data-liesel-ui", "scrollbars");
     style.textContent =
       "html,body{scrollbar-width:none!important}html::-webkit-scrollbar,body::-webkit-scrollbar{display:none!important}";
     (document.head || document.documentElement).appendChild(style);

@@ -2242,7 +2242,7 @@ test("records a warning and leaves the reference when a local resource cannot be
   assert.equal(warnings[0].kind, "load-failed");
 });
 
-test("strips the injected Easel SDK script so exports do not phone home to the server", async () => {
+test("strips the injected Liesel SDK script so exports do not phone home to the server", async () => {
   const html = '<!doctype html><html><body><h1>Hi</h1><script src="/sdk.js?key=abc"></script></body></html>';
   const { html: out } = await buildSelfContainedHtml(html, { baseDir: "/art", readLocalFile: localReader({}) });
 
@@ -2445,7 +2445,7 @@ test("warns on an unmapped root-absolute base href without other assets", async 
 });
 
 test("default reader allows trusted root-absolute mapped design assets outside the artifact root", async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "easel-export-"));
+  const root = await mkdtemp(path.join(os.tmpdir(), "liesel-export-"));
   try {
     const artDir = path.join(root, "art");
     const designDir = path.join(root, "pkg", "design");
@@ -3250,7 +3250,7 @@ test("does not treat property import calls as module imports", async () => {
 });
 
 test("refuses to inline a local symlink that escapes the artifact directory", async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "easel-export-"));
+  const root = await mkdtemp(path.join(os.tmpdir(), "liesel-export-"));
   try {
     const artDir = path.join(root, "art");
     const outsideDir = path.join(root, "outside");
@@ -3287,7 +3287,7 @@ test("skips a local asset that exceeds the per-asset size cap and leaves it as a
 });
 
 test("default reader rejects oversized assets before attempting to read them", async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "easel-export-"));
+  const root = await mkdtemp(path.join(os.tmpdir(), "liesel-export-"));
   const big = path.join(root, "big.png");
   try {
     await writeFile(big, Buffer.alloc(2048, 1));
@@ -3317,7 +3317,7 @@ test("exportFileName derives a portable .export.html name", () => {
 });
 
 test("keeps Mermaid library icon comments so exports render the plain node", async () => {
-  const diagram = "flowchart LR\n  %% easel-icon api aws-architecture-icons/AWS Lambda\n  user --&gt; api[Orders API]";
+  const diagram = "flowchart LR\n  %% liesel-icon api aws-architecture-icons/AWS Lambda\n  user --&gt; api[Orders API]";
   const html = `<!doctype html><html><body><pre class="mermaid">${diagram}</pre></body></html>`;
   const { html: out, warnings } = await buildSelfContainedHtml(html, {
     baseDir: "/art",

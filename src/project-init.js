@@ -1,5 +1,5 @@
-// `easel init`: turn any project folder into one an agent can review designs in. It makes a
-// board folder with a starter item, writes EASEL.md (the loop, for any agent that can run a
+// `liesel init`: turn any project folder into one an agent can review designs in. It makes a
+// board folder with a starter item, writes LIESEL.md (the loop, for any agent that can run a
 // shell command), and appends a short pointer section to the agent instruction files the
 // common harnesses read. Nothing the project already has is ever overwritten.
 import { existsSync } from "node:fs";
@@ -11,9 +11,9 @@ import { CLI_NAME, PRODUCT_NAME } from "./brand.js";
 
 export const DEFAULT_BOARD_DIR = "board";
 export const STARTER_FILE = "welcome.html";
-export const GUIDE_FILE = "EASEL.md";
-export const AGENT_SECTION_START = "<!-- easel:start -->";
-export const AGENT_SECTION_END = "<!-- easel:end -->";
+export const GUIDE_FILE = "LIESEL.md";
+export const AGENT_SECTION_START = "<!-- liesel:start -->";
+export const AGENT_SECTION_END = "<!-- liesel:end -->";
 
 // AGENTS.md is read by Codex, Cursor, OpenCode, Amp, Copilot and others; Claude Code reads
 // CLAUDE.md. Both are created when missing. GEMINI.md is only appended to when the project
@@ -34,7 +34,7 @@ export function createGuideMarkdown(boardDir) {
   const board = boardDir;
   return `# ${PRODUCT_NAME}
 
-This project reviews designs on an ${PRODUCT_NAME} board. \`${board}/\` holds \`board.json\` plus one HTML file per design. The reviewer looks at the designs in a browser, leaves notes on them, and sends the notes to you. Any agent that can run a shell command can work this loop.
+This project reviews designs on a ${PRODUCT_NAME} board. \`${board}/\` holds \`board.json\` plus one HTML file per design. The reviewer looks at the designs in a browser, leaves notes on them, and sends the notes to you. Any agent that can run a shell command can work this loop.
 
 ## The loop
 
@@ -50,8 +50,8 @@ Every command ends its output with a \`next_step\`. Follow it: it is the current
 ## Design files
 
 - One self-contained HTML file per design. Relative assets next to it (\`style.css\`, \`assets/\`) load as usual.
-- \`<meta name="easel-title" content="...">\` and \`<meta name="easel-explain" content="...">\` set the heading and the line the board shows above a design.
-- For a new version of an existing design, write a new file with \`<meta name="easel-parent" content="<item-id>">\`; it sits under its parent so the two can be compared.
+- \`<meta name="liesel-title" content="...">\` and \`<meta name="liesel-explain" content="...">\` set the heading and the line the board shows above a design.
+- For a new version of an existing design, write a new file with \`<meta name="liesel-parent" content="<item-id>">\`; it sits under its parent so the two can be compared.
 `;
 }
 
@@ -63,7 +63,7 @@ export function createAgentSection(boardDir) {
   return `${AGENT_SECTION_START}
 ## ${PRODUCT_NAME} design board
 
-Designs for this project are reviewed on an ${PRODUCT_NAME} board in \`${boardDir}/\`. Before design or UI work the user wants to review, read \`${GUIDE_FILE}\`: it is the loop for opening the board, adding designs, and collecting the reviewer's notes with \`${CLI_NAME} poll ${boardDir}\`.
+Designs for this project are reviewed on a ${PRODUCT_NAME} board in \`${boardDir}/\`. Before design or UI work the user wants to review, read \`${GUIDE_FILE}\`: it is the loop for opening the board, adding designs, and collecting the reviewer's notes with \`${CLI_NAME} poll ${boardDir}\`.
 ${AGENT_SECTION_END}
 `;
 }
@@ -80,8 +80,8 @@ export function createStarterHtml(name) {
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="easel-title" content="Welcome" />
-    <meta name="easel-explain" content="A starter design to try the board on. Ask your agent to replace it." />
+    <meta name="liesel-title" content="Welcome" />
+    <meta name="liesel-explain" content="A starter design to try the board on. Ask your agent to replace it." />
     <title>${title}</title>
     <style>
       :root {
@@ -142,7 +142,7 @@ export function createStarterHtml(name) {
   <body>
     <main>
       <h1>${title} is ready for review</h1>
-      <p>This page is a placeholder. Leave a note on it, then ask your agent to read EASEL.md and build the real thing.</p>
+      <p>This page is a placeholder. Leave a note on it, then ask your agent to read LIESEL.md and build the real thing.</p>
       <ul>
         <li><kbd>Cmd</kbd><span>Tap to turn notes on, click anything to pin a note, tap again to turn them off.</span></li>
         <li><kbd>Option</kbd><span>Tap to pick an element and tune its colour, type and spacing in Controls.</span></li>

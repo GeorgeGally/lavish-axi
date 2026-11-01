@@ -144,7 +144,7 @@ export function createBoardHtml(
       <label class="agent-field" id="agentCommandField" hidden>
         <span class="agent-label">Command</span>
         <input class="agent-input" id="agentCommand" type="text" spellcheck="false" autocomplete="off" placeholder="my-agent --headless">
-        <span class="agent-hint">Runs in the folder below. The notes arrive on stdin and in <code>$EASEL_PROMPT_FILE</code>; what it prints becomes the reply.</span>
+        <span class="agent-hint">Runs in the folder below. The notes arrive on stdin and in <code>$LIESEL_PROMPT_FILE</code>; what it prints becomes the reply.</span>
       </label>
       <label class="agent-field" id="agentCwdField">
         <span class="agent-label">Working folder</span>
@@ -168,8 +168,8 @@ export function createBoardHtml(
   </section>
 </aside>
 <button class="chat-open" id="chatOpen" type="button" hidden>Notes</button>
-<div class="ended" id="ended" hidden>Session ended. Run <code>easel board open</code> when you want it reopened.</div>
-<script id="easel-board" type="application/json">${bootstrap}</script>
+<div class="ended" id="ended" hidden>Session ended. Run <code>liesel board open</code> when you want it reopened.</div>
+<script id="liesel-board" type="application/json">${bootstrap}</script>
 <script src="/dialkit/browser.global.js"></script>
 <script src="/board-client.js?v=${encodeURIComponent(assetVersion)}"></script>
 </body>

@@ -1,24 +1,24 @@
 /* global document, location, window */
 
-const sessionDataElement = document.getElementById("easel-session");
+const sessionDataElement = document.getElementById("liesel-session");
 const sessionData = JSON.parse(sessionDataElement?.textContent || "{}");
 const key = String(sessionData.key || "");
 const filePath = String(sessionData.file || "");
-const queueStorageKey = "easel:queued:" + key;
-const terminalStorageKey = "easel:terminal:" + key;
+const queueStorageKey = "liesel:queued:" + key;
+const terminalStorageKey = "liesel:terminal:" + key;
 // Review-chrome state that must survive a browser refresh. Keyed per session so one review's
 // triage can never leak into another artifact's.
-const warningSelectionStorageKey = "easel:warning-selection:" + key;
+const warningSelectionStorageKey = "liesel:warning-selection:" + key;
 // Unsent annotation-card text lives only in the sandboxed iframe, so a full page reload would
 // destroy it unless the chrome persists what the SDK reports. Keyed per session like the queue,
 // so a draft can never reappear over a different artifact.
-const reviewStateStorageKey = "easel:review-state:" + key;
-// Drafts Easel could not replay. The text outlives the draft that carried it, so the user can
+const reviewStateStorageKey = "liesel:review-state:" + key;
+// Drafts Liesel could not replay. The text outlives the draft that carried it, so the user can
 // still read and copy it after the anchor it was written against is gone for good.
-const retiredDraftStorageKey = "easel:retired-drafts:" + key;
+const retiredDraftStorageKey = "liesel:retired-drafts:" + key;
 /** @type {any[]} */
 const retiredDraftNodes = [];
-const internalQueueKeyField = "_easelQueueKey";
+const internalQueueKeyField = "_lieselQueueKey";
 const promptIdentityField = "prompt_id";
 const PROMPT_IDENTITY_MAX = 128;
 const PROMPT_IDENTITY_RE = /^[A-Za-z0-9_-]+$/;
@@ -170,7 +170,7 @@ const layoutGateTitle = /** @type {HTMLDivElement} */ (document.getElementById("
 const layoutGateCopy = /** @type {HTMLParagraphElement} */ (document.getElementById("layoutGateCopy"));
 const layoutGateAction = /** @type {HTMLButtonElement} */ (document.getElementById("layoutGateAction"));
 const layoutGateBypass = /** @type {HTMLButtonElement} */ (document.getElementById("layoutGateBypass"));
-const layoutGateEscape = /** @type {any} */ (window).__easelLayoutGateEscape;
+const layoutGateEscape = /** @type {any} */ (window).__lieselLayoutGateEscape;
 const warningsWrap = /** @type {HTMLDivElement} */ (document.getElementById("warningsWrap"));
 const warningsButton = /** @type {HTMLButtonElement} */ (document.getElementById("warningsButton"));
 const warningsCount = /** @type {HTMLSpanElement} */ (document.getElementById("warningsCount"));
@@ -272,7 +272,7 @@ let editingDraft = "";
 let editFocusPending = false;
 // The selector list last told to the artifact, so a render that changes nothing stays quiet.
 let postedQueuedAnchors = "[]";
-// In-iframe review context (an open annotation card's unsent text, Easel-owned question
+// In-iframe review context (an open annotation card's unsent text, Liesel-owned question
 // answers). The sandbox means the chrome cannot read it back after a reload, so the SDK reports
 // it as it changes and the chrome replays it once the new document is up. It is persisted per
 // session so a full page reload replays it too.
@@ -282,7 +282,7 @@ const ARTIFACT_SILENCE_PROBE_MS = 8000;
 const ARTIFACT_LOAD_BEGIN_RETRY_DELAYS_MS = [100, 300];
 // Backoff for retrying a whole begin-load attempt after its in-call retries ran out. The
 // in-call retries span 400ms, which only covers a slow response - not the multi-second window
-// where the server is being replaced (a version-driven restart, or another `easel <file>`
+// where the server is being replaced (a version-driven restart, or another `liesel <file>`
 // invocation restarting the shared server). Without these the chrome abandons the artifact for
 // good: the frame is never navigated, `artifact_revision` never advances, and the page sits on
 // the layout gate and then on an empty frame with nothing to click.
@@ -308,14 +308,14 @@ const TERMINAL_PREPARATION_TIMEOUT_MS = 5000;
 // answering), deliver those words without a snapshot instead of waiting forever.
 const SNAPSHOT_REQUEST_TIMEOUT_MS = 5000;
 const SEND_STALLED_COPY =
-  "Still trying to send. Your feedback is saved in this tab. Keep this tab open while Easel catches up, and check that the server is running.";
+  "Still trying to send. Your feedback is saved in this tab. Keep this tab open while Liesel catches up, and check that the server is running.";
 const SEND_FAILED_COPY =
-  "Could not send. Your feedback is still queued in this tab. Check that Easel is running, then click Send to Agent to retry.";
+  "Could not send. Your feedback is still queued in this tab. Check that Liesel is running, then click Send to Agent to retry.";
 const TERMINAL_SEND_FAILED_COPY =
-  "Could not send. Your terminal feedback is still queued in this tab. Check that Easel is running, then click Send & End to retry the same batch.";
-const HEALTH_NO_ANSWER_TITLE = "Easel did not answer.";
+  "Could not send. Your terminal feedback is still queued in this tab. Check that Liesel is running, then click Send & End to retry the same batch.";
+const HEALTH_NO_ANSWER_TITLE = "Liesel did not answer.";
 const HEALTH_NO_ANSWER_COPY =
-  "Easel did not answer the check, so this page cannot tell whether it is running. Try again in a moment.";
+  "Liesel did not answer the check, so this page cannot tell whether it is running. Try again in a moment.";
 let artifactLoadToken = "";
 let artifactLoadRevision = Number(sessionData.initialArtifactRevision) || 0;
 let artifactLoadRequestSequence = Number(sessionData.initialArtifactLoadSequence) || 0;
@@ -736,7 +736,7 @@ const BUBBLE_THUMBNAIL_LIMIT = 4;
 
 // Thumbnails for a note's images, served straight from the same-origin attachment endpoint (the
 // ids are already server-vetted at upload time). The bubble has room for only a few, but the
-// per-prompt cap is configurable (EASEL_MAX_ATTACHMENTS_PER_PROMPT), so a note can
+// per-prompt cap is configurable (LIESEL_MAX_ATTACHMENTS_PER_PROMPT), so a note can
 // legitimately carry more than fit: the remainder collapses into a +N badge rather than being
 // dropped from the preview, which would make the queue look like it lost the extra images (W-A).
 function bubbleAttachmentsHtml(entry) {
@@ -1166,16 +1166,16 @@ function setHandoffSuperseded(visible) {
 }
 
 // The server this page was connected to went away. What is true beyond that depends on why, so
-// the shutdown names its reason and each one gets its own line - a page told "Easel was updated"
+// the shutdown names its reason and each one gets its own line - a page told "Liesel was updated"
 // after a deliberate stop is being told something false. An unnamed reason (SIGTERM, or any
 // caller that names none) claims neither.
 function chromeOutdatedCopy(reason) {
-  if (reason === "upgrade") return "Easel was updated. This page is running the previous version.";
+  if (reason === "upgrade") return "Liesel was updated. This page is running the previous version.";
   if (reason === "local-build") {
-    return "Easel was restarted to pick up a local build. This page is running the copy the previous server sent.";
+    return "Liesel was restarted to pick up a local build. This page is running the copy the previous server sent.";
   }
-  if (reason === "stop") return "Easel was stopped. Reload after you start it again.";
-  return "The Easel server this page was connected to is no longer running. Reloading will work once it is running again.";
+  if (reason === "stop") return "Liesel was stopped. Reload after you start it again.";
+  return "The Liesel server this page was connected to is no longer running. Reloading will work once it is running again.";
 }
 
 // Say so where the user can dismiss it, and never reload on their behalf - a forced reload
@@ -1230,7 +1230,7 @@ function discardUnrestorableDraft(selector) {
   setReviewState({ ...lastReviewState, card: null });
 }
 
-// Retiring a draft ends Easel's ability to replay it, so the text itself is handed back to the
+// Retiring a draft ends Liesel's ability to replay it, so the text itself is handed back to the
 // user before it goes: it is written to the conversation panel verbatim, where it is selectable,
 // nothing overwrites what they may already be typing, and no control can discard it by accident.
 // It is persisted per session so a reload does not take the last copy with it.
@@ -1254,7 +1254,7 @@ function renderRetiredDraft(text, stored = true) {
   const el = document.createElement("div");
   el.className = "bubble note";
   el.innerHTML =
-    "<small>Unsent annotation</small><div>The artifact removed or replaced what this note was attached to, so Easel could not keep it open. Your text is kept here:</div>" +
+    "<small>Unsent annotation</small><div>The artifact removed or replaced what this note was attached to, so Liesel could not keep it open. Your text is kept here:</div>" +
     '<div class="note-draft">' +
     escapeHtml(text) +
     "</div>" +
@@ -1295,7 +1295,7 @@ function scrollPanelToBottom() {
 const MOBILE_SHEET_MEDIA = "(max-width: 860px)";
 // How far a drag on the dock must travel before it counts as a gesture rather than a tap.
 const SHEET_DRAG_THRESHOLD_PX = 48;
-const sheetStorageKey = "easel:sheet-open:" + key;
+const sheetStorageKey = "liesel:sheet-open:" + key;
 const sheetMedia = typeof window.matchMedia === "function" ? window.matchMedia(MOBILE_SHEET_MEDIA) : null;
 // The user's intent, kept across a chrome reload so a live-reload or server upgrade does not drop
 // them back onto a closed dock mid-conversation.
@@ -1491,7 +1491,7 @@ syncVisualViewport();
 // per-review state, so it lives in localStorage under one key for every session. chrome.css only
 // honours `panel-collapsed` outside the phone breakpoint, and this controller never sets it there,
 // so a stored preference cannot hide the phone dock.
-const panelCollapsedStorageKey = "easel:panel-collapsed";
+const panelCollapsedStorageKey = "liesel:panel-collapsed";
 let panelCollapsed = readPanelCollapsed();
 
 function readPanelCollapsed() {
@@ -1582,7 +1582,7 @@ function editQueuedPrompt(index, { reveal = true } = {}) {
   editFocusPending = true;
   revealConversation();
   render();
-  if (reveal && prompt.selector) postToFrame({ type: "easel:revealElement", selector: String(prompt.selector) });
+  if (reveal && prompt.selector) postToFrame({ type: "liesel:revealElement", selector: String(prompt.selector) });
 }
 
 function endQueuedEdit() {
@@ -1634,7 +1634,7 @@ function editQueuedAnchor(selector) {
     }
   }
   // The note is already on its way, or gone: the click still deserves the card it would have had.
-  postToFrame({ type: "easel:annotateElement", selector });
+  postToFrame({ type: "liesel:annotateElement", selector });
 }
 
 // Notes that point at a whole element, cell, or diagram node, which a later click on that same
@@ -1661,7 +1661,7 @@ function postQueuedAnchors(force = false) {
   const signature = JSON.stringify(selectors);
   if (!force && signature === postedQueuedAnchors) return;
   postedQueuedAnchors = signature;
-  postToFrame({ type: "easel:queuedAnchors", selectors });
+  postToFrame({ type: "liesel:queuedAnchors", selectors });
 }
 
 queuedLog.addEventListener("click", (event) => {
@@ -1793,7 +1793,7 @@ function requestSnapshot(action, prompts = [], endAfter = false, terminal = null
     armSendAcknowledgementWarning();
     request.timeout = setTimeout(() => completeSnapshotRequest(requestId, ""), SNAPSHOT_REQUEST_TIMEOUT_MS);
   }
-  postToFrame({ type: "easel:requestSnapshot", snapshot_request_id: requestId });
+  postToFrame({ type: "liesel:requestSnapshot", snapshot_request_id: requestId });
 }
 
 function takeSnapshotRequest(requestId) {
@@ -2356,7 +2356,7 @@ function setLayoutGateCard(state) {
   }
 
   layoutGateTitle.innerHTML = "Checking layout.<br>One moment.";
-  layoutGateCopy.textContent = "Easel is waiting for fonts and final geometry before revealing this artifact.";
+  layoutGateCopy.textContent = "Liesel is waiting for fonts and final geometry before revealing this artifact.";
 }
 
 function setLayoutGateActive(active) {
@@ -2807,16 +2807,16 @@ function closeWarningsDrawer({ restoreFocus = false } = {}) {
 }
 
 function revealWarning(warning) {
-  postToFrame({ type: "easel:revealElement", selector: warning.selector });
+  postToFrame({ type: "liesel:revealElement", selector: warning.selector });
 }
 
 // ---------------------------------------------------------------------------
 // Revision legend
 //
 // The agent declares what it changed in the artifact HTML itself (a
-// `data-easel-revisions` registry plus `data-easel-revision` marks); the SDK
+// `data-liesel-revisions` registry plus `data-liesel-revision` marks); the SDK
 // reads it and posts it here. The legend lives entirely in the chrome, so the
-// served artifact still matches the file on disk - Easel never paints the
+// served artifact still matches the file on disk - Liesel never paints the
 // change indicator into the page. Reveal borrows the same transient marker the
 // layout-issues drawer uses, and only when the reader asks for it.
 
@@ -3064,7 +3064,7 @@ function revealNextRevisionMark(id) {
   const entry = revisionEntries.find((candidate) => candidate.id === id);
   if (!entry || entry.marks.length === 0) return;
   const position = (revisionRevealCursor.get(id) || 0) % entry.marks.length;
-  postToFrame({ type: "easel:revealElement", selector: entry.marks[position].selector });
+  postToFrame({ type: "liesel:revealElement", selector: entry.marks[position].selector });
   revisionRevealCursor.set(id, (position + 1) % entry.marks.length);
   renderRevisionLegend();
 }
@@ -3183,7 +3183,7 @@ function markSessionEnded() {
   layoutGateFailureSticky = false;
   revealLayoutGate();
   layoutGateEscape?.end?.();
-  postToFrame({ type: "easel:setAnnotationMode", enabled: false });
+  postToFrame({ type: "liesel:setAnnotationMode", enabled: false });
   endedOverlay.hidden = false;
 }
 
@@ -3237,8 +3237,8 @@ async function exportArtifact() {
   try {
     const response = await fetch("/api/" + key + "/export");
     if (!response.ok) throw new Error("export failed");
-    const warningCount = Number(response.headers.get("x-easel-export-warning-count") || "0");
-    const noticeCount = Number(response.headers.get("x-easel-export-notice-count") || "0");
+    const warningCount = Number(response.headers.get("x-liesel-export-warning-count") || "0");
+    const noticeCount = Number(response.headers.get("x-liesel-export-notice-count") || "0");
     const blob = await response.blob();
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
@@ -3270,7 +3270,7 @@ function renderShareResult({ url = "", siteId = "", password = "", updateKey = "
   shareUrlInput.value = url;
   shareUrlResult.hidden = !url;
   // A self-hosted backend may not return one, and an empty box with a copy button is worse than
-  // no row. Never derive it from the URL: that shape belongs to the backend, not Easel.
+  // no row. Never derive it from the URL: that shape belongs to the backend, not Liesel.
   shareSiteIdInput.value = siteId;
   shareSiteIdResult.hidden = !siteId;
   sharePasswordOutput.value = password;
@@ -3290,7 +3290,7 @@ function renderShareResult({ url = "", siteId = "", password = "", updateKey = "
 // Wording shared with the CLI's next_step for the same condition, so the two surfaces cannot
 // drift into describing the same dead end differently.
 const NO_SITE_ID_WARNING =
-  " The host did not return a site id Easel can use, and --site is half the republish credential, so this page can NEVER be republished or unpublished even though its update key is in hand.";
+  " The host did not return a site id Liesel can use, and --site is half the republish credential, so this page can NEVER be republished or unpublished even though its update key is in hand.";
 
 // What the page is gated behind, said only in terms of what the panel can show. A password the
 // user typed is never echoed by the server, so pointing at a row that was not rendered is the
@@ -3318,7 +3318,7 @@ function syncSharePasswordInput() {
   const generating = shareGenerateInput.checked;
   sharePasswordInput.disabled = generating;
   sharePasswordInput.placeholder = generating
-    ? "Easel will generate one when you publish"
+    ? "Liesel will generate one when you publish"
     : "Leave blank for a public page";
   if (generating) sharePasswordInput.value = "";
 }
@@ -3345,13 +3345,13 @@ function reportIndeterminatePublish(data) {
     "ht-ml.app may or may not have published this page, so treat the outcome as unknown. If it did publish, the page is live " +
     visibility +
     ", and its URL and update key were lost with the failed response, so it can never be republished or unpublished. Publishing again creates a SECOND page rather than replacing it." +
-    (rendered.password ? " Copy the password now - it is shown once here and Easel does not store it." : "");
+    (rendered.password ? " Copy the password now - it is shown once here and Liesel does not store it." : "");
 }
 
 // An incomplete 200 is NOT an unknown outcome: the host answered, so the page landed. Whatever
 // fields did arrive are rendered, because a url with no update_key names a live, public-by-default
 // page whose only write credential is gone - and saying "may or may not" there would throw away
-// the address Easel is holding.
+// the address Liesel is holding.
 function reportIncompletePublish(data) {
   const rendered = renderShareResult({
     url: data.url || "",
@@ -3369,11 +3369,11 @@ function reportIncompletePublish(data) {
   shareStatus.textContent =
     "ht-ml.app accepted this publish, so the page IS live and " +
     visibility +
-    ", but its response was malformed and Easel could not read the whole result back. " +
-    (rendered.url ? "Its address is below. " : "The response carried no URL, so Easel cannot show the address. ") +
+    ", but its response was malformed and Liesel could not read the whole result back. " +
+    (rendered.url ? "Its address is below. " : "The response carried no URL, so Liesel cannot show the address. ") +
     updateKeyNote +
     "Publishing again creates a SECOND page rather than replacing it." +
-    (rendered.password ? " Copy the password now - it is shown once here and Easel does not store it." : "");
+    (rendered.password ? " Copy the password now - it is shown once here and Liesel does not store it." : "");
 }
 
 async function publishShare(event) {
@@ -3427,7 +3427,7 @@ async function publishShare(event) {
             : "Published. Anyone with the link can view this page.";
     if (rendered.updateKey && !rendered.siteId) shareStatus.textContent += NO_SITE_ID_WARNING;
     if (rendered.password) {
-      shareStatus.textContent += " Copy the password now - it is shown once here and Easel does not store it.";
+      shareStatus.textContent += " Copy the password now - it is shown once here and Liesel does not store it.";
     }
     shareUrlInput.focus();
     shareUrlInput.select();
@@ -3484,11 +3484,11 @@ async function replaceArtifactFrame({ recoveryRetry = false } = {}) {
     resetRevisionLegend();
     startLayoutGateCycle();
     const currentSrc = frame.src || "about:blank";
-    frame.src = currentSrc + (currentSrc.includes("?") ? "&" : "?") + "easel_reload=" + Date.now();
+    frame.src = currentSrc + (currentSrc.includes("?") ? "&" : "?") + "liesel_reload=" + Date.now();
     return true;
   }
   const requestSequence = ++artifactLoadRequestSequence;
-  const requestId = `easel-load-${Date.now().toString(36)}-${requestSequence}-${Math.random().toString(36).slice(2)}`;
+  const requestId = `liesel-load-${Date.now().toString(36)}-${requestSequence}-${Math.random().toString(36).slice(2)}`;
   const previousToken = artifactLoadToken;
   const preservePreviousLoad = () => {
     if (
@@ -3516,12 +3516,12 @@ async function replaceArtifactFrame({ recoveryRetry = false } = {}) {
     // already shows an artifact keeps showing it rather than losing a usable review.
     if (!artifactLoadToken) {
       setLayoutGateFailure(
-        "Easel could not load this artifact.",
-        "The Easel server did not answer this review's load request. It usually restarted while this page was opening. Check and reload to reconnect.",
+        "Liesel could not load this artifact.",
+        "The Liesel server did not answer this review's load request. It usually restarted while this page was opening. Check and reload to reconnect.",
         "Check and reload",
         checkServerThenReload(
-          "Easel could not load this artifact.",
-          "Easel is still not answering. Start it again with your agent, then use Check and reload.",
+          "Liesel could not load this artifact.",
+          "Liesel is still not answering. Start it again with your agent, then use Check and reload.",
         ),
       );
     }
@@ -3742,7 +3742,7 @@ async function handleWhiteboardReady(index, mode, isCurrent) {
     record.sourceHash = String(source.hash || "");
     if (!isCurrent()) return false;
     postToWhiteboard(index, mode, {
-      type: "easel-whiteboard:init",
+      type: "liesel-whiteboard:init",
       mode,
       diagramIndex: index,
       diagramId: record.diagramId,
@@ -3770,7 +3770,7 @@ function showWhiteboardOverlay(index) {
   inlineWhiteboardChannels.delete(index);
   whiteboardError.hidden = true;
   whiteboardOverlay.hidden = false;
-  postToFrame({ type: "easel:suspendWhiteboard", diagramIndex: index });
+  postToFrame({ type: "liesel:suspendWhiteboard", diagramIndex: index });
   // A fresh document per open: the frame boots, posts ready, and receives its
   // init - no stale editor state can leak between opens.
   whiteboardFrame.src =
@@ -3785,7 +3785,7 @@ function finishWhiteboardClose(index) {
   overlayFrameReady = false;
   overlayChannelId = "";
   inlineWhiteboardChannels.delete(index);
-  if (!ended) postToFrame({ type: "easel:resumeWhiteboard", diagramIndex: index });
+  if (!ended) postToFrame({ type: "liesel:resumeWhiteboard", diagramIndex: index });
 }
 
 function whiteboardTeardownKey(index, placement) {
@@ -3806,7 +3806,7 @@ function beginWhiteboardTeardown(index, placement, onComplete) {
   });
   const teardown = { index, placement, flushId, promise, resolve, onComplete };
   whiteboardTeardowns.set(key, teardown);
-  const message = { type: "easel-whiteboard:prepareTeardown", flushId };
+  const message = { type: "liesel-whiteboard:prepareTeardown", flushId };
   postToWhiteboard(index, placement, message);
   return promise;
 }
@@ -3845,7 +3845,7 @@ function beginWhiteboardFlush(index, placement) {
     resolve = complete;
   });
   whiteboardFlushes.set(flushKey, { index, placement, flushId, promise, resolve });
-  postToWhiteboard(index, placement, { type: "easel-whiteboard:flush", flushId });
+  postToWhiteboard(index, placement, { type: "liesel-whiteboard:flush", flushId });
   return promise;
 }
 
@@ -3934,12 +3934,12 @@ function handleWhiteboardSave(index, message, mode) {
   const flushId = String(message.flushId || "");
   saveWhiteboardScene(index, message).then(
     () => {
-      if (flushId) postToWhiteboard(index, mode, { type: "easel-whiteboard:saveResult", flushId, ok: true });
+      if (flushId) postToWhiteboard(index, mode, { type: "liesel-whiteboard:saveResult", flushId, ok: true });
     },
     (error) => {
       if (flushId) {
         postToWhiteboard(index, mode, {
-          type: "easel-whiteboard:saveResult",
+          type: "liesel-whiteboard:saveResult",
           flushId,
           ok: false,
           error: error instanceof Error ? error.message : String(error),
@@ -3961,7 +3961,7 @@ async function queueWhiteboardFeedback(index, message, mode) {
   const preparation = beginFeedbackPreparation();
   if (!preparation) {
     postToWhiteboard(index, mode, {
-      type: "easel-whiteboard:queueResult",
+      type: "liesel-whiteboard:queueResult",
       ok: false,
       error: "Feedback delivery is already ending this review.",
     });
@@ -4020,13 +4020,13 @@ async function queueWhiteboardFeedback(index, message, mode) {
       throw new Error("failed to retain whiteboard feedback");
     // Queued from the whiteboard inside the artifact, like any other in-artifact prompt.
     pulseSheetDock();
-    postToWhiteboard(index, mode, { type: "easel-whiteboard:queueResult", ok: true });
+    postToWhiteboard(index, mode, { type: "liesel-whiteboard:queueResult", ok: true });
     if (mode === "overlay") closeWhiteboard();
     clearPreparationFailure("whiteboard");
     succeeded = true;
   } catch (error) {
     postToWhiteboard(index, mode, {
-      type: "easel-whiteboard:queueResult",
+      type: "liesel-whiteboard:queueResult",
       ok: false,
       error: error instanceof Error ? error.message : String(error),
     });
@@ -4051,7 +4051,7 @@ async function refreshWhiteboardSource() {
       record.source = source ? String(source.source || "") : "";
       record.sourceHash = nextHash;
       postToWhiteboardOverlay({
-        type: "easel-whiteboard:sourceChanged",
+        type: "liesel-whiteboard:sourceChanged",
         source: record.source,
         sourceHash: record.sourceHash,
       });
@@ -4067,13 +4067,13 @@ function validWhiteboardIndex(value) {
 }
 
 function handleAuthenticatedWhiteboardMessage(index, message, mode) {
-  if (message.type === "easel-whiteboard:save") handleWhiteboardSave(index, message, mode);
-  if (message.type === "easel-whiteboard:queueFeedback") queueWhiteboardFeedback(index, message, mode);
-  if (message.type === "easel-whiteboard:maximize" && mode === "inline") openWhiteboardOverlay(index);
-  if (message.type === "easel-whiteboard:close" && mode === "overlay") closeWhiteboard();
-  if (message.type === "easel-whiteboard:teardownReady") finishWhiteboardTeardown(index, message, mode);
-  if (message.type === "easel-whiteboard:teardownFailed") failWhiteboardTeardown(index, message, mode);
-  if (message.type === "easel-whiteboard:flushComplete") finishWhiteboardFlush(index, message, mode);
+  if (message.type === "liesel-whiteboard:save") handleWhiteboardSave(index, message, mode);
+  if (message.type === "liesel-whiteboard:queueFeedback") queueWhiteboardFeedback(index, message, mode);
+  if (message.type === "liesel-whiteboard:maximize" && mode === "inline") openWhiteboardOverlay(index);
+  if (message.type === "liesel-whiteboard:close" && mode === "overlay") closeWhiteboard();
+  if (message.type === "liesel-whiteboard:teardownReady") finishWhiteboardTeardown(index, message, mode);
+  if (message.type === "liesel-whiteboard:teardownFailed") failWhiteboardTeardown(index, message, mode);
+  if (message.type === "liesel-whiteboard:flushComplete") finishWhiteboardFlush(index, message, mode);
 }
 
 // Inline whiteboard frames are created by the SDK inside the artifact document,
@@ -4100,7 +4100,7 @@ function handleInlineWhiteboardMessage(event, message) {
   if (!isArtifactChildWindow(event.source)) return;
   const index = validWhiteboardIndex(message.diagramIndex);
   if (index === null) return;
-  if (message.type === "easel-whiteboard:ready") {
+  if (message.type === "liesel-whiteboard:ready") {
     if (inlineWhiteboardChannels.has(index)) return;
     const channelId = String(message.channelToken || "");
     if (!channelId) return;
@@ -4126,7 +4126,7 @@ function handleOverlayWhiteboardMessage(event, message) {
   if (event.source !== whiteboardFrame.contentWindow || overlayIndex === null) return;
   const index = validWhiteboardIndex(message.diagramIndex);
   if (index === null || index !== overlayIndex) return;
-  if (message.type === "easel-whiteboard:ready") {
+  if (message.type === "liesel-whiteboard:ready") {
     if (overlayFrameReady || overlayChannelId) return;
     const channelId = String(message.channelToken || "");
     if (!channelId) return;
@@ -4193,9 +4193,9 @@ async function probeChromeHealth() {
 }
 
 // The replacement server usually binds within a second, but it is a fresh node process competing
-// with whatever else the machine is doing, and several `easel` invocations can be racing for
+// with whatever else the machine is doing, and several `liesel` invocations can be racing for
 // the same port. Reloading on a fixed short deadline regardless of whether anything is listening
-// trades a recoverable page for the browser's connection-error page, which no Easel code can
+// trades a recoverable page for the browser's connection-error page, which no Liesel code can
 // recover from. So wait for the port to answer, and if it never does, say so instead.
 async function reloadChromeAfterServerRestart(reason = "") {
   let sawOutage = false;
@@ -4230,12 +4230,12 @@ async function reloadChromeAfterServerRestart(reason = "") {
   if (!healthy) {
     chromeRestartReloadPromise = null;
     setLayoutGateFailure(
-      "Easel is not running.",
-      "The Easel server restarted and did not come back. Start it again with your agent, then check and reload this page.",
+      "Liesel is not running.",
+      "The Liesel server restarted and did not come back. Start it again with your agent, then check and reload this page.",
       "Check and reload",
       checkServerThenReload(
-        "Easel is not running.",
-        "Easel is still not running. Start it again with your agent, then use Check and reload.",
+        "Liesel is not running.",
+        "Liesel is still not running. Start it again with your agent, then use Check and reload.",
       ),
       { sticky: true },
     );
@@ -4283,7 +4283,7 @@ async function reloadChromeForOutdatedBanner() {
         outdatedText.textContent =
           outcome === "no-answer"
             ? HEALTH_NO_ANSWER_COPY
-            : "Easel is still not running. Start it again, then use Check and reload.";
+            : "Liesel is still not running. Start it again, then use Check and reload.";
       }
     }
   }
@@ -4292,7 +4292,7 @@ async function reloadChromeForOutdatedBanner() {
 // ---- Tab title and icon from the artifact ----
 // The server stamps the tab from the artifact's <head> once, when the chrome is served. A page that
 // changes after that (a live dashboard) can ask the chrome to follow it with
-// window.easel.setDocumentMeta. The page is untrusted, so the chrome clamps the title and takes
+// window.liesel.setDocumentMeta. The page is untrusted, so the chrome clamps the title and takes
 // only a bounded SVG data: icon, which cannot run script or fetch anything as a tab icon.
 const DOCUMENT_TITLE_MAX_CHARS = 120;
 const DOCUMENT_ICON_MAX_CHARS = 8192;
@@ -4310,7 +4310,7 @@ function applyDocumentMeta(msg) {
       .trim()
       .slice(0, DOCUMENT_TITLE_MAX_CHARS)
       .trim();
-    document.title = title ? title + " · Easel" : loadTimeTitle;
+    document.title = title ? title + " · Liesel" : loadTimeTitle;
   }
   if (msg.icon === null) setDocumentIcon(loadTimeIconHref);
   else if (
@@ -4341,13 +4341,13 @@ window.addEventListener("message", (event) => {
   if (messageToken !== artifactLoadToken) {
     // A pass can be stamped by the load that just lost a token race. Ask the current artifact
     // document to run the audit again instead of consuming the only pass for this cycle.
-    if (msg.type === "easel:layoutDiagnostics") postToFrame({ type: "easel:requestLayoutDiagnostics" });
+    if (msg.type === "liesel:layoutDiagnostics") postToFrame({ type: "liesel:requestLayoutDiagnostics" });
     return;
   }
   const messageSequence = ++artifactMessageSequence;
   artifactSpokeToken = messageToken;
   clearTimeout(artifactSilenceTimer);
-  if (msg.type === "easel:layoutDiagnostics") {
+  if (msg.type === "liesel:layoutDiagnostics") {
     const diagnosticSequence = ++layoutDiagnosticSequence;
     const complete = msg.complete !== false;
     // The gate is visual, so the client-side settled pass is the release signal. Reporting the
@@ -4381,46 +4381,46 @@ window.addEventListener("message", (event) => {
     return;
   }
   // The artifact spoke, so it rendered and ran its SDK - there is nothing fatal to probe for.
-  if (msg.type === "easel:annotationMode" && typeof msg.enabled === "boolean" && !annotationDefaultReceived) {
+  if (msg.type === "liesel:annotationMode" && typeof msg.enabled === "boolean" && !annotationDefaultReceived) {
     annotationDefaultReceived = true;
     if (!annotationOverridden && !ended && !terminalSubmission) annotation = msg.enabled;
     annotationSwitch.setAttribute("aria-pressed", String(annotation && !ended));
     // Reconcile even if frame load replayed the old mode before this report arrived.
-    postToFrame({ type: "easel:setAnnotationMode", enabled: annotation && !ended });
+    postToFrame({ type: "liesel:setAnnotationMode", enabled: annotation && !ended });
   }
-  if (msg.type === "easel:queuePrompt") {
+  if (msg.type === "liesel:queuePrompt") {
     enqueuePrompt(msg.prompt);
     // Queued from inside the artifact, where the closed dock is the only sign it landed.
     pulseSheetDock();
   }
-  if (msg.type === "easel:snapshot") {
+  if (msg.type === "liesel:snapshot") {
     completeSnapshotRequest(msg.snapshot_request_id, msg.snapshot || "");
   }
-  if (msg.type === "easel:documentMeta") applyDocumentMeta(msg);
-  if (msg.type === "easel:scroll") {
+  if (msg.type === "liesel:documentMeta") applyDocumentMeta(msg);
+  if (msg.type === "liesel:scroll") {
     lastScroll = { x: Number(msg.x) || 0, y: Number(msg.y) || 0 };
   }
-  if (msg.type === "easel:reviewState") {
+  if (msg.type === "liesel:reviewState") {
     setReviewState(msg.state && typeof msg.state === "object" ? msg.state : null);
   }
-  if (msg.type === "easel:reviewDraftUnrestorable") {
+  if (msg.type === "liesel:reviewDraftUnrestorable") {
     discardUnrestorableDraft(String(msg.selector || ""));
   }
-  if (msg.type === "easel:artifactAssetFailure") {
+  if (msg.type === "liesel:artifactAssetFailure") {
     reportArtifactFailures(
       [{ kind: "artifact-asset-unavailable", detail: String(msg.detail || "a local artifact asset failed to load") }],
       messageToken,
     ).catch(() => {});
   }
-  if (msg.type === "easel:uploadAttachment") uploadAttachment(msg);
+  if (msg.type === "liesel:uploadAttachment") uploadAttachment(msg);
   // There is deliberately no attachment-delete message. See removeAttachment's
   // removal note below: the iframe cannot be trusted to decide a delete, and the
   // chrome cannot see every live reference, so reclamation is the sweeper's job.
-  if (msg.type === "easel:sendQueuedPrompts") sendQueued();
-  if (msg.type === "easel:endSession") endSession();
-  if (msg.type === "easel:revisions") applyRevisionMessage(msg);
-  if (msg.type === "easel:toggleAnnotationMode") toggleAnnotationMode();
-  if (msg.type === "easel:editQueuedAnchor") editQueuedAnchor(String(msg.selector || ""));
+  if (msg.type === "liesel:sendQueuedPrompts") sendQueued();
+  if (msg.type === "liesel:endSession") endSession();
+  if (msg.type === "liesel:revisions") applyRevisionMessage(msg);
+  if (msg.type === "liesel:toggleAnnotationMode") toggleAnnotationMode();
+  if (msg.type === "liesel:editQueuedAnchor") editQueuedAnchor(String(msg.selector || ""));
 });
 
 // The sandboxed artifact iframe can't reach the loopback server (opaque origin),
@@ -4447,7 +4447,7 @@ async function uploadAttachment(message, reportResult = postToFrame, signal) {
   }
   if (!Number.isFinite(size) || size < 0) {
     reportResult({
-      type: "easel:attachmentResult",
+      type: "liesel:attachmentResult",
       nonce,
       localId,
       ok: false,
@@ -4461,7 +4461,7 @@ async function uploadAttachment(message, reportResult = postToFrame, signal) {
   // reaches its error+retry state. The server still enforces the cap authoritatively.
   if (attachmentMaxBytes > 0 && size > attachmentMaxBytes) {
     reportResult({
-      type: "easel:attachmentResult",
+      type: "liesel:attachmentResult",
       nonce,
       localId,
       ok: false,
@@ -4474,7 +4474,7 @@ async function uploadAttachment(message, reportResult = postToFrame, signal) {
   while (uploadTimestamps.length && now - uploadTimestamps[0] > UPLOAD_RATE_WINDOW_MS) uploadTimestamps.shift();
   if (uploadTimestamps.length >= UPLOAD_RATE_MAX) {
     reportResult({
-      type: "easel:attachmentResult",
+      type: "liesel:attachmentResult",
       nonce,
       localId,
       ok: false,
@@ -4484,7 +4484,7 @@ async function uploadAttachment(message, reportResult = postToFrame, signal) {
   }
   if (uploadedBytesTotal + size > UPLOAD_SESSION_BYTE_QUOTA) {
     reportResult({
-      type: "easel:attachmentResult",
+      type: "liesel:attachmentResult",
       nonce,
       localId,
       ok: false,
@@ -4497,7 +4497,7 @@ async function uploadAttachment(message, reportResult = postToFrame, signal) {
   // upload (below) frees a slot for the next.
   if (uploadsInFlight >= UPLOAD_MAX_IN_FLIGHT) {
     reportResult({
-      type: "easel:attachmentResult",
+      type: "liesel:attachmentResult",
       nonce,
       localId,
       ok: false,
@@ -4518,7 +4518,7 @@ async function uploadAttachment(message, reportResult = postToFrame, signal) {
     const data = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(data.error || "Upload failed");
     reportResult({
-      type: "easel:attachmentResult",
+      type: "liesel:attachmentResult",
       nonce,
       localId,
       ok: true,
@@ -4526,7 +4526,7 @@ async function uploadAttachment(message, reportResult = postToFrame, signal) {
     });
   } catch (error) {
     reportResult({
-      type: "easel:attachmentResult",
+      type: "liesel:attachmentResult",
       nonce,
       localId,
       ok: false,
@@ -4555,7 +4555,7 @@ function toggleAnnotationMode() {
   annotationOverridden = true;
   annotation = !annotation;
   annotationSwitch.setAttribute("aria-pressed", String(annotation));
-  postToFrame({ type: "easel:setAnnotationMode", enabled: annotation });
+  postToFrame({ type: "liesel:setAnnotationMode", enabled: annotation });
 }
 
 annotationSwitch.onclick = toggleAnnotationMode;
@@ -4746,14 +4746,14 @@ document.addEventListener(
 );
 frame.addEventListener("load", () => {
   if (artifactSpokeToken !== artifactLoadToken) armArtifactAvailabilityProbe(artifactLoadToken);
-  postToFrame({ type: "easel:setAnnotationMode", enabled: annotation && !ended });
+  postToFrame({ type: "liesel:setAnnotationMode", enabled: annotation && !ended });
   // Replay the pre-reload scroll position so hot reloads don't jump the artifact to the top.
-  postToFrame({ type: "easel:restoreScroll", x: lastScroll.x, y: lastScroll.y });
-  if (lastReviewState) postToFrame({ type: "easel:restoreReviewState", state: lastReviewState });
+  postToFrame({ type: "liesel:restoreScroll", x: lastScroll.x, y: lastScroll.y });
+  if (lastReviewState) postToFrame({ type: "liesel:restoreReviewState", state: lastReviewState });
   postQueuedAnchors(true);
   if (overlayIndex !== null) {
     inlineWhiteboardChannels.delete(overlayIndex);
-    postToFrame({ type: "easel:suspendWhiteboard", diagramIndex: overlayIndex });
+    postToFrame({ type: "liesel:suspendWhiteboard", diagramIndex: overlayIndex });
   }
 });
 
@@ -4847,5 +4847,5 @@ if (sessionData.initialEnded) markSessionEnded();
 // bootstrap already owns the gate's bounded escape if this script fails; retire only its separate
 // boot-failure timer now that the full client has taken over.
 const chromeBootWindow = /** @type {Record<string, any>} */ (/** @type {unknown} */ (window));
-chromeBootWindow.__easelChromeReady = true;
-chromeBootWindow.__easelCancelChromeBootFailsafe?.();
+chromeBootWindow.__lieselChromeReady = true;
+chromeBootWindow.__lieselCancelChromeBootFailsafe?.();

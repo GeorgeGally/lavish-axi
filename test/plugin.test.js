@@ -48,7 +48,7 @@ const ALLOWED_MANIFEST_FIELDS = [
 ];
 const MANIFEST_NAME_PATTERN = /^(?!.*(?:--|\.\.))[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/;
 
-function tempDir(prefix = "easel-plugin-") {
+function tempDir(prefix = "liesel-plugin-") {
   const dir = mkdtempSync(path.join(os.tmpdir(), prefix));
   test.after(() => rmSync(dir, { recursive: true, force: true }));
   return dir;
@@ -58,7 +58,7 @@ function tempDir(prefix = "easel-plugin-") {
 // the tests that assert on a *real* on-disk link skip there rather than failing. The
 // link-creation logic itself stays covered everywhere through injected operations.
 const symlinkSupport = (() => {
-  const probe = mkdtempSync(path.join(os.tmpdir(), "easel-symlink-probe-"));
+  const probe = mkdtempSync(path.join(os.tmpdir(), "liesel-symlink-probe-"));
   try {
     symlinkSync(path.join(probe, "target"), path.join(probe, "link"));
     return { supported: true, skip: false };
@@ -113,8 +113,8 @@ test("committed plugin.json stays in sync with package.json", async () => {
 
 test("normalizeRepositoryUrl converts npm git URLs to plain https", () => {
   assert.equal(
-    normalizeRepositoryUrl({ url: "git+https://github.com/GeorgeGally/lavish-axi.git" }),
-    "https://github.com/GeorgeGally/lavish-axi",
+    normalizeRepositoryUrl({ url: "git+https://github.com/GeorgeGally/liesel.git" }),
+    "https://github.com/GeorgeGally/liesel",
   );
   assert.equal(normalizeRepositoryUrl("https://example.com/x"), "https://example.com/x");
   assert.equal(normalizeRepositoryUrl(undefined), undefined);
@@ -133,25 +133,25 @@ test("the package root is itself a discoverable Agent Plugin", async () => {
   );
   assert.deepEqual(
     discovered.map((entry) => entry.name),
-    ["easel"],
-    "exactly the easel skill is discovered",
+    ["liesel"],
+    "exactly the liesel skill is discovered",
   );
 
-  const skill = await readFile(path.join(root, "skills", "easel", "SKILL.md"), "utf8");
-  assert.deepEqual(validateSkillMarkdown(skill, { directoryName: "easel" }).errors, []);
+  const skill = await readFile(path.join(root, "skills", "liesel", "SKILL.md"), "utf8");
+  assert.deepEqual(validateSkillMarkdown(skill, { directoryName: "liesel" }).errors, []);
 });
 
 test("the plugin declares no MCP servers", async () => {
-  // easel's agent surface is the CLI itself; an mcp.json would add a second contract.
+  // liesel's agent surface is the CLI itself; an mcp.json would add a second contract.
   assert.equal(existsSync(path.join(resolvePluginRoot(), "mcp.json")), false);
 });
 
 test("VS Code registration adds the plugin root and is idempotent", () => {
-  const [first, changedFirst] = computeVsCodePluginLocationsUpdate({}, "/pkg/easel", "easel");
+  const [first, changedFirst] = computeVsCodePluginLocationsUpdate({}, "/pkg/liesel", "liesel");
   assert.equal(changedFirst, true);
-  assert.deepEqual(first["chat.pluginLocations"], { "/pkg/easel": true });
+  assert.deepEqual(first["chat.pluginLocations"], { "/pkg/liesel": true });
 
-  const [second, changedSecond] = computeVsCodePluginLocationsUpdate(first, "/pkg/easel", "easel");
+  const [second, changedSecond] = computeVsCodePluginLocationsUpdate(first, "/pkg/liesel", "liesel");
   assert.equal(changedSecond, false, "re-running registers nothing new");
   assert.deepEqual(second, first);
 });
@@ -161,49 +161,49 @@ test("VS Code registration preserves unrelated settings and other plugins", () =
     "editor.fontSize": 13,
     "chat.pluginLocations": { "/somewhere/other-plugin": true },
   };
-  const [updated] = computeVsCodePluginLocationsUpdate(settings, "/pkg/easel", "easel");
+  const [updated] = computeVsCodePluginLocationsUpdate(settings, "/pkg/liesel", "liesel");
 
   assert.equal(updated["editor.fontSize"], 13);
   assert.equal(updated["chat.pluginLocations"]["/somewhere/other-plugin"], true, "another plugin is untouched");
-  assert.equal(updated["chat.pluginLocations"]["/pkg/easel"], true);
+  assert.equal(updated["chat.pluginLocations"]["/pkg/liesel"], true);
   assert.deepEqual(settings["chat.pluginLocations"], { "/somewhere/other-plugin": true }, "input is not mutated");
 });
 
 test("VS Code registration repairs a relocated install without dropping foreign entries", () => {
   const dir = tempDir();
-  const stale = writePlugin(path.join(dir, "old", "easel"), "easel");
+  const stale = writePlugin(path.join(dir, "old", "liesel"), "liesel");
   const foreign = writePlugin(path.join(dir, "other-plugin"), "other-plugin");
-  const current = writePlugin(path.join(dir, "new", "easel"), "easel");
+  const current = writePlugin(path.join(dir, "new", "liesel"), "liesel");
 
   const settings = { "chat.pluginLocations": { [stale]: true, [foreign]: true } };
-  const [updated, changed] = computeVsCodePluginLocationsUpdate(settings, current, "easel");
+  const [updated, changed] = computeVsCodePluginLocationsUpdate(settings, current, "liesel");
 
   assert.equal(changed, true);
-  assert.equal(updated["chat.pluginLocations"][stale], undefined, "the previous easel location is dropped");
+  assert.equal(updated["chat.pluginLocations"][stale], undefined, "the previous liesel location is dropped");
   assert.equal(updated["chat.pluginLocations"][foreign], true, "a different plugin survives");
   assert.equal(updated["chat.pluginLocations"][current], true);
 });
 
 test("a removed install directory is only treated as stale when it was ours", () => {
   const dir = tempDir();
-  assert.equal(isStalePluginLocation(path.join(dir, "gone", "easel"), "easel"), true);
-  assert.equal(isStalePluginLocation(path.join(dir, "gone", "someone-else"), "easel"), false);
+  assert.equal(isStalePluginLocation(path.join(dir, "gone", "liesel"), "liesel"), true);
+  assert.equal(isStalePluginLocation(path.join(dir, "gone", "someone-else"), "liesel"), false);
 });
 
 test("Cursor registration links, no-ops, and repairs the local plugin slot", { skip: symlinkSupport.skip }, () => {
   const dir = tempDir();
   const localPlugins = path.join(dir, "local");
-  const pluginRoot = writePlugin(path.join(dir, "pkg", "easel"), "easel");
+  const pluginRoot = writePlugin(path.join(dir, "pkg", "liesel"), "liesel");
 
-  const linked = linkCursorLocalPlugin(localPlugins, pluginRoot, "easel");
+  const linked = linkCursorLocalPlugin(localPlugins, pluginRoot, "liesel");
   assert.equal(linked.status, "linked");
   assert.equal(path.resolve(readlinkSync(linked.target)), pluginRoot);
 
-  assert.equal(linkCursorLocalPlugin(localPlugins, pluginRoot, "easel").status, "current");
+  assert.equal(linkCursorLocalPlugin(localPlugins, pluginRoot, "liesel").status, "current");
 
-  const moved = writePlugin(path.join(dir, "pkg2", "easel"), "easel");
+  const moved = writePlugin(path.join(dir, "pkg2", "liesel"), "liesel");
   // Exercise Windows' move-aside replacement path even when this suite runs elsewhere.
-  const repaired = linkCursorLocalPlugin(localPlugins, moved, "easel", { platform: "win32" });
+  const repaired = linkCursorLocalPlugin(localPlugins, moved, "liesel", { platform: "win32" });
   assert.equal(repaired.status, "repaired");
   assert.equal(path.resolve(readlinkSync(repaired.target)), moved);
 });
@@ -211,11 +211,11 @@ test("Cursor registration links, no-ops, and repairs the local plugin slot", { s
 test("Cursor registration refuses to clobber a real directory in the slot", () => {
   const dir = tempDir();
   const localPlugins = path.join(dir, "local");
-  const occupied = path.join(localPlugins, "easel");
+  const occupied = path.join(localPlugins, "liesel");
   mkdirSync(occupied, { recursive: true });
   writeFileSync(path.join(occupied, "keep.txt"), "user content");
 
-  const result = linkCursorLocalPlugin(localPlugins, path.join(dir, "pkg"), "easel");
+  const result = linkCursorLocalPlugin(localPlugins, path.join(dir, "pkg"), "liesel");
 
   assert.equal(result.status, "occupied");
   assert.equal(lstatSync(occupied).isDirectory(), true);
@@ -226,10 +226,10 @@ test("Cursor registration replaces a dangling symlink", { skip: symlinkSupport.s
   const dir = tempDir();
   const localPlugins = path.join(dir, "local");
   mkdirSync(localPlugins, { recursive: true });
-  symlinkSync(path.join(dir, "vanished"), path.join(localPlugins, "easel"));
-  const pluginRoot = writePlugin(path.join(dir, "pkg", "easel"), "easel");
+  symlinkSync(path.join(dir, "vanished"), path.join(localPlugins, "liesel"));
+  const pluginRoot = writePlugin(path.join(dir, "pkg", "liesel"), "liesel");
 
-  const result = linkCursorLocalPlugin(localPlugins, pluginRoot, "easel");
+  const result = linkCursorLocalPlugin(localPlugins, pluginRoot, "liesel");
 
   assert.equal(result.status, "repaired");
   assert.equal(path.resolve(readlinkSync(result.target)), pluginRoot);
@@ -238,13 +238,13 @@ test("Cursor registration replaces a dangling symlink", { skip: symlinkSupport.s
 test("Cursor registration preserves the old link when replacement fails", { skip: symlinkSupport.skip }, async () => {
   const dir = tempDir();
   const localPlugins = path.join(dir, "local");
-  const original = writePlugin(path.join(dir, "old", "easel"), "easel");
-  const replacement = writePlugin(path.join(dir, "new", "easel"), "easel");
+  const original = writePlugin(path.join(dir, "old", "liesel"), "liesel");
+  const replacement = writePlugin(path.join(dir, "new", "liesel"), "liesel");
   mkdirSync(localPlugins, { recursive: true });
-  const target = path.join(localPlugins, "easel");
+  const target = path.join(localPlugins, "liesel");
   symlinkSync(original, target);
 
-  const result = linkCursorLocalPlugin(localPlugins, replacement, "easel", {
+  const result = linkCursorLocalPlugin(localPlugins, replacement, "liesel", {
     renameSync: () => {
       throw new Error("replacement failed");
     },
@@ -254,7 +254,7 @@ test("Cursor registration preserves the old link when replacement fails", { skip
   assert.equal(result.status, "unsupported");
   assert.match(result.reason, /replacement failed/);
   assert.equal(path.resolve(readlinkSync(target)), original, "the old registration survives");
-  assert.deepEqual(await readdir(localPlugins), ["easel"]);
+  assert.deepEqual(await readdir(localPlugins), ["liesel"]);
 });
 
 test("Cursor registration reports rather than throws when links cannot be created", () => {
@@ -264,7 +264,7 @@ test("Cursor registration reports rather than throws when links cannot be create
     throw Object.assign(new Error("EPERM: operation not permitted, symlink"), { code: "EPERM" });
   };
 
-  const result = linkCursorLocalPlugin(path.join(dir, "local"), path.join(dir, "pkg"), "easel", {
+  const result = linkCursorLocalPlugin(path.join(dir, "local"), path.join(dir, "pkg"), "liesel", {
     symlinkSync: denied,
   });
 
@@ -277,7 +277,7 @@ test("Cursor registration links with a junction on Windows", () => {
   const dir = tempDir();
   const attempts = [];
 
-  const result = linkCursorLocalPlugin(path.join(dir, "local"), path.join(dir, "pkg"), "easel", {
+  const result = linkCursorLocalPlugin(path.join(dir, "local"), path.join(dir, "pkg"), "liesel", {
     platform: "win32",
     symlinkSync: (target, linkPath, type) => attempts.push(type),
   });
@@ -290,7 +290,7 @@ test("Cursor registration falls back to a symlink when a junction is refused", (
   const dir = tempDir();
   const attempts = [];
 
-  const result = linkCursorLocalPlugin(path.join(dir, "local"), path.join(dir, "pkg"), "easel", {
+  const result = linkCursorLocalPlugin(path.join(dir, "local"), path.join(dir, "pkg"), "liesel", {
     platform: "win32",
     symlinkSync: (target, linkPath, type) => {
       attempts.push(type);
@@ -349,11 +349,11 @@ test("client config locations follow each platform's convention", () => {
 });
 
 test("plugin client launch preserves Windows batch arguments", { skip: process.platform !== "win32" }, async () => {
-  const dir = tempDir("easel plugin client ");
+  const dir = tempDir("liesel plugin client ");
   const script = path.join(dir, "copilot-stub.cjs");
   const launcher = path.join(dir, "copilot.cmd");
   const output = path.join(dir, "received.json");
-  const pluginRoot = path.join(dir, "Jane Doe & team", "easel");
+  const pluginRoot = path.join(dir, "Jane Doe & team", "liesel");
   writeFileSync(script, `require("node:fs").writeFileSync(process.argv[2], JSON.stringify(process.argv.slice(3)))`);
   writeFileSync(launcher, `@echo off\r\n"${process.execPath}" "${script}" %*\r\n`);
 

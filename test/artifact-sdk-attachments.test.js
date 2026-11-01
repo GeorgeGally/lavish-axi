@@ -24,8 +24,8 @@ test("the SDK bundle uploads captured images through the chrome", () => {
   // before the upload handler runs - so a raw parent.postMessage here (which this
   // regression once shipped as) silently kills every real upload while mocked
   // harnesses stay green.
-  assert.match(sdk, /postArtifactMessage\("easel:uploadAttachment", \{/);
-  assert.doesNotMatch(sdk, /parent\.postMessage\(\s*\{\s*type: "easel:uploadAttachment"/);
+  assert.match(sdk, /postArtifactMessage\("liesel:uploadAttachment", \{/);
+  assert.doesNotMatch(sdk, /parent\.postMessage\(\s*\{\s*type: "liesel:uploadAttachment"/);
   assert.match(sdk, /localId: item\.localId/);
   assert.match(sdk, /item\.file\s*\n?\s*\.arrayBuffer\(\)/);
 });
@@ -41,7 +41,7 @@ test("the SDK bundle scopes every upload and result to this document (E1)", () =
 });
 
 test("the SDK bundle applies upload results and offers a retry", () => {
-  assert.match(sdk, /easel:attachmentResult/);
+  assert.match(sdk, /liesel:attachmentResult/);
   assert.match(sdk, /activeAttachments\?\.handleResult\(msg\.localId, msg\.ok, msg\.id, msg\.error\)/);
   assert.match(sdk, /data-attachment-retry/);
 });
@@ -84,8 +84,8 @@ test("the SDK bundle carries the server's accepted image list, not a literal of 
 });
 
 test("the SDK bundle renders chips with a thumbnail, name, and status", () => {
-  assert.match(sdk, /easel-attachment-thumb/);
-  assert.match(sdk, /easel-attachment-name/);
+  assert.match(sdk, /liesel-attachment-thumb/);
+  assert.match(sdk, /liesel-attachment-name/);
   assert.match(sdk, /Uploading…/);
   assert.match(sdk, /revokeObjectURL/);
 });
@@ -103,7 +103,7 @@ test("the SDK bundle intercepts every drop so a non-image can't navigate the fra
 
 test("the SDK bundle renders a visible, titled remove control on each chip", () => {
   assert.match(sdk, /aria-label="Remove image" title="Remove"/);
-  assert.match(sdk, /easel-attachment-remove/);
+  assert.match(sdk, /liesel-attachment-remove/);
 });
 
 test("the SDK bundle gates queuing until in-flight uploads settle (R2.4)", () => {
@@ -119,11 +119,11 @@ test("the SDK bundle gates queuing until in-flight uploads settle (R2.4)", () =>
 test("the count-cap notice reads as an error, not as the passive keyboard hint", () => {
   // The cap notice replaces the card's gray hint line, so without its own error
   // styling it reads as passive help text and a rejected drop goes unnoticed.
-  assert.match(sdk, /easel-hint-alert/);
-  assert.match(sdk, /\.easel-hint-alert\{[^}]*color:#ff9d7a/);
-  assert.match(sdk, /attachNotice\.classList\.add\("easel-hint-alert"\)/);
+  assert.match(sdk, /liesel-hint-alert/);
+  assert.match(sdk, /\.liesel-hint-alert\{[^}]*color:#ff9d7a/);
+  assert.match(sdk, /attachNotice\.classList\.add\("liesel-hint-alert"\)/);
   // Clearing the notice restores the neutral hint instead of leaving stale red text.
-  assert.match(sdk, /attachNotice\.classList\.remove\("easel-hint-alert"\)/);
+  assert.match(sdk, /attachNotice\.classList\.remove\("liesel-hint-alert"\)/);
 });
 
 test("the count-cap notice persists until attachment capacity is created", () => {
@@ -140,7 +140,7 @@ test("the count-cap notice persists until attachment capacity is created", () =>
   assert.equal(deriveAttachmentNoticeState({ ...state, itemCount: 3 }), "");
 
   assert.match(sdk, /notify\(\s*deriveAttachmentNoticeState\(/);
-  assert.match(sdk, /attachNotice\.classList\.add\("easel-hint-alert"\)/);
+  assert.match(sdk, /attachNotice\.classList\.add\("liesel-hint-alert"\)/);
   assert.match(sdk, /if \(items\.length < ATTACHMENT_MAX_COUNT\) capRejected = false/);
   assert.match(sdk, /if \(!hasPending\(\) && !hasErrors\(\)\) queueBlocked = false/);
 });

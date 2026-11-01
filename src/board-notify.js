@@ -6,10 +6,10 @@ import path from "node:path";
 /**
  * When a reviewer queues a note on a board, the server can run one command so a
  * supervisor wakes up without keeping a poll open. The command is the operator's own
- * (`EASEL_NOTIFY_CMD`, or `notify_cmd` in the state directory's `config.json`); it gets
+ * (`LIESEL_NOTIFY_CMD`, or `notify_cmd` in the state directory's `config.json`); it gets
  * the board name, the board.json path and a submission id as arguments and as
- * `EASEL_BOARD`, `EASEL_BOARD_JSON` and `EASEL_SUBMISSION_ID`, plus `EASEL_BOARD_DIR`,
- * `EASEL_BOARD_ID` (the session key) and `EASEL_NOTE_COUNT` (notes waiting for the
+ * `LIESEL_BOARD`, `LIESEL_BOARD_JSON` and `LIESEL_SUBMISSION_ID`, plus `LIESEL_BOARD_DIR`,
+ * `LIESEL_BOARD_ID` (the session key) and `LIESEL_NOTE_COUNT` (notes waiting for the
  * agent). The note text is never passed. It is fire and forget: it never holds the
  * request, never consumes the feedback (a poll still collects it), runs at most once per
  * board per debounce window, and a failure is only logged.
@@ -123,12 +123,12 @@ export function runNotifyCommand({
   if (!cmd) return null;
   const env = {
     ...process.env,
-    EASEL_BOARD_DIR: boardDir,
-    EASEL_BOARD_ID: boardId,
-    EASEL_NOTE_COUNT: String(noteCount),
-    EASEL_BOARD: board,
-    EASEL_BOARD_JSON: boardJson,
-    EASEL_SUBMISSION_ID: submissionId,
+    LIESEL_BOARD_DIR: boardDir,
+    LIESEL_BOARD_ID: boardId,
+    LIESEL_NOTE_COUNT: String(noteCount),
+    LIESEL_BOARD: board,
+    LIESEL_BOARD_JSON: boardJson,
+    LIESEL_SUBMISSION_ID: submissionId,
   };
   /** @type {import("node:child_process").ChildProcess} */
   let child;
@@ -139,7 +139,7 @@ export function runNotifyCommand({
       platform === "win32"
         ? // cmd.exe has no safe "$@"; Windows reads the values from the environment.
           spawnFn(cmd, { shell: true, env, stdio: ["ignore", "ignore", "pipe"], windowsHide: true })
-        : spawnFn("/bin/sh", ["-c", `${cmd} "$@"`, "easel-notify", board, boardJson, submissionId], {
+        : spawnFn("/bin/sh", ["-c", `${cmd} "$@"`, "liesel-notify", board, boardJson, submissionId], {
             env,
             stdio: ["ignore", "ignore", "pipe"],
             detached: true,

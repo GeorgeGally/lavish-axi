@@ -13,11 +13,11 @@ import {
   validateSkillMarkdown,
 } from "../src/skill.js";
 
-test("createSkillMarkdown emits valid frontmatter naming the easel skill", () => {
+test("createSkillMarkdown emits valid frontmatter naming the liesel skill", () => {
   const { frontmatter, errors } = parseSkillFrontmatter(createSkillMarkdown());
 
   assert.deepEqual(errors, [], "frontmatter parses as plain block-style YAML");
-  assert.equal(frontmatter.name, "easel");
+  assert.equal(frontmatter.name, "liesel");
   assert.equal(frontmatter.description, SKILL_DESCRIPTION);
 });
 
@@ -36,7 +36,7 @@ test("createSkillMarkdown emits Hermes Agent metadata as string-valued frontmatt
 test("createSkillMarkdown conforms to the Agent Skills frontmatter contract", () => {
   // Agent Plugins delegates skill validity to Agent Skills and silently skips any skill
   // that fails it, so a regression here would quietly remove the skill from the plugin.
-  const { valid, errors } = validateSkillMarkdown(createSkillMarkdown(), { directoryName: "easel" });
+  const { valid, errors } = validateSkillMarkdown(createSkillMarkdown(), { directoryName: "liesel" });
 
   assert.deepEqual(errors, []);
   assert.ok(valid);
@@ -51,26 +51,26 @@ test("createSkillMarkdown keeps every frontmatter field in the allowed set", () 
 });
 
 test("validateSkillMarkdown rejects the shapes the reference validator rejects", () => {
-  const flowCollection = "---\nname: easel\ndescription: d\nmetadata:\n  tags: [a, b]\n---\nbody";
+  const flowCollection = "---\nname: liesel\ndescription: d\nmetadata:\n  tags: [a, b]\n---\nbody";
   assert.match(validateSkillMarkdown(flowCollection).errors.join("\n"), /flow collection/);
 
-  const unknownField = "---\nname: easel\ndescription: d\nargument-hint: x\n---\nbody";
+  const unknownField = "---\nname: liesel\ndescription: d\nargument-hint: x\n---\nbody";
   assert.match(validateSkillMarkdown(unknownField).errors.join("\n"), /unexpected frontmatter field `argument-hint`/);
 
-  const nested = "---\nname: easel\ndescription: d\nmetadata:\n  hermes:\n    category: p\n---\nbody";
+  const nested = "---\nname: liesel\ndescription: d\nmetadata:\n  hermes:\n    category: p\n---\nbody";
   assert.match(validateSkillMarkdown(nested).errors.join("\n"), /nests deeper than one level/);
 
-  const mismatched = "---\nname: easel\ndescription: d\n---\nbody";
+  const mismatched = "---\nname: liesel\ndescription: d\n---\nbody";
   assert.match(
     validateSkillMarkdown(mismatched, { directoryName: "other" }).errors.join("\n"),
     /must match skill name/,
   );
 
-  const missing = "---\nname: easel\n---\nbody";
+  const missing = "---\nname: liesel\n---\nbody";
   assert.match(validateSkillMarkdown(missing).errors.join("\n"), /`description` is required/);
 });
 
-test("createSkillMarkdown handles explicit /easel invocation arguments", () => {
+test("createSkillMarkdown handles explicit /liesel invocation arguments", () => {
   const md = createSkillMarkdown();
   const body = md.slice(md.indexOf("\n---\n", 4) + 5);
 
@@ -82,19 +82,19 @@ test("createSkillMarkdown stays a short stub that defers to the CLI", () => {
   const md = createSkillMarkdown();
 
   assert.ok(md.length <= MAX_SKILL_MARKDOWN_CHARS, "the generated skill stays drastically smaller than CLI guidance");
-  assert.match(md, /Easel/);
-  assert.match(md, /`easel --help`/);
-  assert.match(md, /`easel board --help`/);
-  assert.match(md, /`easel reply --help`/);
+  assert.match(md, /Liesel/);
+  assert.match(md, /`liesel --help`/);
+  assert.match(md, /`liesel board --help`/);
+  assert.match(md, /`liesel reply --help`/);
   assert.match(md, /not about to long-poll/);
-  assert.match(md, /`easel design`/);
-  assert.match(md, /`easel playbook <id>`/);
+  assert.match(md, /`liesel design`/);
+  assert.match(md, /`liesel playbook <id>`/);
   assert.match(md, /stale/i);
 });
 
 test("createSkillMarkdown does not bake CLI-owned guidance into the skill", () => {
   const md = createSkillMarkdown();
-  const home = createHomeOutput({ bin: "easel", sessions: [], includeSessions: false, agent: "static" });
+  const home = createHomeOutput({ bin: "liesel", sessions: [], includeSessions: false, agent: "static" });
 
   for (const item of home.visual_guidance) {
     assert.ok(!md.includes(item), `must not copy visual guidance: ${item.slice(0, 48)}...`);
@@ -131,10 +131,10 @@ test("createSkillMarkdown omits setup guidance", () => {
   assert.doesNotMatch(md, /setup plugin/);
 });
 
-test("createSkillMarkdown never sends the agent to npm, where the name easel is another package", () => {
+test("createSkillMarkdown never sends the agent to npm, where Liesel is not published", () => {
   const md = createSkillMarkdown();
 
   assert.doesNotMatch(md, /npx/);
-  assert.doesNotMatch(md, /npm install (-g )?easel/);
-  assert.match(md, /`npm install -g github:GeorgeGally\/lavish-axi`/);
+  assert.doesNotMatch(md, /npm install (-g )?liesel/);
+  assert.match(md, /`npm install -g github:GeorgeGally\/liesel`/);
 });

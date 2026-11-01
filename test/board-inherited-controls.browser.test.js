@@ -11,7 +11,7 @@ import { fileURLToPath } from "node:url";
 import { findChrome } from "../src/board-crop.js";
 import { launchChrome } from "./board-cdp-browser.js";
 
-const runBrowserE2e = process.env.EASEL_BROWSER_E2E === "1";
+const runBrowserE2e = process.env.LIESEL_BROWSER_E2E === "1";
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 function run(command, args, env, timeout = 45_000) {
@@ -72,22 +72,22 @@ const SHIFT = 8;
  * @param {string} name @param {string} html
  */
 async function startBoard(name, html) {
-  const temp = await mkdtemp(path.join(tmpdir(), "easel-inherited-e2e-"));
+  const temp = await mkdtemp(path.join(tmpdir(), "liesel-inherited-e2e-"));
   const port = await freePort();
-  const easelEnv = {
-    EASEL_PORT: String(port),
-    EASEL_STATE_DIR: path.join(temp, "state"),
-    EASEL_NO_OPEN: "1",
-    EASEL_TELEMETRY: "0",
-    EASEL_HOST: "127.0.0.1",
-    EASEL_LINK_HOST: "127.0.0.1",
+  const lieselEnv = {
+    LIESEL_PORT: String(port),
+    LIESEL_STATE_DIR: path.join(temp, "state"),
+    LIESEL_NO_OPEN: "1",
+    LIESEL_TELEMETRY: "0",
+    LIESEL_HOST: "127.0.0.1",
+    LIESEL_LINK_HOST: "127.0.0.1",
   };
   const profile = path.join(temp, "chrome");
   await mkdir(profile, { recursive: true });
   const board = path.join(temp, "board");
   await mkdir(board, { recursive: true });
   await writeFile(path.join(board, name), html);
-  const output = run(process.execPath, ["bin/easel.js", "board", "open", board, "--no-open"], easelEnv);
+  const output = run(process.execPath, ["bin/liesel.js", "board", "open", board, "--no-open"], lieselEnv);
   const url = output.match(/url:\s*"([^"]+)"/)?.[1];
   assert.ok(url, output);
 
@@ -148,7 +148,7 @@ async function startBoard(name, html) {
   /** The element the frame outlines, matched by its box. */
   const outlined = (sessionId) =>
     evaluate(
-      `(() => { const h = document.getElementById("easel-hover"); if (!h || h.style.display !== "block") return ""; const box = { left: parseFloat(h.style.left) - scrollX, top: parseFloat(h.style.top) - scrollY, width: parseFloat(h.style.width), height: parseFloat(h.style.height) }; const all = [document.body, ...document.body.querySelectorAll("*:not([data-easel-ui])")]; const hit = all.find((e) => { const r = e.getBoundingClientRect(); return Math.abs(r.left - box.left) < 1 && Math.abs(r.top - box.top) < 1 && Math.abs(r.width - box.width) < 1 && Math.abs(r.height - box.height) < 1; }); return hit ? (hit.id || hit.className || hit.tagName.toLowerCase()) : "?"; })()`,
+      `(() => { const h = document.getElementById("liesel-hover"); if (!h || h.style.display !== "block") return ""; const box = { left: parseFloat(h.style.left) - scrollX, top: parseFloat(h.style.top) - scrollY, width: parseFloat(h.style.width), height: parseFloat(h.style.height) }; const all = [document.body, ...document.body.querySelectorAll("*:not([data-liesel-ui])")]; const hit = all.find((e) => { const r = e.getBoundingClientRect(); return Math.abs(r.left - box.left) < 1 && Math.abs(r.top - box.top) < 1 && Math.abs(r.width - box.width) < 1 && Math.abs(r.height - box.height) < 1; }); return hit ? (hit.id || hit.className || hit.tagName.toLowerCase()) : "?"; })()`,
       sessionId,
     );
   const colourOf = (sessionId, selector) =>
@@ -157,7 +157,7 @@ async function startBoard(name, html) {
 
   const close = () => {
     browser.close();
-    run(process.execPath, ["bin/easel.js", "stop", "--port", String(port)], easelEnv, 15_000);
+    run(process.execPath, ["bin/liesel.js", "stop", "--port", String(port)], lieselEnv, 15_000);
     return rm(temp, { recursive: true, force: true });
   };
   return {

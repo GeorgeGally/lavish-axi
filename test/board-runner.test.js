@@ -15,7 +15,7 @@ import {
 } from "../src/board-runner.js";
 
 async function scratch(t) {
-  const dir = await realpath(await mkdtemp(path.join(tmpdir(), "easel-runner-")));
+  const dir = await realpath(await mkdtemp(path.join(tmpdir(), "liesel-runner-")));
   t.after(() => rm(dir, { recursive: true, force: true }));
   return dir;
 }
@@ -113,7 +113,7 @@ test("the prompt names each note's item file, pin and images", () => {
   assert.match(prompt, /Note: Too loud\n {3}make it quieter/);
   assert.match(prompt, /Image: \/state\/att\/a\.png/);
   assert.match(prompt, /2\. The whole board/);
-  assert.match(prompt, /Do not run `easel poll`/);
+  assert.match(prompt, /Do not run `liesel poll`/);
   assert.doesNotMatch(prompt, /Working folder/);
 });
 
@@ -150,7 +150,7 @@ test("runAgent feeds the prompt on stdin, runs in the chosen folder and returns 
 process.stdin.on("data", (c) => (input += c));
 process.stdin.on("end", async () => {
   const { writeFile } = await import("node:fs/promises");
-  await writeFile("seen.txt", input + "|" + process.env.EASEL_BOARD_DIR + "|" + process.env.EASEL_PROMPT_FILE);
+  await writeFile("seen.txt", input + "|" + process.env.LIESEL_BOARD_DIR + "|" + process.env.LIESEL_PROMPT_FILE);
   process.stderr.write("thinking\\n");
   process.stdout.write("Changed the headline.\\n");
 });
@@ -162,7 +162,7 @@ process.stdin.on("end", async () => {
     executable: "",
     prompt: "note: $(touch pwned)",
     boardDir: dir,
-    extraEnv: { EASEL_BOARD_DIR: dir },
+    extraEnv: { LIESEL_BOARD_DIR: dir },
     onOutput: (chunk) => chunks.push(chunk),
   });
   assert.equal(outcome.ok, true, outcome.error);

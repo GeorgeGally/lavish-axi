@@ -10,7 +10,7 @@ export const PLAYBOOKS = [
     use_when: "Explain relationships, flows, state, architecture, and concepts with illustrations",
     choose: [
       "Default to hand-authored inline SVG: it gives proportion, emphasis, spatial metaphor, and annotation-ready structure that generated layouts cannot.",
-      "Use Mermaid only when the user asks for an editable whiteboard: rendered Mermaid in a `.mermaid` container becomes an Excalidraw whiteboard in the Easel browser.",
+      "Use Mermaid only when the user asks for an editable whiteboard: rendered Mermaid in a `.mermaid` container becomes an Excalidraw whiteboard in the Liesel browser.",
       "For large systems, draw a small overview illustration and put detail in module cards below it, instead of one dense auto-laid graph.",
     ],
     structure: [
@@ -27,7 +27,7 @@ export const PLAYBOOKS = [
       "Keep labels to a few words and put prose beside the figure in HTML - SVG text does not wrap, so short labels are also the overflow discipline.",
       "Keep figures self-contained: no external images, fonts, or scripts, so exports render offline.",
       "Render-verify before serving: screenshot the artifact in light, dark, and a narrow viewport - the layout audit deliberately skips SVG interiors.",
-      "When the user asked for a whiteboard, initialize Mermaid theme-aware with the `easel design` snippet rather than hardcoding one theme; to show flowchart nodes as icons from the user's Excalidraw libraries, follow `whiteboard_tooling.library_icons` there.",
+      "When the user asked for a whiteboard, initialize Mermaid theme-aware with the `liesel design` snippet rather than hardcoding one theme; to show flowchart nodes as icons from the user's Excalidraw libraries, follow `whiteboard_tooling.library_icons` there.",
     ],
     pitfalls: [
       "Do not cram every file or function into one figure when a layered explanation would be clearer.",
@@ -35,8 +35,8 @@ export const PLAYBOOKS = [
       "Do not reach for Mermaid to save authoring effort - it surrenders position, size, and emphasis to the engine.",
       "Do not present unverified architecture claims as facts. Cite the files or commands that support them.",
     ],
-    easel_notes: [
-      "An Easel diagram should invite precise annotation: make modules, edges, and captions easy to click and discuss.",
+    liesel_notes: [
+      "A Liesel diagram should invite precise annotation: make modules, edges, and captions easy to click and discuss.",
       "When a relationship is uncertain, label it as a question so the user can resolve it in the review loop.",
     ],
   },
@@ -63,8 +63,8 @@ export const PLAYBOOKS = [
       "Do not hide the important conclusion below a large undifferentiated grid.",
       "Do not use color as the only status signal.",
     ],
-    easel_notes: [
-      "An Easel table should make individual rows easy annotation targets.",
+    liesel_notes: [
+      "A Liesel table should make individual rows easy annotation targets.",
       "If a row implies a follow-up change, include an action control that queues a specific prompt.",
       "When one action covers multiple rows and completeness matters, also follow the input playbook's tracked batch pattern so the reviewer submits one explicit ID set for item-by-item accounting.",
     ],
@@ -92,8 +92,8 @@ export const PLAYBOOKS = [
       "Do not compare vague summaries when concrete examples are available.",
       "Do not bury assumptions that would change the recommendation.",
     ],
-    easel_notes: [
-      "An Easel comparison should let the user annotate the exact option or tradeoff they want changed.",
+    liesel_notes: [
+      "A Liesel comparison should let the user annotate the exact option or tradeoff they want changed.",
       "If the goal is selection, provide controls that queue the chosen option with rationale.",
     ],
   },
@@ -120,11 +120,11 @@ export const PLAYBOOKS = [
       "Do not only focus on ambiguous decisions and omit the actual proposal.",
       "Do not omit failure modes, migration concerns, or backwards compatibility questions.",
     ],
-    easel_notes: ["An Easel plan should make a plan and its uncertainties easy to annotate before code exists."],
+    liesel_notes: ["A Liesel plan should make a plan and its uncertainties easy to annotate before code exists."],
   },
   {
     id: "code",
-    use_when: "Render source code, code files, patches, PR diffs, and before/after code inside Easel artifacts",
+    use_when: "Render source code, code files, patches, PR diffs, and before/after code inside Liesel artifacts",
     choose: [
       "Use this whenever an artifact shows source code: a snippet, full file, patch, PR diff, local change set, or before/after code.",
       "Use File for one code file, FileDiff for old/new versions or parsed patch metadata, and CodeView only when several files or diffs need coordinated navigation.",
@@ -147,11 +147,11 @@ export const PLAYBOOKS = [
   const options = { theme, themeType: "dark", overflow: "wrap" };
   const oldFile = {
     name: "src/greeting.ts",
-    contents: "export function greet(name: string) {\\n  return \\"Hello \\" + name;\\n}\\n\\nconsole.log(greet(\\"Easel\\"));\\n",
+    contents: "export function greet(name: string) {\\n  return \\"Hello \\" + name;\\n}\\n\\nconsole.log(greet(\\"Liesel\\"));\\n",
   };
   const newFile = {
     name: "src/greeting.ts",
-    contents: "export function greet(name: string) {\\n  return \\"Hello, \\" + name + \\"!\\";\\n}\\n\\nconsole.log(greet(\\"Easel\\"));\\n",
+    contents: "export function greet(name: string) {\\n  return \\"Hello, \\" + name + \\"!\\";\\n}\\n\\nconsole.log(greet(\\"Liesel\\"));\\n",
   };
 
   new File(options).render({
@@ -177,8 +177,8 @@ export const PLAYBOOKS = [
       "Do not show huge unrelated files when a focused render range, parsed patch file, or grouped summary would be clearer.",
       "Do not separate a claim from the code lines that prove it.",
     ],
-    easel_notes: [
-      "An Easel code artifact should make each file, hunk, and relevant line easy to annotate precisely.",
+    liesel_notes: [
+      "A Liesel code artifact should make each file, hunk, and relevant line easy to annotate precisely.",
       "When a user action should trigger a fix, queue prompts that name the file path, line range, and desired change.",
       "If the artifact combines code with a plan, table, or comparison, read those playbooks too and keep @pierre/diffs responsible for the code surface.",
     ],
@@ -201,15 +201,15 @@ export const PLAYBOOKS = [
       "Show selected state separately from queued state so the user trusts what will be sent back.",
     ],
     design_rules: [
-      'Set data-easel-annotate="off" on <html> for decision, choice, and form-shaped pages; leave annotation on (the default, or "on") when reviewing a frontend or layout. Unknown values default to on. The toolbar can override the page default and keeps the reviewer\'s choice across artifact reloads.',
-      "Native controls - radios, checkboxes, text inputs, selects, textareas, buttons, options, labels, disclosure summaries, and contenteditable regions - and custom widgets with an interactive ARIA role (button, checkbox, combobox, menuitem, option, radio, switch, tab, treeitem, and the menuitem variants) are interactive automatically: clicks toggle, focus, and type instead of annotating, so they do not need data-easel-action. An <a href> stays annotatable when it carries one of these roles or sits inside such a widget. Build choice and option UIs from these whenever you can.",
-      "For reversible choices, do not call window.easel.queuePrompt() from radio change handlers or option click handlers. Those handlers should only update local selected state.",
-      "Use a per-question form submit or explicit Queue answer button to read the current values and call window.easel.queuePrompt() exactly once for the final answer.",
-      "Put data-easel-action only on custom (non-native) elements that should act like a feedback control - typically a styled div or span you made clickable - so Easel does not annotate it and shows a pointer cursor instead.",
-      "Use data-easel-question on a question wrapper or pass queueKey when multiple pre-send updates should replace the prior unsent answer for the same question.",
+      'Set data-liesel-annotate="off" on <html> for decision, choice, and form-shaped pages; leave annotation on (the default, or "on") when reviewing a frontend or layout. Unknown values default to on. The toolbar can override the page default and keeps the reviewer\'s choice across artifact reloads.',
+      "Native controls - radios, checkboxes, text inputs, selects, textareas, buttons, options, labels, disclosure summaries, and contenteditable regions - and custom widgets with an interactive ARIA role (button, checkbox, combobox, menuitem, option, radio, switch, tab, treeitem, and the menuitem variants) are interactive automatically: clicks toggle, focus, and type instead of annotating, so they do not need data-liesel-action. An <a href> stays annotatable when it carries one of these roles or sits inside such a widget. Build choice and option UIs from these whenever you can.",
+      "For reversible choices, do not call window.liesel.queuePrompt() from radio change handlers or option click handlers. Those handlers should only update local selected state.",
+      "Use a per-question form submit or explicit Queue answer button to read the current values and call window.liesel.queuePrompt() exactly once for the final answer.",
+      "Put data-liesel-action only on custom (non-native) elements that should act like a feedback control - typically a styled div or span you made clickable - so Liesel does not annotate it and shows a pointer cursor instead.",
+      "Use data-liesel-question on a question wrapper or pass queueKey when multiple pre-send updates should replace the prior unsent answer for the same question.",
       "Pass options such as tag, text, selector, target, data, queueKey, or element when they help the agent understand exactly what the user chose.",
       "For a tracked batch, queue the final selected set once in a concise, bounded data.items array; include each item's stable ID, concise label, and requested disposition, and explicitly tell the agent to account for every submitted ID before reporting completion.",
-      "Call window.easel.sendQueuedPrompts() only when the control should immediately send committed feedback instead of waiting for the user to press Send to Agent.",
+      "Call window.liesel.sendQueuedPrompts() only when the control should immediately send committed feedback instead of waiting for the user to press Send to Agent.",
       "Make queued prompts specific enough that the agent can act without asking a follow-up question.",
       "Keep native browser controls accessible and readable on mobile.",
     ],
@@ -219,25 +219,25 @@ export const PLAYBOOKS = [
       "Do not hide the difference between selected locally and queued for the agent.",
       "Do not require interaction for content the user only needs to read.",
     ],
-    easel_notes: [
-      "Easel is strongest when the artifact becomes a focused review surface and not just a static page.",
-      'A native single-choice question should submit the final value: `<form data-easel-question="plan" onsubmit="event.preventDefault(); const choice = new FormData(event.currentTarget).get(\'plan\'); if (choice) window.easel.queuePrompt(\'Use the \' + choice + \' plan\', { tag: \'choice\', text: \'Plan: \' + choice, element: event.currentTarget, data: { question: \'plan\', answer: choice } });"><label><input type="radio" name="plan" value="Starter"> Starter</label><label><input type="radio" name="plan" value="Pro"> Pro</label><button type="submit">Queue this answer</button></form>`.',
-      `A tracked batch should submit the final selected set once: <form data-easel-question="tracked-review" onsubmit="event.preventDefault(); const selected = [...event.currentTarget.querySelectorAll('input[name=items]:checked')].map((input) => ({ id: input.value, label: input.dataset.label, disposition: input.dataset.disposition })); if (selected.length) window.easel.queuePrompt('Act on every selected item and return an item-by-item receipt. Account for every submitted ID before reporting completion.', { tag: 'tracked-batch', text: 'Apply ' + selected.length + ' selected review items', element: event.currentTarget, data: { items: selected } });"><label><input type="checkbox" name="items" value="R-03" data-label="Preserve rollback behavior" data-disposition="must-address"> R-03 — Preserve rollback behavior</label><label><input type="checkbox" name="items" value="R-08" data-label="Reuse the existing error surface" data-disposition="must-address"> R-08 — Reuse the existing error surface</label><button type="submit">Queue selected items</button></form>`,
-      `For a decision artifact a human may open by double-clicking the HTML, optionally include this standalone answer-copy control: it copies every question's answers as text the human pastes back into the chat for the agent to read. It works without Easel and remains absent unless you write it into the artifact:
+    liesel_notes: [
+      "Liesel is strongest when the artifact becomes a focused review surface and not just a static page.",
+      'A native single-choice question should submit the final value: `<form data-liesel-question="plan" onsubmit="event.preventDefault(); const choice = new FormData(event.currentTarget).get(\'plan\'); if (choice) window.liesel.queuePrompt(\'Use the \' + choice + \' plan\', { tag: \'choice\', text: \'Plan: \' + choice, element: event.currentTarget, data: { question: \'plan\', answer: choice } });"><label><input type="radio" name="plan" value="Starter"> Starter</label><label><input type="radio" name="plan" value="Pro"> Pro</label><button type="submit">Queue this answer</button></form>`.',
+      `A tracked batch should submit the final selected set once: <form data-liesel-question="tracked-review" onsubmit="event.preventDefault(); const selected = [...event.currentTarget.querySelectorAll('input[name=items]:checked')].map((input) => ({ id: input.value, label: input.dataset.label, disposition: input.dataset.disposition })); if (selected.length) window.liesel.queuePrompt('Act on every selected item and return an item-by-item receipt. Account for every submitted ID before reporting completion.', { tag: 'tracked-batch', text: 'Apply ' + selected.length + ' selected review items', element: event.currentTarget, data: { items: selected } });"><label><input type="checkbox" name="items" value="R-03" data-label="Preserve rollback behavior" data-disposition="must-address"> R-03 — Preserve rollback behavior</label><label><input type="checkbox" name="items" value="R-08" data-label="Reuse the existing error surface" data-disposition="must-address"> R-08 — Reuse the existing error surface</label><button type="submit">Queue selected items</button></form>`,
+      `For a decision artifact a human may open by double-clicking the HTML, optionally include this standalone answer-copy control: it copies every question's answers as text the human pastes back into the chat for the agent to read. It works without Liesel and remains absent unless you write it into the artifact:
 \`\`\`html
 <div>
   <button type="button" onclick="(async (btn) => {
-    const copyRun = btn._easelCopyRun = (btn._easelCopyRun || 0) + 1;
-    const qs = [...document.querySelectorAll('[data-easel-question]')];
-    const status = btn.parentElement.querySelector('[data-easel-copy-all-status]');
-    btn.parentElement.querySelector('[data-easel-copy-all-manual]')?.remove();
+    const copyRun = btn._lieselCopyRun = (btn._lieselCopyRun || 0) + 1;
+    const qs = [...document.querySelectorAll('[data-liesel-question]')];
+    const status = btn.parentElement.querySelector('[data-liesel-copy-all-status]');
+    btn.parentElement.querySelector('[data-liesel-copy-all-manual]')?.remove();
     const out = [];
     for (const q of qs) {
-      const key = q.getAttribute('data-easel-question')?.trim() || 'Question';
+      const key = q.getAttribute('data-liesel-question')?.trim() || 'Question';
       const lines = [];
       for (const el of q.querySelectorAll('input, select, textarea')) {
         if (el.matches(':disabled')) continue;
-        if (el.closest('[data-easel-question]') !== q) continue;
+        if (el.closest('[data-liesel-question]') !== q) continue;
         const isChoice = el.matches('input[type=checkbox], input[type=radio]');
         if (isChoice && !el.checked) continue;
         if (el.matches('input[type=button], input[type=submit], input[type=reset], input[type=image], input[type=hidden], input[type=file], input[type=range], input[type=color]')) continue;
@@ -264,11 +264,11 @@ export const PLAYBOOKS = [
     try {
       if (typeof navigator.clipboard?.writeText !== 'function') throw new Error('Clipboard API unavailable');
       await navigator.clipboard.writeText(text);
-      if (copyRun !== btn._easelCopyRun) return;
+      if (copyRun !== btn._lieselCopyRun) return;
       status.textContent = 'Answers copied.';
       return;
     } catch {}
-    if (copyRun !== btn._easelCopyRun) return;
+    if (copyRun !== btn._lieselCopyRun) return;
     const tmp = document.createElement('textarea');
     tmp.value = text;
     tmp.readOnly = true;
@@ -287,24 +287,24 @@ export const PLAYBOOKS = [
       status.textContent = 'Answers copied.';
       return;
     }
-    btn.parentElement.querySelector('[data-easel-copy-all-manual]')?.remove();
+    btn.parentElement.querySelector('[data-liesel-copy-all-manual]')?.remove();
     const man = document.createElement('textarea');
     man.value = text;
     man.readOnly = true;
     man.rows = Math.min(12, Math.max(3, text.split('\\n').length));
     man.setAttribute('aria-label', 'Answers to copy manually');
-    man.dataset.easelCopyAllManual = '';
+    man.dataset.lieselCopyAllManual = '';
     btn.insertAdjacentElement('afterend', man);
     man.focus();
     man.select();
     status.textContent = 'Clipboard unavailable. Copy the answers below manually.';
   })(this)">Copy all answers</button>
-  <span data-easel-copy-all-status role="status" aria-live="polite"></span>
+  <span data-liesel-copy-all-status role="status" aria-live="polite"></span>
 </div>
 \`\`\``,
       "The agent's tracked-batch completion receipt must give every submitted ID exactly one outcome: addressed with concrete evidence, deferred with a reason, or rejected with a reason. Evidence may cover several IDs. Before declaring completion, compare the submitted ID set with the receipt ID set and surface every missing ID.",
-      "A custom choice UI should make option buttons update local state, then use a separate Queue answer button with data-easel-action to queue the final selected value.",
-      "Use window.easel.queuePrompt for user intent, not internal analytics or UI-only state changes.",
+      "A custom choice UI should make option buttons update local state, then use a separate Queue answer button with data-liesel-action to queue the final selected value.",
+      "Use window.liesel.queuePrompt for user intent, not internal analytics or UI-only state changes.",
       "End input paths with an obvious way for the user to send feedback back to the agent.",
     ],
   },
@@ -336,8 +336,8 @@ export const PLAYBOOKS = [
       "Do not bury the answer under a diagram of the entire system when the question is about one slice of it.",
       "Do not present inferred reasoning as verified fact; cite or label it.",
     ],
-    easel_notes: [
-      "An Easel explanation should let the reader annotate the exact claim they doubt or want expanded.",
+    liesel_notes: [
+      "A Liesel explanation should let the reader annotate the exact claim they doubt or want expanded.",
       "When an explanation surfaces a disagreement, queue prompts that name the claim and the evidence gap.",
     ],
   },
@@ -364,8 +364,8 @@ export const PLAYBOOKS = [
       "Do not paste a scroll-page outline into fixed-size frames without rewriting the narrative.",
       "Do not make consecutive slides with the same spatial composition unless repetition is the point.",
     ],
-    easel_notes: [
-      "An Easel slide deck can still collect feedback, but each prompt should refer to a slide or decision.",
+    liesel_notes: [
+      "A Liesel slide deck can still collect feedback, but each prompt should refer to a slide or decision.",
       "Use slides for persuasion or presentation, not for dense code review.",
     ],
   },

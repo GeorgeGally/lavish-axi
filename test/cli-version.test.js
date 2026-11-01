@@ -12,7 +12,7 @@ import { promisify } from "node:util";
 import { isVersionOnlyArgv, VERSION } from "../src/cli.js";
 
 const execFileAsync = promisify(execFile);
-const BIN = fileURLToPath(new URL("../bin/easel.js", import.meta.url));
+const BIN = fileURLToPath(new URL("../bin/liesel.js", import.meta.url));
 
 // Accepts the telemetry connection and never answers, so a regression pays the whole
 // drain timeout instead of a fast connection refusal.
@@ -52,7 +52,7 @@ test("isVersionOnlyArgv matches exactly the SDK's version-flag shapes", () => {
 
 test("--version prints the version fast and skips telemetry and state-dir init", async (t) => {
   const telemetry = await startBlackHoleTelemetry();
-  const stateParent = await mkdtemp(path.join(tmpdir(), "easel-version-"));
+  const stateParent = await mkdtemp(path.join(tmpdir(), "liesel-version-"));
   const stateDir = path.join(stateParent, "state");
   t.after(async () => {
     await telemetry.close();
@@ -61,10 +61,10 @@ test("--version prints the version fast and skips telemetry and state-dir init",
 
   const env = {
     ...process.env,
-    EASEL_STATE_DIR: stateDir,
-    EASEL_TELEMETRY: "1",
-    EASEL_UMAMI_WEBSITE_ID: "version-fast-path-test",
-    EASEL_UMAMI_HOST: telemetry.host,
+    LIESEL_STATE_DIR: stateDir,
+    LIESEL_TELEMETRY: "1",
+    LIESEL_UMAMI_WEBSITE_ID: "version-fast-path-test",
+    LIESEL_UMAMI_HOST: telemetry.host,
   };
 
   for (const flag of ["--version", "-v", "-V"]) {
@@ -81,7 +81,7 @@ test("--version prints the version fast and skips telemetry and state-dir init",
 
 test("a non-version invocation still runs the telemetry init the fast path skips", async (t) => {
   const telemetry = await startBlackHoleTelemetry();
-  const stateParent = await mkdtemp(path.join(tmpdir(), "easel-version-control-"));
+  const stateParent = await mkdtemp(path.join(tmpdir(), "liesel-version-control-"));
   const stateDir = path.join(stateParent, "state");
   t.after(async () => {
     await telemetry.close();
@@ -91,10 +91,10 @@ test("a non-version invocation still runs the telemetry init the fast path skips
   await execFileAsync(process.execPath, [BIN, "design"], {
     env: {
       ...process.env,
-      EASEL_STATE_DIR: stateDir,
-      EASEL_TELEMETRY: "1",
-      EASEL_UMAMI_WEBSITE_ID: "version-fast-path-test",
-      EASEL_UMAMI_HOST: telemetry.host,
+      LIESEL_STATE_DIR: stateDir,
+      LIESEL_TELEMETRY: "1",
+      LIESEL_UMAMI_WEBSITE_ID: "version-fast-path-test",
+      LIESEL_UMAMI_HOST: telemetry.host,
     },
   });
 

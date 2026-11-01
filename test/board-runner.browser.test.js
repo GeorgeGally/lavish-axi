@@ -8,9 +8,9 @@ import { findChrome } from "../src/board-crop.js";
 import { serve } from "../src/server.js";
 import { launchChrome } from "./board-cdp-browser.js";
 
-const runBrowserE2e = process.env.EASEL_BROWSER_E2E === "1";
+const runBrowserE2e = process.env.LIESEL_BROWSER_E2E === "1";
 // Set to a folder to keep screenshots of each step.
-const shotsDir = process.env.EASEL_RUNNER_SHOTS || "";
+const shotsDir = process.env.LIESEL_RUNNER_SHOTS || "";
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const ITEM_HTML = `<!doctype html>
@@ -28,7 +28,7 @@ process.stdin.on("data", (chunk) => (input += chunk));
 process.stdin.on("end", async () => {
   process.stdout.write("Reading the notes...\\n");
   await new Promise((r) => setTimeout(r, 1500));
-  const file = path.join(process.env.EASEL_BOARD_DIR, "01-hero.html");
+  const file = path.join(process.env.LIESEL_BOARD_DIR, "01-hero.html");
   const note = (input.match(/Note: (.*)/) || [])[1] || "";
   await writeFile(file, (await readFile(file, "utf8")).replace("The whole fleet", note.slice(0, 60)));
   process.stdout.write("Set the headline to your words.\\n");
@@ -39,7 +39,7 @@ test(
   "the Agent tab picks an installed agent, and a sent note runs it, edits the item and answers in Chat",
   { skip: !runBrowserE2e || !findChrome(), timeout: 120_000 },
   async () => {
-    const temp = await realpath(await mkdtemp(path.join(tmpdir(), "easel-runner-e2e-")));
+    const temp = await realpath(await mkdtemp(path.join(tmpdir(), "liesel-runner-e2e-")));
     const profile = path.join(temp, "chrome");
     await mkdir(profile, { recursive: true });
     const boardDir = path.join(temp, "board");
@@ -56,7 +56,7 @@ test(
       idleTimeoutMs: null,
       hosts: ["127.0.0.1"],
       linkHost: "127.0.0.1",
-      env: { ...process.env, EASEL_NOTIFY_CMD: "" },
+      env: { ...process.env, LIESEL_NOTIFY_CMD: "" },
       log: () => {},
     });
     const base = `http://127.0.0.1:${server.port}`;

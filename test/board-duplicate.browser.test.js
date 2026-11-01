@@ -10,10 +10,10 @@ import { fileURLToPath } from "node:url";
 import { findChrome } from "../src/board-crop.js";
 import { launchChrome } from "./board-cdp-browser.js";
 
-const runBrowserE2e = process.env.EASEL_BROWSER_E2E === "1";
+const runBrowserE2e = process.env.LIESEL_BROWSER_E2E === "1";
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 // Where to leave a screenshot of the board with its duplicate, when asked.
-const shotDir = process.env.EASEL_E2E_SHOTS || "";
+const shotDir = process.env.LIESEL_E2E_SHOTS || "";
 
 function run(command, args, env, timeout = 45_000) {
   const result = spawnSync(command, args, {
@@ -54,15 +54,15 @@ test(
   "a design duplicates beside itself, scrolls with its copy, renames, and deletes with undo",
   { skip: !runBrowserE2e || !findChrome(), timeout: 240_000 },
   async () => {
-    const temp = await mkdtemp(path.join(tmpdir(), "easel-duplicate-e2e-"));
+    const temp = await mkdtemp(path.join(tmpdir(), "liesel-duplicate-e2e-"));
     const port = await freePort();
-    const easelEnv = {
-      EASEL_PORT: String(port),
-      EASEL_STATE_DIR: path.join(temp, "state"),
-      EASEL_NO_OPEN: "1",
-      EASEL_TELEMETRY: "0",
-      EASEL_HOST: "127.0.0.1",
-      EASEL_LINK_HOST: "127.0.0.1",
+    const lieselEnv = {
+      LIESEL_PORT: String(port),
+      LIESEL_STATE_DIR: path.join(temp, "state"),
+      LIESEL_NO_OPEN: "1",
+      LIESEL_TELEMETRY: "0",
+      LIESEL_HOST: "127.0.0.1",
+      LIESEL_LINK_HOST: "127.0.0.1",
     };
     const profile = path.join(temp, "chrome");
     await mkdir(profile, { recursive: true });
@@ -72,7 +72,7 @@ test(
       const board = path.join(temp, "board");
       await mkdir(board, { recursive: true });
       await writeFile(path.join(board, "hero.html"), ITEM_HTML);
-      const output = run(process.execPath, ["bin/easel.js", "board", "open", board, "--no-open"], easelEnv);
+      const output = run(process.execPath, ["bin/liesel.js", "board", "open", board, "--no-open"], lieselEnv);
       const url = output.match(/url:\s*"([^"]+)"/)?.[1];
       assert.ok(url, output);
 
@@ -187,7 +187,7 @@ test(
       }
     } finally {
       browser?.close();
-      run(process.execPath, ["bin/easel.js", "stop", "--port", String(port)], easelEnv, 15_000);
+      run(process.execPath, ["bin/liesel.js", "stop", "--port", String(port)], lieselEnv, 15_000);
       await rm(temp, { recursive: true, force: true });
     }
   },

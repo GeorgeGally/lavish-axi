@@ -34,6 +34,6 @@ test("cropFrameHtml shifts the sandboxed item so the crop fills the window", () 
 });
 
 test("findChrome honours a configured path and refuses one that is missing", () => {
-  assert.equal(findChrome({ EASEL_CHROME: "/nonexistent/chrome" }), "");
-  assert.equal(findChrome({ EASEL_CHROME: process.execPath }), process.execPath);
+  assert.equal(findChrome({ LIESEL_CHROME: "/nonexistent/chrome" }), "");
+  assert.equal(findChrome({ LIESEL_CHROME: process.execPath }), process.execPath);
 });

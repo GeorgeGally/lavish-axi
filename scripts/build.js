@@ -7,7 +7,7 @@ const packageJson = JSON.parse(await readFile(new URL("../package.json", import.
 await mkdir("dist", { recursive: true });
 
 await esbuild.build({
-  entryPoints: ["bin/easel.js"],
+  entryPoints: ["bin/liesel.js"],
   outfile: "dist/cli.mjs",
   bundle: true,
   packages: "external",
@@ -15,16 +15,16 @@ await esbuild.build({
   format: "esm",
   target: "node22",
   define: {
-    "process.env.EASEL_BUILD_UMAMI_HOST": JSON.stringify(process.env.EASEL_UMAMI_HOST || ""),
-    "process.env.EASEL_BUILD_UMAMI_WEBSITE_ID": JSON.stringify(process.env.EASEL_UMAMI_WEBSITE_ID || ""),
-    "process.env.EASEL_BUILD_VERSION": JSON.stringify(packageJson.version),
+    "process.env.LIESEL_BUILD_UMAMI_HOST": JSON.stringify(process.env.LIESEL_UMAMI_HOST || ""),
+    "process.env.LIESEL_BUILD_UMAMI_WEBSITE_ID": JSON.stringify(process.env.LIESEL_UMAMI_WEBSITE_ID || ""),
+    "process.env.LIESEL_BUILD_VERSION": JSON.stringify(packageJson.version),
   },
 });
 
 await chmod("dist/cli.mjs", 0o755);
 
 await esbuild.build({
-  entryPoints: ["bin/easel-server.js"],
+  entryPoints: ["bin/liesel-server.js"],
   outfile: "dist/server.mjs",
   bundle: true,
   packages: "external",
@@ -35,7 +35,7 @@ await esbuild.build({
     {
       name: "external-cli",
       setup(build) {
-        build.onResolve({ filter: /^\.\/easel\.js$/ }, () => ({
+        build.onResolve({ filter: /^\.\/liesel\.js$/ }, () => ({
           path: "./cli.mjs",
           external: true,
         }));

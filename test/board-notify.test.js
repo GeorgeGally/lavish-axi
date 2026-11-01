@@ -39,19 +39,19 @@ test("runNotifyCommand passes board values as parameters and environment, never 
   assert.deepEqual(calls[0].args, [
     "-c",
     '/opt/notify --flag "$@"',
-    "easel-notify",
+    "liesel-notify",
     "Hero $(rm -rf ~)",
     "/b/board.json",
     "s1",
   ]);
   assert.equal(calls[0].options.detached, true);
   const env = calls[0].options.env;
-  assert.equal(env.EASEL_BOARD_ID, "k1");
-  assert.equal(env.EASEL_NOTE_COUNT, "2");
-  assert.equal(env.EASEL_BOARD_DIR, "/boards/Hero $(rm -rf ~)");
-  assert.equal(env.EASEL_BOARD, "Hero $(rm -rf ~)");
-  assert.equal(env.EASEL_BOARD_JSON, "/b/board.json");
-  assert.equal(env.EASEL_SUBMISSION_ID, "s1");
+  assert.equal(env.LIESEL_BOARD_ID, "k1");
+  assert.equal(env.LIESEL_NOTE_COUNT, "2");
+  assert.equal(env.LIESEL_BOARD_DIR, "/boards/Hero $(rm -rf ~)");
+  assert.equal(env.LIESEL_BOARD, "Hero $(rm -rf ~)");
+  assert.equal(env.LIESEL_BOARD_JSON, "/b/board.json");
+  assert.equal(env.LIESEL_SUBMISSION_ID, "s1");
 });
 
 test("runNotifyCommand logs a failing command and never throws", () => {
@@ -123,7 +123,7 @@ test("createBoardNotifier runs at once, then collapses a burst into one trailing
 });
 
 test("resolveNotifyCommand prefers the environment, then config.json notify_cmd, else off", async (t) => {
-  const stateRoot = await mkdtemp(path.join(tmpdir(), "easel-notify-config-"));
+  const stateRoot = await mkdtemp(path.join(tmpdir(), "liesel-notify-config-"));
   t.after(() => rm(stateRoot, { recursive: true, force: true }));
   assert.equal(await resolveNotifyCommand({ envCommand: "", stateRoot }), "");
   await writeFile(path.join(stateRoot, "config.json"), "not json");

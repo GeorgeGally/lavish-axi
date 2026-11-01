@@ -124,7 +124,7 @@ body {
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 }
-body.easel {
+body.liesel {
   color-scheme: dark;
 }
 :focus-visible {

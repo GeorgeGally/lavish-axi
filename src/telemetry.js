@@ -1,24 +1,24 @@
 const UMAMI_PATH = "/api/send";
 const DEFAULT_HOSTNAME = "cli";
-const DEFAULT_TITLE = "Easel CLI";
+const DEFAULT_TITLE = "Liesel CLI";
 const DEFAULT_REQUEST_TIMEOUT_MS = 1_000;
 
 export function resolveTelemetryConfig(input) {
-  const optOut = String(input.env.EASEL_TELEMETRY || "")
+  const optOut = String(input.env.LIESEL_TELEMETRY || "")
     .trim()
     .toLowerCase();
   if (optOut === "0" || optOut === "false" || optOut === "off") {
     return { enabled: false, host: "", websiteID: "" };
   }
 
-  const websiteID = String(input.env.EASEL_UMAMI_WEBSITE_ID || "").trim() || input.buildWebsiteID.trim();
+  const websiteID = String(input.env.LIESEL_UMAMI_WEBSITE_ID || "").trim() || input.buildWebsiteID.trim();
   if (!websiteID) {
     return { enabled: false, host: "", websiteID: "" };
   }
 
-  // Telemetry runs only against a host this build or environment names: Easel has no
+  // Telemetry runs only against a host this build or environment names: Liesel has no
   // built-in analytics server.
-  const host = String(input.env.EASEL_UMAMI_HOST || "").trim() || input.buildHost.trim();
+  const host = String(input.env.LIESEL_UMAMI_HOST || "").trim() || input.buildHost.trim();
   if (!host) {
     return { enabled: false, host: "", websiteID: "" };
   }
@@ -26,11 +26,11 @@ export function resolveTelemetryConfig(input) {
 }
 
 export function getBuildTimeUmamiHost() {
-  return process.env.EASEL_BUILD_UMAMI_HOST || "";
+  return process.env.LIESEL_BUILD_UMAMI_HOST || "";
 }
 
 export function getBuildTimeUmamiWebsiteID() {
-  return process.env.EASEL_BUILD_UMAMI_WEBSITE_ID || "";
+  return process.env.LIESEL_BUILD_UMAMI_WEBSITE_ID || "";
 }
 
 export function createTelemetryClient(config) {

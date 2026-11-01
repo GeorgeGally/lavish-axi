@@ -1,6 +1,6 @@
 # Third-party notices
 
-The published `easel` package vendors the following third-party software into `dist/`.
+The published `liesel` package vendors the following third-party software into `dist/`.
 Each component remains under its own license; the notices below satisfy their attribution requirements.
 The whiteboard bundle (`dist/whiteboard/`) is built from these packages by `scripts/build.js`.
 

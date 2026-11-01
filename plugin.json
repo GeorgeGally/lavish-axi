@@ -1,14 +1,14 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
-  "name": "easel",
+  "name": "liesel",
   "version": "0.2.0",
-  "description": "HTML is the new markdown. Easel is a board for reviewing and tuning HTML designs with your agent.",
+  "description": "HTML is the new markdown. Liesel is a board for reviewing and tuning HTML designs with your agent.",
   "author": {
     "name": "George Gally",
     "url": "https://github.com/GeorgeGally"
   },
-  "homepage": "https://github.com/GeorgeGally/lavish-axi#readme",
-  "repository": "https://github.com/GeorgeGally/lavish-axi",
+  "homepage": "https://github.com/GeorgeGally/liesel#readme",
+  "repository": "https://github.com/GeorgeGally/liesel",
   "license": "MIT",
   "keywords": [
     "axi",

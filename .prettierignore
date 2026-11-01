@@ -1,9 +1,9 @@
 dist
 node_modules
-.easel
-.easel
+.liesel
+.liesel
 .no-mistakes
-easel-code-review.html
+liesel-code-review.html
 package-lock.json
 CHANGELOG.md
 plugin.json

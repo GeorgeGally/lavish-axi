@@ -2,7 +2,7 @@ import { readFile, realpath, stat } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-// Builds a portable copy of an Easel artifact by inlining only its LOCAL assets - files on disk
+// Builds a portable copy of a Liesel artifact by inlining only its LOCAL assets - files on disk
 // the artifact references by relative path, fetchable file:// URL, or a trusted root-absolute
 // resolver - as inline <style>/<script> blocks and data URIs. Remote references (http(s) CDN/font URLs,
 // protocol-relative URLs, CSS url() pointing at the network) are deliberately LEFT AS-IS: the
@@ -135,12 +135,12 @@ export async function buildSelfContainedHtml(html, options = {}) {
     resolveAbsolute: typeof options.resolveAbsolute === "function" ? options.resolveAbsolute : () => null,
     maxAssetBytes: resolveBytes(
       options.maxAssetBytes,
-      process.env.EASEL_EXPORT_MAX_ASSET_BYTES,
+      process.env.LIESEL_EXPORT_MAX_ASSET_BYTES,
       DEFAULT_MAX_ASSET_BYTES,
     ),
     maxBundleBytes: resolveBytes(
       options.maxBundleBytes,
-      process.env.EASEL_EXPORT_MAX_BUNDLE_BYTES,
+      process.env.LIESEL_EXPORT_MAX_BUNDLE_BYTES,
       DEFAULT_MAX_BUNDLE_BYTES,
     ),
     maxDepth: Number.isFinite(options.maxDepth) ? options.maxDepth : DEFAULT_MAX_DEPTH,
@@ -739,7 +739,7 @@ async function inlineScript(tag, attrs, body, closeTag, baseDir, ctx) {
     if (!isClassicScript(attrs) && !isModuleScript(attrs)) inlineBody = scrubRawTextFileUrls(inlineBody, ctx);
     return `${await transformStartTag(tag, attrs, false, baseDir, ctx)}${escapeRawText(inlineBody, "script")}${closeTag}`;
   }
-  if (isInjectedEaselSdkSrc(src)) return "";
+  if (isInjectedLieselSdkSrc(src)) return "";
   if (isModuleScript(attrs)) {
     warnExternalModuleScript(src, baseDir, ctx, HTML_REF_OPTIONS);
     const startTag = await transformStartTag(tag, replaceUnresolvedAttrRef(attrs, "src", src), false, baseDir, ctx);
@@ -3350,7 +3350,7 @@ function replaceUnresolvedAttrRef(source, name, ref) {
   return shouldRedactUnresolvedRef(ref) ? replaceAttrValue(source, name, REDACTED_FILE_REF) : source;
 }
 
-function isInjectedEaselSdkSrc(src) {
+function isInjectedLieselSdkSrc(src) {
   const value = String(src || "").trim();
   if (!value.startsWith("/sdk.js?")) return false;
   const params = new URLSearchParams(value.slice("/sdk.js?".length));

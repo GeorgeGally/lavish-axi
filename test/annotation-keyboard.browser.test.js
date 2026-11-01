@@ -7,7 +7,7 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
-const runBrowserE2e = process.env.EASEL_BROWSER_E2E === "1";
+const runBrowserE2e = process.env.LIESEL_BROWSER_E2E === "1";
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 function run(command, args, env, timeout = 45_000) {
@@ -59,18 +59,18 @@ test(
   "typing in the annotation card does not reach the artifact's own key handlers",
   { skip: !runBrowserE2e, timeout: 180_000 },
   async () => {
-    const temp = await mkdtemp(path.join(tmpdir(), "easel-keyboard-e2e-"));
+    const temp = await mkdtemp(path.join(tmpdir(), "liesel-keyboard-e2e-"));
     const port = await freePort();
-    const easelEnv = {
-      EASEL_PORT: String(port),
-      EASEL_STATE_DIR: path.join(temp, "state"),
-      EASEL_NO_OPEN: "1",
-      EASEL_TELEMETRY: "0",
-      EASEL_HOST: "127.0.0.1",
-      EASEL_LINK_HOST: "127.0.0.1",
+    const lieselEnv = {
+      LIESEL_PORT: String(port),
+      LIESEL_STATE_DIR: path.join(temp, "state"),
+      LIESEL_NO_OPEN: "1",
+      LIESEL_TELEMETRY: "0",
+      LIESEL_HOST: "127.0.0.1",
+      LIESEL_LINK_HOST: "127.0.0.1",
     };
     const chromeEnv = {
-      CHROME_DEVTOOLS_AXI_SESSION: `easel-keyboard-e2e-${process.pid}`,
+      CHROME_DEVTOOLS_AXI_SESSION: `liesel-keyboard-e2e-${process.pid}`,
       CHROME_DEVTOOLS_AXI_USER_DATA_DIR: path.join(temp, "chrome"),
     };
     const browser = (...args) => run("chrome-devtools-axi", args, chromeEnv);
@@ -83,7 +83,7 @@ test(
     try {
       const artifact = path.join(temp, "deck.html");
       await writeFile(artifact, ARTIFACT_HTML);
-      const output = run(process.execPath, ["bin/easel.js", artifact, "--no-open"], easelEnv);
+      const output = run(process.execPath, ["bin/liesel.js", artifact, "--no-open"], lieselEnv);
       const url = output.match(/url:\s*"([^"]+)"/)?.[1];
       assert.ok(url, output);
 
@@ -102,7 +102,7 @@ test(
       const outside = browser("press", "ArrowRight");
       assert.match(outside, /"Slide 2"/, outside);
     } finally {
-      run(process.execPath, ["bin/easel.js", "stop", "--port", String(port)], easelEnv, 15_000);
+      run(process.execPath, ["bin/liesel.js", "stop", "--port", String(port)], lieselEnv, 15_000);
       run("chrome-devtools-axi", ["stop"], chromeEnv);
       await rm(temp, { recursive: true, force: true });
     }

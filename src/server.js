@@ -16,7 +16,7 @@ import {
   classifyMaterialRectEscape,
   createArtifactSdk,
   deriveAttachmentNoticeState,
-  deriveEaselQueueKey,
+  deriveLieselQueueKey,
   findStableLayoutFindings,
   isMaterialPageOverflow,
   isModeToggleHotkeyEvent,
@@ -58,7 +58,7 @@ import { hostRejectedShareWrite, publishedDespiteError, publishToHtmlApp } from 
 import { serializeChat, serializeChatAckIds, serializeChatSync } from "./chat-messages.js";
 import { formatServerLogLine, serverStdioIsTimestamped } from "./server-log.js";
 import { BOARD_FILE_NAME, PRODUCT_NAME, productEnv, SERVER_APP_ID } from "./brand.js";
-import { injectEaselSdk } from "./html-transform.js";
+import { injectLieselSdk } from "./html-transform.js";
 import {
   BoardError,
   boardDirPath,
@@ -157,7 +157,7 @@ const NETWORK_RECONCILE_CACHE_MS = 1_000;
 const BIND_RETRY_DELAYS_MS = [100, 250, 500];
 // A requested address that still has not bound after that budget is retried in the background for
 // the life of the process (the last delay repeats), so a tailnet address held by a stale daemon or
-// absent while Tailscale restarts comes back without anyone restarting Easel.
+// absent while Tailscale restarts comes back without anyone restarting Liesel.
 const BIND_RECOVERY_DELAYS_MS = [1_000, 2_000, 5_000, 10_000, 30_000];
 const LOOPBACK_OWNER_PROBE_TIMEOUT_MS = 500;
 const WEBSOCKET_CLOSE_GRACE_MS = 250;
@@ -190,7 +190,7 @@ export const BATCH_RELOAD_DEBOUNCE_MS = 900;
 
 // The whiteboard frame bundle (Excalidraw + Mermaid converter + React) is
 // produced by `scripts/build.js` into dist/whiteboard. Packaged runs find it
-// next to the served bundle; source runs (node bin/easel.js) fall back to
+// next to the served bundle; source runs (node bin/liesel.js) fall back to
 // the repo's dist output, so `pnpm run build` must have run at least once.
 export function defaultWhiteboardAssetsDir() {
   const packaged = fileURLToPath(new URL("./whiteboard", import.meta.url));
@@ -301,11 +301,11 @@ export function isValidWhiteboardChannelToken(token, secret, sessionKey, now = D
 
 // A detached server should not live forever. When no browser chrome or agent poll
 // are connected for this long, the server shuts itself down so it stops dangling. The next
-// `easel <file>` invocation re-spawns a fresh server and adopts resumable sessions from
+// `liesel <file>` invocation re-spawns a fresh server and adopts resumable sessions from
 // state.json. Browser-ended sessions still require the explicit --reopen opt-in. Set
-// EASEL_IDLE_TIMEOUT_MS to 0/off to disable, or to a custom millisecond budget.
+// LIESEL_IDLE_TIMEOUT_MS to 0/off to disable, or to a custom millisecond budget.
 export function resolveIdleTimeoutMs(env = process.env) {
-  const raw = env.EASEL_IDLE_TIMEOUT_MS?.trim();
+  const raw = env.LIESEL_IDLE_TIMEOUT_MS?.trim();
   if (raw === undefined || raw === "") return DEFAULT_IDLE_TIMEOUT_MS;
   if (raw === "0" || raw.toLowerCase() === "off") return null;
   const value = Number(raw);
@@ -315,12 +315,12 @@ export function resolveIdleTimeoutMs(env = process.env) {
 
 // How long an active poll waits for a review page to reconnect after the last one drops before it
 // returns browser_disconnected. A phone that locks or backgrounds the tab drops its socket, so the
-// 10s default can be too short there. Set EASEL_DISCONNECT_GRACE_MS to a custom millisecond
+// 10s default can be too short there. Set LIESEL_DISCONNECT_GRACE_MS to a custom millisecond
 // budget, or to 0/off so a disconnect never releases the poll (only feedback, an end, or its own
 // timeout does). Both resolvers clamp to 2147483647 ms, setTimeout's maximum; a larger delay would
 // overflow and fire after about 1 ms.
 export function resolveBrowserDisconnectGraceMs(env = process.env) {
-  const raw = env.EASEL_DISCONNECT_GRACE_MS?.trim();
+  const raw = env.LIESEL_DISCONNECT_GRACE_MS?.trim();
   if (raw === undefined || raw === "") return DEFAULT_BROWSER_DISCONNECT_GRACE_MS;
   if (raw === "0" || raw.toLowerCase() === "off") return null;
   const value = Number(raw);
@@ -409,8 +409,8 @@ export async function serve({
     typeof log === "function"
       ? log
       : (line) => process.stderr.write(`${serverStdioIsTimestamped() ? line : formatServerLogLine(line)}\n`);
-  const logEvent = verbose ? (line) => writeLog(`[easel] ${line}`) : null;
-  if (tailscaleDetectionWarning) writeLog(`[easel] WARNING: ${tailscaleDetectionWarning}`);
+  const logEvent = verbose ? (line) => writeLog(`[liesel] ${line}`) : null;
+  if (tailscaleDetectionWarning) writeLog(`[liesel] WARNING: ${tailscaleDetectionWarning}`);
   let publicPort = port;
   let serverReady = false;
   let networkReconcileCheckedAt = 0;
@@ -437,7 +437,7 @@ export async function serve({
       .then((session) => {
         if (session) events.emit("chat-sync", key, session);
       })
-      .catch((error) => writeLog(`[easel] working stamp after reload failed: ${error?.message || error}`));
+      .catch((error) => writeLog(`[liesel] working stamp after reload failed: ${error?.message || error}`));
   });
   // The transcript the chrome renders is computed here (src/chat-messages.js): agent text ships
   // with its rendered html, user entries ship as text with their anchor, never as html.
@@ -524,12 +524,12 @@ export async function serve({
             ? `${code}: that name does not resolve right now`
             : code || (error instanceof Error ? error.message : String(error));
     const address = `${hostForUrl(listenHost)}:${publicPort || port}`;
-    const reachable = `Easel remains available on ${boundHosts.map((bound) => hostForUrl(bound)).join(", ") || "loopback"}`;
+    const reachable = `Liesel remains available on ${boundHosts.map((bound) => hostForUrl(bound)).join(", ") || "loopback"}`;
     if (listenHost === tailscale?.ipv4) {
       return `Tailscale binding failed for ${address} (${why}); there is no phone access and tailnet review links do not load. ${reachable} and keeps retrying the tailnet address in the background.`;
     }
     const fellBack = boundHosts.length > 0 && boundHosts.every((bound) => bound === LOOPBACK_HOST);
-    return `Could not bind ${address} (${why}); ${fellBack ? "Easel fell back to loopback and is" : "Easel is"} not reachable at that address. ${reachable} and keeps retrying ${hostForUrl(listenHost)} in the background.`;
+    return `Could not bind ${address} (${why}); ${fellBack ? "Liesel fell back to loopback and is" : "Liesel is"} not reachable at that address. ${reachable} and keeps retrying ${hostForUrl(listenHost)} in the background.`;
   }
 
   // Everything that reports network health reads this, so the warning appears and clears with the
@@ -591,7 +591,7 @@ export async function serve({
       const session = await store.findByKey(key);
       if (session) events.emit("chat-sync", key, session);
     } catch (error) {
-      writeLog(`[easel] chat-sync after delivery failed: ${error?.message || error}`);
+      writeLog(`[liesel] chat-sync after delivery failed: ${error?.message || error}`);
     }
   }
 
@@ -656,12 +656,12 @@ export async function serve({
     const persistedNothing = !session || Boolean(session.rejected) || Boolean(session.conflict);
     if (restoreError) {
       writeLog(
-        `[easel] closed poll feedback restore failed; the batch was lost: ${restoreError?.message || restoreError}`,
+        `[liesel] closed poll feedback restore failed; the batch was lost: ${restoreError?.message || restoreError}`,
       );
     } else if (persistedNothing) {
-      writeLog("[easel] closed poll feedback restore was refused; nothing was re-queued and the batch was lost");
+      writeLog("[liesel] closed poll feedback restore was refused; nothing was re-queued and the batch was lost");
     } else if (!restoredPrompts || JSON.stringify(restoredPrompts) !== JSON.stringify(prompts) || !failuresRestored) {
-      writeLog("[easel] closed poll feedback restore was incomplete; delivery was not marked");
+      writeLog("[liesel] closed poll feedback restore was incomplete; delivery was not marked");
     }
     const pendingAfterRestore =
       (Array.isArray(restoredPrompts) && restoredPrompts.length > 0) ||
@@ -684,11 +684,11 @@ export async function serve({
   // never one of the hostnames this server answers to.
   //
   // Loopback names are always accepted. Binding to a concrete interface
-  // (EASEL_HOST) or naming a link host (EASEL_LINK_HOST) adds that host,
+  // (LIESEL_HOST) or naming a link host (LIESEL_LINK_HOST) adds that host,
   // so an operator who intentionally exposes the server on a specific interface
   // keeps rebinding protection while their chosen hostname works. Additional
   // names (a reverse-proxy hostname, extra interfaces) are an explicit opt-in via
-  // EASEL_ALLOWED_HOSTS; a lone "*" there disables the guard for operators
+  // LIESEL_ALLOWED_HOSTS; a lone "*" there disables the guard for operators
   // who front the server with their own authentication. When a reverse proxy sits
   // in front, X-Forwarded-Host is validated too (see isAllowedRequestHost).
   //
@@ -755,8 +755,8 @@ export async function serve({
         error: "forbidden host",
         title: "Wrong address",
         message: tailscalePhoneReady
-          ? "This Easel review server does not accept that host. Open the working URL below on this computer or your phone through Tailscale."
-          : "This Easel review server does not accept that host. Open the working URL below on this computer. Phone access is unavailable.",
+          ? "This Liesel review server does not accept that host. Open the working URL below on this computer or your phone through Tailscale."
+          : "This Liesel review server does not accept that host. Open the working URL below on this computer. Phone access is unavailable.",
       });
     });
   }
@@ -874,9 +874,9 @@ export async function serve({
       const sessionUrl = `http://${hostForUrl(resolvedLinkHost)}:${publicPort}/session/${key}`;
       // A user-initiated end (ending or send-and-ending from the browser) means the human
       // deliberately closed the review surface. Silently reopening it on the next
-      // `easel <file>` is the exact behavior this route exists to prevent - require an
+      // `liesel <file>` is the exact behavior this route exists to prevent - require an
       // explicit `reopen` opt-in instead of reviving it automatically. Agent-initiated ends
-      // (`easel end`) keep reviving on the next open, same as before this change.
+      // (`liesel end`) keep reviving on the next open, same as before this change.
       if (existing?.status === "ended" && existing.ended_by === "user" && !reopen) {
         logEvent?.(`session open blocked (user-ended) key=${key} file=${file}`);
         res.json({
@@ -995,9 +995,9 @@ export async function serve({
   /**
    * Every build of an item's file leaves a snapshot behind, so the board can show one
    * item as a timeline: a dot per change, a labelled tick when the build names itself
-   * with `<meta name="easel-build">`.
+   * with `<meta name="liesel-build">`.
    */
-  const BOARD_BUILD_DIR = ".easel-builds";
+  const BOARD_BUILD_DIR = ".liesel-builds";
 
   async function recordBuilds(dir, board) {
     let changed = false;
@@ -1007,7 +1007,7 @@ export async function serve({
       const html = await readFile(file, "utf8").catch(() => "");
       const hash = crypto.createHash("sha1").update(html).digest("hex");
       if (item.builds.some((build) => build.hash === hash)) continue;
-      const label = /<meta[^>]+name=["']easel-build["'][^>]*content=(?:"([^"]*)"|'([^']*)')/i.exec(html);
+      const label = /<meta[^>]+name=["']liesel-build["'][^>]*content=(?:"([^"]*)"|'([^']*)')/i.exec(html);
       const folder = path.join(dir, BOARD_BUILD_DIR, item.id);
       await mkdir(folder, { recursive: true });
       await writeFile(path.join(folder, `${hash}.html`), html, { flag: "wx" }).catch((error) => {
@@ -1357,7 +1357,7 @@ export async function serve({
         const name = duplicateFileName(board, source.file, (candidate) => existsSync(path.join(directory, candidate)));
         // The bytes land under a name no scan picks up, and take their real name only
         // once the board already knows the item, so the copy never appears twice.
-        const temporary = path.join(directory, `.easel-copy-${crypto.randomBytes(6).toString("hex")}.tmp`);
+        const temporary = path.join(directory, `.liesel-copy-${crypto.randomBytes(6).toString("hex")}.tmp`);
         await copyFile(sourceFile, temporary);
         const next = {
           ...board,
@@ -1388,7 +1388,7 @@ export async function serve({
 
   // Only a duplicate can be deleted from the board. Its file moves into the board's
   // trash folder with its record, so Undo puts back exactly what was there.
-  const BOARD_TRASH_DIR = ".easel-trash";
+  const BOARD_TRASH_DIR = ".liesel-trash";
   app.post("/api/boards/:key/delete", async (req, res, next) => {
     try {
       if (!boardWriteGuard(req, res)) return;
@@ -1485,7 +1485,7 @@ export async function serve({
           ended: resolved.session.status === "ended",
           endedBy: resolved.session.ended_by || null,
           assetVersion: version,
-          // Who answers on this board, for "<name> is replying…" (EASEL_AGENT_NAME).
+          // Who answers on this board, for "<name> is replying…" (LIESEL_AGENT_NAME).
           agentName: String(productEnv("AGENT_NAME", env) || "Agent").slice(0, 40),
         }),
       );
@@ -2020,7 +2020,7 @@ export async function serve({
       const streamHeartbeat = timeoutMs === null;
       let heartbeat = null;
       if (streamHeartbeat) {
-        res.status(200).type("application/json").set("Easel-Poll-State", "listening");
+        res.status(200).type("application/json").set("Liesel-Poll-State", "listening");
         res.write(" ");
         heartbeat = setInterval(() => {
           if (!res.writableEnded) res.write(" ");
@@ -2152,13 +2152,13 @@ export async function serve({
   // from the artifact path, not a secret, so knowing it must not be enough -
   // only this server's own chrome may queue prompts.
   // A board submission (a note sent from the composer, a pin, tune Send, an image drop,
-  // Accept / Keep today, an end) runs the operator's notify command (EASEL_NOTIFY_CMD, else
+  // Accept / Keep today, an end) runs the operator's notify command (LIESEL_NOTIFY_CMD, else
   // `notify_cmd` in the state directory's config.json) after the batch is queued, without
   // waiting on it, at most once per board per debounce window (see createBoardNotifier).
   const boardNotifier = createBoardNotifier({
     run: (key) => {
       runBoardNotify(key).catch((error) =>
-        writeLog(`[easel] board notify skipped key=${key}: ${error?.message || error}`),
+        writeLog(`[liesel] board notify skipped key=${key}: ${error?.message || error}`),
       );
     },
   });
@@ -2172,7 +2172,7 @@ export async function serve({
     if (!resolved) return;
     const submissionId = newSubmissionId();
     const noteCount = Number(resolved.session.pending_prompts) || 0;
-    writeLog(`[easel] board notify key=${key} submission=${submissionId} notes=${noteCount}`);
+    writeLog(`[liesel] board notify key=${key} submission=${submissionId} notes=${noteCount}`);
     runNotifyCommand({
       command,
       boardDir: resolved.dir,
@@ -2181,7 +2181,7 @@ export async function serve({
       board: resolved.board.name || path.basename(resolved.dir),
       boardJson: resolved.session.file,
       submissionId,
-      log: (line) => writeLog(`[easel] ${line}`),
+      log: (line) => writeLog(`[liesel] ${line}`),
     });
   }
   function notifyBoardSubmission(key, session) {
@@ -2289,7 +2289,7 @@ export async function serve({
     if (boardRunStarting.has(key)) return;
     boardRunStarting.add(key);
     startBoardRun(key)
-      .catch((error) => writeLog(`[easel] runner failed key=${key}: ${error?.message || error}`))
+      .catch((error) => writeLog(`[liesel] runner failed key=${key}: ${error?.message || error}`))
       .finally(() => boardRunStarting.delete(key));
   }
 
@@ -2327,7 +2327,7 @@ export async function serve({
     finishFeedbackDelivery(key, taken);
     refreshIdleTimer();
     broadcastRun(key, { now: true });
-    writeLog(`[easel] runner start key=${key} agent=${config.agent} notes=${prompts.length} cwd=${config.cwd}`);
+    writeLog(`[liesel] runner start key=${key} agent=${config.agent} notes=${prompts.length} cwd=${config.cwd}`);
     const prompt = buildRunnerPrompt({
       boardDir: resolved.dir,
       boardName: resolved.board.name || path.basename(resolved.dir),
@@ -2342,11 +2342,11 @@ export async function serve({
       boardDir: resolved.dir,
       env,
       extraEnv: {
-        EASEL_BOARD: resolved.board.name || path.basename(resolved.dir),
-        EASEL_BOARD_DIR: resolved.dir,
-        EASEL_BOARD_JSON: resolved.session.file,
-        EASEL_BOARD_ID: key,
-        EASEL_NOTE_COUNT: String(prompts.length),
+        LIESEL_BOARD: resolved.board.name || path.basename(resolved.dir),
+        LIESEL_BOARD_DIR: resolved.dir,
+        LIESEL_BOARD_JSON: resolved.session.file,
+        LIESEL_BOARD_ID: key,
+        LIESEL_NOTE_COUNT: String(prompts.length),
       },
       timeoutMs: runnerTimeoutMs,
       onSpawn: (stop) => {
@@ -2381,7 +2381,7 @@ export async function serve({
       void publishChatSync(key);
       run.status = "failed";
     }
-    writeLog(`[easel] runner ${run.status} key=${key} agent=${config.agent}${run.error ? `: ${run.error}` : ""}`);
+    writeLog(`[liesel] runner ${run.status} key=${key} agent=${config.agent}${run.error ? `: ${run.error}` : ""}`);
     const queued = run.queued;
     run.queued = false;
     broadcastRun(key, { now: true });
@@ -2476,7 +2476,7 @@ export async function serve({
         return;
       }
       await runnerConfigs.set(resolved.session.file, checked.config);
-      writeLog(`[easel] runner set key=${req.params.key} agent=${checked.config.agent} cwd=${checked.config.cwd}`);
+      writeLog(`[liesel] runner set key=${req.params.key} agent=${checked.config.agent} cwd=${checked.config.cwd}`);
       res.json(await runnerView(req.params.key, resolved.session));
     } catch (error) {
       next(error);
@@ -2595,7 +2595,7 @@ export async function serve({
   });
 
   // Passive detection. A diagnostic pass updates the warning inbox and notifies open browser
-  // chromes - it never emits "feedback", so it can never make `easel poll` return and can
+  // chromes - it never emits "feedback", so it can never make `liesel poll` return and can
   // never wake an agent. Only the user's explicit "Queue selected fixes" does that, through the
   // ordinary prompt queue.
   app.post("/api/:key/layout-diagnostics", async (req, res, next) => {
@@ -2740,8 +2740,8 @@ export async function serve({
       // renders the exported HTML instead of saving it.
       res.setHeader("content-security-policy", ARTIFACT_CONTENT_SECURITY_POLICY);
       res.setHeader("content-disposition", exportContentDisposition(session.file));
-      res.setHeader("x-easel-export-warning-count", String(unresolved.length));
-      res.setHeader("x-easel-export-notice-count", String(notices.length));
+      res.setHeader("x-liesel-export-warning-count", String(unresolved.length));
+      res.setHeader("x-liesel-export-notice-count", String(notices.length));
       res.type("html").send(html);
     } catch (error) {
       next(error);
@@ -2749,7 +2749,7 @@ export async function serve({
   });
 
   // Hosted share: build the local-inlined artifact and publish it to ht-ml.app, a third-party
-  // hosting service not part of Easel, returning the share URL. Publishing sends the artifact
+  // hosting service not part of Liesel, returning the share URL. Publishing sends the artifact
   // to ht-ml.app's servers. Remote CDN/font references are left intact for the viewer's browser
   // to load.
   // Publishing creates a public third-party page unless a password is supplied, so this is gated
@@ -2821,7 +2821,7 @@ export async function serve({
       const { unresolved, notices } = splitExportWarnings(warnings);
       res.json({
         ...site,
-        // Only a password Easel minted goes back to the browser; one the user typed is already
+        // Only a password Liesel minted goes back to the browser; one the user typed is already
         // theirs, and echoing it would put it in a field they did not ask to have filled.
         ...(generatePassword ? { password } : {}),
         ...(warnings.length ? { warnings: exportWarningSummaries(warnings) } : {}),
@@ -2950,7 +2950,7 @@ export async function serve({
           .status(409)
           .type("html")
           .send(
-            "<!doctype html><title>Artifact load expired</title><p>This artifact load is no longer current. Reload Easel to continue.</p>",
+            "<!doctype html><title>Artifact load expired</title><p>This artifact load is no longer current. Reload Liesel to continue.</p>",
           );
         return;
       }
@@ -2961,11 +2961,11 @@ export async function serve({
           .status(409)
           .type("html")
           .send(
-            "<!doctype html><title>Artifact load expired</title><p>This artifact load is no longer current. Reload Easel to continue.</p>",
+            "<!doctype html><title>Artifact load expired</title><p>This artifact load is no longer current. Reload Liesel to continue.</p>",
           );
         return;
       }
-      res.type("html").send(injectEaselSdk(html, key, verified.artifact_revision, verified.artifact_load_token));
+      res.type("html").send(injectLieselSdk(html, key, verified.artifact_revision, verified.artifact_load_token));
     } catch (error) {
       next(error);
     }
@@ -3177,7 +3177,7 @@ export async function serve({
   });
 
   // User-supplied Excalidraw libraries for every whiteboard's library panel and
-  // for `%% easel-icon` nodes. Read-only: Easel never writes that directory.
+  // for `%% liesel-icon` nodes. Read-only: Liesel never writes that directory.
   app.get("/api/whiteboard-libraries", async (req, res, next) => {
     try {
       if (hasPresentOriginOrReferer(req) && !isSameOriginRequest(req, allowedHostnames, allowAnyHostname)) {
@@ -3392,7 +3392,7 @@ export async function serve({
   function handleEventUpgrade(req, socket, head) {
     let pathname;
     try {
-      pathname = new URL(String(req.url || ""), "http://easel.local").pathname;
+      pathname = new URL(String(req.url || ""), "http://liesel.local").pathname;
     } catch {
       rejectEventUpgrade(socket, 400, "Bad Request");
       return;
@@ -3428,7 +3428,7 @@ export async function serve({
         sendEvent(type, data) {
           if (webSocket.readyState === WebSocket.OPEN) webSocket.send(JSON.stringify({ type, data }));
         },
-        close(code = 1001, reason = "Easel server shutdown") {
+        close(code = 1001, reason = "Liesel server shutdown") {
           webSocket.close(code, reason);
           const terminateTimer = setTimeout(() => {
             if (webSocket.readyState !== WebSocket.CLOSED) webSocket.terminate();
@@ -3495,11 +3495,11 @@ export async function serve({
       }
     }
     const httpServer = await listenHttp(app, boundPort, address, (error) => {
-      writeLog(`[easel] HTTP server error: ${error instanceof Error ? error.message : String(error)}`);
+      writeLog(`[liesel] HTTP server error: ${error instanceof Error ? error.message : String(error)}`);
     });
     if (shuttingDown) {
       httpServer.close();
-      throw new Error("Easel server is shutting down");
+      throw new Error("Liesel server is shutting down");
     }
     httpServer.on("upgrade", handleEventUpgrade);
     if (boundPort === 0) boundPort = httpServer.address().port;
@@ -3571,7 +3571,7 @@ export async function serve({
             await listenOnce(listenHost);
             pendingBinds.delete(listenHost);
             bound = true;
-            writeLog(`[easel] now listening on ${hostForUrl(listenHost)}:${boundPort} after an earlier bind failure.`);
+            writeLog(`[liesel] now listening on ${hostForUrl(listenHost)}:${boundPort} after an earlier bind failure.`);
           } catch (error) {
             if (!shuttingDown) pendingBinds.set(listenHost, error instanceof Error ? error : new Error(String(error)));
           }
@@ -3599,7 +3599,7 @@ export async function serve({
   }
 
   // Loopback is bound first because it is this port's control address: every CLI probes it
-  // whatever its own EASEL_HOST says. Whoever holds it owns the port, so a second Easel
+  // whatever its own LIESEL_HOST says. Whoever holds it owns the port, so a second Liesel
   // server started concurrently (two agents with different host settings) loses here and exits
   // instead of taking the remaining addresses and splitting one port across two daemons that share
   // one state file.
@@ -3611,11 +3611,11 @@ export async function serve({
     if (!error) continue;
     lastBindError = error;
     if (listenHost === LOOPBACK_HOST && isAddressInUseBindError(error)) {
-      const owner = await probeEaselHealth(LOOPBACK_HOST, boundPort);
+      const owner = await probeLieselHealth(LOOPBACK_HOST, boundPort);
       throw new Error(
         owner
-          ? `Another Easel server (version ${owner.version || "unknown"}) already owns port ${boundPort} on ${LOOPBACK_HOST}; not starting a second one.`
-          : `Loopback ${LOOPBACK_HOST}:${boundPort} is already in use; not starting an Easel server on another address.`,
+          ? `Another Liesel server (version ${owner.version || "unknown"}) already owns port ${boundPort} on ${LOOPBACK_HOST}; not starting a second one.`
+          : `Loopback ${LOOPBACK_HOST}:${boundPort} is already in use; not starting a Liesel server on another address.`,
         { cause: error },
       );
     }
@@ -3632,7 +3632,7 @@ export async function serve({
   }
   if (httpServers.length === 0) {
     throw new Error(
-      `Easel server failed to bind any address${lastBindError ? `: ${lastBindError.message}` : ""}`,
+      `Liesel server failed to bind any address${lastBindError ? `: ${lastBindError.message}` : ""}`,
       lastBindError ? { cause: lastBindError } : undefined,
     );
   }
@@ -3640,7 +3640,7 @@ export async function serve({
   // bound neither is alive and unreachable, so close every listener already taken in this call.
   if (!boundHosts.includes(LOOPBACK_HOST) && !boundHosts.includes(listenHosts[0])) {
     const error = new Error(
-      `Easel server failed to bind a control-channel address${lastBindError ? `: ${lastBindError.message}` : ""}`,
+      `Liesel server failed to bind a control-channel address${lastBindError ? `: ${lastBindError.message}` : ""}`,
       lastBindError ? { cause: lastBindError } : undefined,
     );
     await Promise.all(
@@ -3659,7 +3659,7 @@ export async function serve({
   // Always logged, not only under --verbose: an address that silently stopped serving is what left
   // tailnet review links dead for most of an hour with nothing but a debug line to show for it.
   for (const [listenHost, error] of pendingBinds) {
-    writeLog(`[easel] WARNING: ${describeBindFailure(listenHost, error)}`);
+    writeLog(`[liesel] WARNING: ${describeBindFailure(listenHost, error)}`);
   }
   serverReady = true;
   scheduleBindRecovery();
@@ -3670,7 +3670,7 @@ export async function serve({
   function shutdown(reloadKey = "", reason = "", cause = "requested") {
     if (shuttingDown) return;
     shuttingDown = true;
-    writeLog(`[easel] shutting down: ${cause}${reason ? ` (reason=${reason})` : ""}`);
+    writeLog(`[liesel] shutting down: ${cause}${reason ? ` (reason=${reason})` : ""}`);
     if (idleTimer) {
       clearTimeout(idleTimer);
       idleTimer = null;
@@ -3875,11 +3875,11 @@ function isAddressInUseBindError(error) {
   return error instanceof Error && "code" in error && error.code === "EADDRINUSE";
 }
 
-// Whether an Easel server answers /health at this address. Bounded, because a foreign process
+// Whether a Liesel server answers /health at this address. Bounded, because a foreign process
 // that accepts the connection and never answers must not stall startup, and the socket is
 // destroyed on every exit path: a lingering probe connection keeps a failed server process alive
 // and holds the other process's close() open.
-function probeEaselHealth(host, port) {
+function probeLieselHealth(host, port) {
   return new Promise((resolve) => {
     const request = httpGet({ host, port, path: "/health", agent: false }, (response) => {
       let body = "";
@@ -3927,7 +3927,7 @@ export async function prepareBoardFolder(input) {
   const home = homedir();
   const expanded = raw === "~" ? home : raw.startsWith("~/") ? path.join(home, raw.slice(2)) : raw;
   if (!path.isAbsolute(expanded)) {
-    throw new BoardError("Give the folder as a full path, such as ~/Easel/my-board");
+    throw new BoardError("Give the folder as a full path, such as ~/Liesel/my-board");
   }
   const folder = path.resolve(expanded);
   if (path.parse(folder).root === folder || folder === path.resolve(home)) {
@@ -3976,7 +3976,7 @@ function createLandingHtml(boards) {
   let folderEdited = false;
   const slug = (value) => value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
   name.addEventListener("input", () => {
-    if (!folderEdited) folder.value = "~/Easel/" + slug(name.value);
+    if (!folderEdited) folder.value = "~/Liesel/" + slug(name.value);
   });
   folder.addEventListener("input", () => { folderEdited = true; });
   form.addEventListener("submit", async (event) => {
@@ -3998,14 +3998,14 @@ function createLandingHtml(boards) {
     }
   });
 })();`;
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${PRODUCT_NAME}</title><style>${style}</style></head><body><main class="card"><h1>${PRODUCT_NAME}</h1>${list}<h2>New board</h2><form id="newBoard" autocomplete="off"><label>Name<input name="name" required maxlength="120" placeholder="Checkout redesign"></label><label>Folder<input name="folder" required value="~/Easel/" spellcheck="false"><span class="hint">A missing folder is created. A folder that already holds HTML files opens with each one on the board. Drop more HTML files onto the board to add them.</span></label><div class="actions"><button type="submit">Create board</button><span class="error" id="newBoardError" role="alert"></span></div></form></main><script>${script}</script></body></html>`;
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${PRODUCT_NAME}</title><style>${style}</style></head><body><main class="card"><h1>${PRODUCT_NAME}</h1>${list}<h2>New board</h2><form id="newBoard" autocomplete="off"><label>Name<input name="name" required maxlength="120" placeholder="Checkout redesign"></label><label>Folder<input name="folder" required value="~/Liesel/" spellcheck="false"><span class="hint">A missing folder is created. A folder that already holds HTML files opens with each one on the board. Drop more HTML files onto the board to add them.</span></label><div class="actions"><button type="submit">Create board</button><span class="error" id="newBoardError" role="alert"></span></div></form></main><script>${script}</script></body></html>`;
 }
 
 function createDeniedHtml({ title, message, workingUrl }) {
   const safeTitle = escapeHtml(title);
   const safeMessage = escapeHtml(message);
   const safeUrl = escapeHtml(workingUrl);
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${safeTitle} - Easel</title><style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#f7f4ef;color:#25221f;font:16px/1.5 system-ui,sans-serif}.card{width:min(560px,calc(100% - 40px));padding:32px;border:1px solid #d9d0c5;border-radius:16px;background:#fffdf9;box-shadow:0 12px 40px #25221f18}h1{margin:0 0 12px;font-size:26px}p{margin:0 0 18px}.url{display:block;padding:12px 14px;border-radius:10px;background:#f0ebe4;color:#25221f;overflow-wrap:anywhere}a{color:inherit;font-weight:700}</style></head><body><main class="card"><h1>${safeTitle}</h1><p>${safeMessage}</p><p>Open this working URL:</p><a class="url" href="${safeUrl}">${safeUrl}</a></main></body></html>`;
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${safeTitle} - Liesel</title><style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#f7f4ef;color:#25221f;font:16px/1.5 system-ui,sans-serif}.card{width:min(560px,calc(100% - 40px));padding:32px;border:1px solid #d9d0c5;border-radius:16px;background:#fffdf9;box-shadow:0 12px 40px #25221f18}h1{margin:0 0 12px;font-size:26px}p{margin:0 0 18px}.url{display:block;padding:12px 14px;border-radius:10px;background:#f0ebe4;color:#25221f;overflow-wrap:anywhere}a{color:inherit;font-weight:700}</style></head><body><main class="card"><h1>${safeTitle}</h1><p>${safeMessage}</p><p>Open this working URL:</p><a class="url" href="${safeUrl}">${safeUrl}</a></main></body></html>`;
 }
 
 async function readDesignAsset(asset) {
@@ -4068,7 +4068,7 @@ export function buildAllowedHostnames({ host, hosts = [], linkHost: linkHostName
   );
 }
 
-// A lone "*" in EASEL_ALLOWED_HOSTS is an explicit opt-out of the Host
+// A lone "*" in LIESEL_ALLOWED_HOSTS is an explicit opt-out of the Host
 // allowlist, for operators who front the server with their own auth/proxy.
 export function allowsAllHosts(allowedHosts = []) {
   return allowedHosts.some((value) => String(value).trim() === "*");
@@ -4125,7 +4125,7 @@ export function isAllowedHostHeader(hostHeader, allowedHostnames) {
 // header is required and must be allowlisted. When an X-Forwarded-Host is present
 // - a reverse proxy in front of the loopback server - its outermost (last) value
 // must ALSO be allowlisted, so a proxy works once its public hostname is added to
-// EASEL_ALLOWED_HOSTS. This is an AND check: a client-spoofed forwarded host
+// LIESEL_ALLOWED_HOSTS. This is an AND check: a client-spoofed forwarded host
 // can only narrow access (Host is still checked), never widen it into a bypass. A
 // blank forwarded host is treated as absent, matching how proxies omit it.
 /**
@@ -4263,8 +4263,8 @@ async function watchSession(session, watchers, events, logEvent, reloadDebounceM
 // Watching the artifact's parent directory recursively can stall the event loop when the
 // artifact lives in a large tree (e.g. ~/Downloads). Default to watching only the artifact
 // itself; an artifact opts back into directory-wide live reload via either a
-// `data-easel-live-reload-root` attribute on its root element or
-// `<meta name="easel-live-reload" content="root">`.
+// `data-liesel-live-reload-root` attribute on its root element or
+// `<meta name="liesel-live-reload" content="root">`.
 export async function resolveWatchTarget(session) {
   const baseOptions = {
     ignoreInitial: true,
@@ -4278,7 +4278,7 @@ export async function resolveWatchTarget(session) {
         scope: "directory",
         options: {
           ...baseOptions,
-          ignored: /(^|[/\\])(\.git|node_modules|dist|build|\.easel)([/\\]|$)/,
+          ignored: /(^|[/\\])(\.git|node_modules|dist|build|\.liesel)([/\\]|$)/,
         },
       };
     }
@@ -4291,8 +4291,8 @@ export async function resolveWatchTarget(session) {
 export function hasLiveReloadRootOptIn(html) {
   if (typeof html !== "string") return false;
   const searchableHtml = html.replace(/<!--[\s\S]*?-->/g, "");
-  if (/<html\b[^>]*\sdata-easel-live-reload-root(?:[\s=>/]|$)[^>]*>/i.test(searchableHtml)) return true;
-  return /<meta\b(?=[^>]*name=["']easel-live-reload["'])(?=[^>]*content=["']root["'])[^>]*>/i.test(searchableHtml);
+  if (/<html\b[^>]*\sdata-liesel-live-reload-root(?:[\s=>/]|$)[^>]*>/i.test(searchableHtml)) return true;
+  return /<meta\b(?=[^>]*name=["']liesel-live-reload["'])(?=[^>]*content=["']root["'])[^>]*>/i.test(searchableHtml);
 }
 
 function releasePollListener(holder, activePolls, deliveredFeedback, events) {
@@ -4312,7 +4312,7 @@ function listenerConflict(holder, code) {
     status: "error",
     code,
     error:
-      code === "LISTENER_ACTIVE" ? "Easel already has an active poll listener" : "Easel poll listener was replaced",
+      code === "LISTENER_ACTIVE" ? "Liesel already has an active poll listener" : "Liesel poll listener was replaced",
     holder: { label: listenerLabel(holder), age_ms: Math.max(0, Date.now() - holder.startedAt) },
   };
 }
@@ -4460,7 +4460,7 @@ function normalizeFlagValue(value) {
   return value === undefined || value === null ? "" : String(value).trim().toLowerCase();
 }
 
-const EASEL_DEFAULT_FAVICON =
+const LIESEL_DEFAULT_FAVICON =
   "<link rel=\"icon\" href=\"data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>\u{1F48E}</text></svg>\">";
 
 function readTagAttr(tag, name) {
@@ -4481,16 +4481,16 @@ function readTagAttr(tag, name) {
   return "";
 }
 
-// Pull a tab favicon + title out of the artifact's own <head>. Easel renders the
+// Pull a tab favicon + title out of the artifact's own <head>. Liesel renders the
 // artifact in a sandboxed iframe, so the artifact's own <link rel="icon"> and
-// <title> never reach the browser tab; surfacing them here makes a wall of Easel
-// tabs identifiable. Falls back to the Easel default favicon. Only data: and
+// <title> never reach the browser tab; surfacing them here makes a wall of Liesel
+// tabs identifiable. Falls back to the Liesel default favicon. Only data: and
 // absolute (http/https/protocol-relative) icon hrefs are adopted verbatim;
 // artifact-relative hrefs would not resolve against the chrome page, so they fall
 // back to the default.
 export function extractArtifactHead(html) {
   const head = String(html || "").slice(0, 10000);
-  let faviconTag = EASEL_DEFAULT_FAVICON;
+  let faviconTag = LIESEL_DEFAULT_FAVICON;
   const linkTags = head.match(/<link\b(?:"[^"]*"|'[^']*'|[^"'>])*>/gi) || [];
   const iconTag = linkTags.find((tag) => /(^|\s)icon(\s|$)/i.test(readTagAttr(tag, "rel")));
   const iconHref = iconTag ? readTagAttr(iconTag, "href") : "";
@@ -4518,26 +4518,26 @@ const CHROME_BOOT_FAILSAFE_PROBE_TIMEOUT_MS = 4000;
 const CHROME_BOOT_FAILSAFE_JS = `(function(){
 var t=setTimeout(fail,${CHROME_BOOT_FAILSAFE_MS});
 var o=document.getElementById("layoutGateOverlay"),h,c,a,b,gt=0,manual=false,ended=false;
-try{ended=JSON.parse(document.getElementById("easel-session").textContent).initialEnded===true;}catch(e){}
+try{ended=JSON.parse(document.getElementById("liesel-session").textContent).initialEnded===true;}catch(e){}
 function cancelGate(){if(gt)clearTimeout(gt);gt=0;}
 function reveal(){cancelGate();if(o)o.hidden=true;if(document.body)document.body.classList.remove("layout-gate-active");}
 function manualReveal(){if(ended)return false;manual=true;reveal();return true;}
 function armGate(ms,onTimeout){cancelGate();if(!ended)gt=setTimeout(function(){if(ended)return;if(onTimeout)onTimeout();else reveal();},ms);}
 function showBypass(){b=document.getElementById("layoutGateBypass");if(b){b.hidden=false;b.onclick=manualReveal;}}
-window.__easelLayoutGateEscape={arm:armGate,cancel:cancelGate,reveal:reveal,manualReveal:manualReveal,showBypass:showBypass,end:function(){ended=true;cancelGate();},isEnded:function(){return ended;},isManuallyBypassed:function(){return manual;}};
+window.__lieselLayoutGateEscape={arm:armGate,cancel:cancelGate,reveal:reveal,manualReveal:manualReveal,showBypass:showBypass,end:function(){ended=true;cancelGate();},isEnded:function(){return ended;},isManuallyBypassed:function(){return manual;}};
 a=document.getElementById("layoutGateAction");
 if(ended){reveal();b=document.getElementById("endedOverlay");if(b)b.hidden=false;}
 if(a&&!ended)a.onclick=manualReveal;
 if(o&&!o.hidden&&!ended)armGate(${CHROME_LAYOUT_GATE_MAX_HOLD_MS});
-window.__easelCancelChromeBootFailsafe=function(){clearTimeout(t);};
-window.__easelChromeBootFailed=function(){clearTimeout(t);fail();};
+window.__lieselCancelChromeBootFailsafe=function(){clearTimeout(t);};
+window.__lieselChromeBootFailed=function(){clearTimeout(t);fail();};
 function fail(){
-if(window.__easelChromeReady||ended)return;
+if(window.__lieselChromeReady||ended)return;
 h=document.getElementById("layoutGateTitle");
 c=document.getElementById("layoutGateCopy");
 a=document.getElementById("layoutGateAction");
-if(h)h.textContent="Easel could not finish loading.";
-if(c)c.textContent="The Easel editor script did not load. The server usually restarted while this page was opening. Check and reload to reconnect.";
+if(h)h.textContent="Liesel could not finish loading.";
+if(c)c.textContent="The Liesel editor script did not load. The server usually restarted while this page was opening. Check and reload to reconnect.";
 if(a){a.textContent="Check and reload";a.disabled=false;a.onclick=check;}
 showBypass();
 if(o)o.hidden=false;
@@ -4552,7 +4552,7 @@ fetch("/health",{cache:"no-store",signal:ctl.signal}).then(function(r){return r&
 clearTimeout(pt);
 if(outcome==="running"){location.reload();return;}
 if(a)a.disabled=false;
-if(c)c.textContent=outcome==="no-answer"?"Easel did not answer the check, so this page cannot tell whether it is running. Try again in a moment.":"Easel is still not running. Start it again with your agent, then use Check and reload.";
+if(c)c.textContent=outcome==="no-answer"?"Liesel did not answer the check, so this page cannot tell whether it is running. Try again in a moment.":"Liesel is still not running. Start it again with your agent, then use Check and reload.";
 });
 }
 })();`;
@@ -4561,7 +4561,7 @@ export function createChromeHtml(
   session,
   {
     layoutGateEnabled = true,
-    faviconTag = EASEL_DEFAULT_FAVICON,
+    faviconTag = LIESEL_DEFAULT_FAVICON,
     title = PRODUCT_NAME,
     artifactRevision = 0,
     artifactLoadToken = "",
@@ -4604,7 +4604,7 @@ export function createChromeHtml(
     revisionPalette: artifactRevisions.revisionPalette(),
   });
   const { head: pathHead, tail: pathTail } = displayPathParts(session.file);
-  const bodyClass = layoutGateEnabled ? "easel layout-gate-active" : "easel";
+  const bodyClass = layoutGateEnabled ? "liesel layout-gate-active" : "liesel";
   const layoutGateHidden = layoutGateEnabled ? "" : " hidden";
   const modeHotkeyUpper = MODE_TOGGLE_HOTKEY_KEY.toUpperCase();
   const modeToggleHint = `Toggle annotate/explore mode (⌘${modeHotkeyUpper} / Ctrl+${modeHotkeyUpper})`;
@@ -4618,15 +4618,15 @@ ${faviconTag}
 <link rel="stylesheet" href="/chrome.css">
 </head>
 <body class="${bodyClass}">
-<div class="bar"><div class="brand"><span class="brand-mark">Easel</span><span class="brand-support">Board</span></div><div class="spacer" aria-hidden="true"></div><div class="warnings-wrap" id="warningsWrap" hidden><button class="warnings-button" id="warningsButton" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="warningsDrawer">${chromeIcons.warning}<span class="warnings-count" id="warningsCount">0</span></button><div class="menu warnings-drawer" id="warningsDrawer" role="dialog" aria-labelledby="warningsTitle" aria-describedby="warningsSummary" hidden><div class="warnings-head"><h2 class="warnings-title" id="warningsTitle">Layout issues</h2><p class="warnings-summary" id="warningsSummary"></p></div><div class="warnings-toolbar"><label class="warnings-selectall"><input type="checkbox" id="warningsSelectAll"><span>Select all</span></label><span class="warnings-selected" id="warningsSelected" role="status" aria-live="polite"></span></div><div class="warnings-list" id="warningsList"></div><div class="warnings-foot"><p class="warnings-note">Queueing sends a repair request with your next feedback. An issue is marked resolved only after a newer artifact load and a complete check at the same viewport no longer finds it.</p><button class="button" id="warningsQueueButton" type="button" disabled>Queue selected fixes</button></div></div></div><div class="revisions-wrap" id="revisionsWrap" hidden><button class="revisions-button" id="revisionsButton" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="revisionsDrawer"><span class="revisions-button-text">Revisions</span><span class="revisions-count" id="revisionsCount">0</span></button><div class="menu revisions-drawer" id="revisionsDrawer" role="dialog" aria-labelledby="revisionsTitle" aria-describedby="revisionsSummary" hidden><div class="revisions-head"><h2 class="revisions-title" id="revisionsTitle">Revisions</h2><p class="revisions-summary" id="revisionsSummary"></p></div><div class="revisions-list" id="revisionsList"></div><div class="revisions-foot"><p class="revisions-note">The agent declares these in the artifact itself. Reveal flashes the next block it marked for that revision; nothing about the page is restyled, so the saved file still looks the way it does here.</p></div></div></div><button class="annotate-switch" id="annotation" type="button" aria-pressed="true" title="${escapeHtml(modeToggleHint)}"><span class="switch-track" aria-hidden="true"><span class="switch-knob"></span></span><span>Annotate</span></button><button class="sidebar-toggle" id="sidebarToggle" type="button" aria-controls="panel" aria-expanded="true" aria-label="Hide conversation" title="Hide conversation">${chromeIcons.sidebar}<span class="sidebar-toggle-count" id="sidebarToggleCount" aria-hidden="true" hidden></span></button><div class="more-wrap" id="moreWrap"><button class="more-button" id="moreButton" type="button" title="More" aria-haspopup="menu" aria-expanded="false">${chromeIcons.more}</button><div class="menu more-menu" id="moreMenu" hidden><div class="menu-head"><div class="menu-label">Editing</div><button class="menu-file" id="copyPath" type="button" title="Copy path · ${escapeHtml(session.file)}">${chromeIcons.file}<span class="menu-file-text"><span class="path-head">${escapeHtml(pathHead)}</span><span class="path-tail">${escapeHtml(pathTail)}</span></span><span class="copy-hint" id="copyHint"><span class="icon-copy">${chromeIcons.copy}</span><span class="icon-check">${chromeIcons.check}</span><span id="copyHintText">Copy</span></span></button></div><div class="menu-rule"></div><button class="menu-item" id="reloadArtifact" type="button">${chromeIcons.refresh}<span>Reload artifact</span></button><button class="menu-item" id="copySnapshot" type="button">${chromeIcons.camera}<span>Copy DOM snapshot</span></button><button class="menu-item" id="exportArtifact" type="button">${chromeIcons.download}<span>Export standalone HTML</span></button><button class="menu-item" id="shareArtifact" type="button">${chromeIcons.globe}<span>Publish link</span></button><div class="menu-rule"></div><button class="menu-item danger" id="end" type="button">${chromeIcons.exit}<span>End session</span></button></div></div></div>
-<div class="layout"><div class="frame"><iframe id="artifact" sandbox="allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads" data-artifact-src="/artifact/${session.key}/index.html"></iframe></div><div class="panel-scrim" id="panelScrim"></div><aside class="panel" id="panel"><div class="panel-head" id="panelHead"><span class="panel-handle" aria-hidden="true"></span><div class="panel-head-row"><h2>Conversation</h2><span class="panel-summary" id="panelSummary" role="status" aria-live="polite"></span><button class="panel-toggle" id="panelToggle" type="button" aria-expanded="false" aria-controls="panel" aria-label="Show conversation">${chromeIcons.chevronUp}</button></div></div><div class="panel-scroll" id="panelScroll"><div class="chat" id="chatLog"></div><div class="chat chat-queued" id="queuedLog"></div></div><div class="composer" id="chatComposer"><div class="presence-banner handoff-banner" id="handoffBanner" hidden><span>This review is open in another Easel tab. Unsent answers stay in the tab or window where you entered them; taking over in another window does not bring them along.</span><button class="handoff-takeover" id="handoffTakeover" type="button">Take over here</button></div><div class="presence-banner handoff-banner" id="outdatedBanner" hidden><span id="outdatedText">The Easel server this page was connected to is no longer running. Reloading will work once it is running again.</span><span class="outdated-actions"><button class="handoff-takeover" id="outdatedReload" type="button">Check and reload</button><button class="handoff-takeover" id="outdatedDismiss" type="button">Dismiss</button></span></div><div class="presence-banner" id="presenceBanner" hidden>Your agent is not listening. If this persists, ask your agent to poll for updates from Easel.</div><textarea id="chatInput" placeholder="Write a message for the agent..."></textarea><div class="chat-attachments" id="chatAttachments"></div><div class="chat-attachment-toolbar"><button class="chat-attach" id="chatAttach" type="button">Attach images</button><input id="chatAttachInput" type="file" accept="${escapeHtml(acceptedMime.join(","))}" multiple hidden><span class="chat-attachment-notice" id="chatAttachmentNotice" role="status"></span></div><div class="send-hint" id="sendHint" hidden>Nothing queued in this tab. Unsent answers stay in the tab or window where you entered them; taking over in another window does not bring them along.</div><div class="actions" id="sendActions"><button class="button button-danger" id="sendAndEnd" type="button">${chromeIcons.exit}<span>Send &amp; End</span></button><button class="button" id="send">Send to Agent</button></div></div></aside></div>
-<div class="share-overlay" id="shareDialog" role="dialog" aria-modal="true" aria-labelledby="shareTitleText" hidden><form class="share-card" id="shareForm"><div class="share-head"><div><div class="share-kicker">Publish to <a class="share-link" href="https://ht-ml.app" target="_blank" rel="noopener noreferrer">ht-ml.app</a></div><h2 id="shareTitleText">Publish artifact</h2></div><button class="share-close" id="shareClose" type="button" aria-label="Close publish dialog"><svg width="14" height="14" viewBox="0 0 10 10" fill="none" aria-hidden="true" focusable="false"><path d="M1 1L9 9M9 1L1 9" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button></div><p class="share-note">ht-ml.app is a separate, third-party hosting service, not part of Easel. Publishing sends this artifact to its servers.</p><p class="share-copy">This uploads this artifact to ht-ml.app with local assets inlined. Without a password, the page is PUBLIC and anyone with the link can open it. With a password, the page is PRIVATE and viewers must supply the password to view.</p><p class="share-note">Do not publish secrets. The Easel annotation SDK is not included.</p><div class="share-grid"><label class="share-check"><input id="shareGenerate" type="checkbox"><span>Generate a password (makes this page private)</span></label><label>Password (optional)<input id="sharePassword" name="password" type="password" autocomplete="new-password" placeholder="Leave blank for a public page"></label></div><div class="share-status" id="shareStatus" role="status"></div><div class="share-result" id="shareResult" hidden><label id="shareUrlResult">Share URL<div class="share-copy-row"><input id="shareUrl" readonly><button class="share-copy-btn" id="copyShareUrl" type="button">Copy URL</button></div></label><label id="sharePasswordResult" hidden>Password (shared secret)<div class="share-copy-row"><input id="sharePasswordOut" readonly><button class="share-copy-btn" id="copySharePassword" type="button">Copy password</button></div></label><label id="shareSiteIdResult" hidden>Site ID<div class="share-copy-row"><input id="shareSiteId" readonly><button class="share-copy-btn" id="copyShareSiteId" type="button">Copy site ID</button></div></label><label id="shareUpdateKeyResult">Update key (secret)<div class="share-copy-row"><input id="shareUpdateKey" readonly><button class="share-copy-btn" id="copyUpdateKey" type="button">Copy key</button></div></label><p class="share-note" id="shareUpdateKeyNote">Keep the update key private. ht-ml.app returns it once and it is the only way to update this page later; the service has no delete. Republish this page&#39;s HTML with <code>easel share &lt;file&gt; --site &lt;site id&gt; --update-key &lt;key&gt;</code>, and add <code>--private</code> to also lock it behind a new generated password.</p></div><div class="share-actions"><button class="share-cancel" id="shareCancel" type="button">Cancel</button><button class="button" id="sharePublish" type="submit">Publish</button></div></form></div>
-<div class="ended-overlay layout-gate-overlay" id="layoutGateOverlay"${layoutGateHidden}><div class="ended-card"><div class="ended-title" id="layoutGateTitle">Checking layout.<br>One moment.</div><p class="ended-copy" id="layoutGateCopy">Easel is waiting for fonts and final geometry before revealing this artifact.</p><button class="button ended-action" id="layoutGateAction" type="button">Show anyway</button><button class="button ended-action layout-gate-bypass" id="layoutGateBypass" type="button" hidden>Show anyway</button></div></div>
+<div class="bar"><div class="brand"><span class="brand-mark">Liesel</span><span class="brand-support">Board</span></div><div class="spacer" aria-hidden="true"></div><div class="warnings-wrap" id="warningsWrap" hidden><button class="warnings-button" id="warningsButton" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="warningsDrawer">${chromeIcons.warning}<span class="warnings-count" id="warningsCount">0</span></button><div class="menu warnings-drawer" id="warningsDrawer" role="dialog" aria-labelledby="warningsTitle" aria-describedby="warningsSummary" hidden><div class="warnings-head"><h2 class="warnings-title" id="warningsTitle">Layout issues</h2><p class="warnings-summary" id="warningsSummary"></p></div><div class="warnings-toolbar"><label class="warnings-selectall"><input type="checkbox" id="warningsSelectAll"><span>Select all</span></label><span class="warnings-selected" id="warningsSelected" role="status" aria-live="polite"></span></div><div class="warnings-list" id="warningsList"></div><div class="warnings-foot"><p class="warnings-note">Queueing sends a repair request with your next feedback. An issue is marked resolved only after a newer artifact load and a complete check at the same viewport no longer finds it.</p><button class="button" id="warningsQueueButton" type="button" disabled>Queue selected fixes</button></div></div></div><div class="revisions-wrap" id="revisionsWrap" hidden><button class="revisions-button" id="revisionsButton" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="revisionsDrawer"><span class="revisions-button-text">Revisions</span><span class="revisions-count" id="revisionsCount">0</span></button><div class="menu revisions-drawer" id="revisionsDrawer" role="dialog" aria-labelledby="revisionsTitle" aria-describedby="revisionsSummary" hidden><div class="revisions-head"><h2 class="revisions-title" id="revisionsTitle">Revisions</h2><p class="revisions-summary" id="revisionsSummary"></p></div><div class="revisions-list" id="revisionsList"></div><div class="revisions-foot"><p class="revisions-note">The agent declares these in the artifact itself. Reveal flashes the next block it marked for that revision; nothing about the page is restyled, so the saved file still looks the way it does here.</p></div></div></div><button class="annotate-switch" id="annotation" type="button" aria-pressed="true" title="${escapeHtml(modeToggleHint)}"><span class="switch-track" aria-hidden="true"><span class="switch-knob"></span></span><span>Annotate</span></button><button class="sidebar-toggle" id="sidebarToggle" type="button" aria-controls="panel" aria-expanded="true" aria-label="Hide conversation" title="Hide conversation">${chromeIcons.sidebar}<span class="sidebar-toggle-count" id="sidebarToggleCount" aria-hidden="true" hidden></span></button><div class="more-wrap" id="moreWrap"><button class="more-button" id="moreButton" type="button" title="More" aria-haspopup="menu" aria-expanded="false">${chromeIcons.more}</button><div class="menu more-menu" id="moreMenu" hidden><div class="menu-head"><div class="menu-label">Editing</div><button class="menu-file" id="copyPath" type="button" title="Copy path · ${escapeHtml(session.file)}">${chromeIcons.file}<span class="menu-file-text"><span class="path-head">${escapeHtml(pathHead)}</span><span class="path-tail">${escapeHtml(pathTail)}</span></span><span class="copy-hint" id="copyHint"><span class="icon-copy">${chromeIcons.copy}</span><span class="icon-check">${chromeIcons.check}</span><span id="copyHintText">Copy</span></span></button></div><div class="menu-rule"></div><button class="menu-item" id="reloadArtifact" type="button">${chromeIcons.refresh}<span>Reload artifact</span></button><button class="menu-item" id="copySnapshot" type="button">${chromeIcons.camera}<span>Copy DOM snapshot</span></button><button class="menu-item" id="exportArtifact" type="button">${chromeIcons.download}<span>Export standalone HTML</span></button><button class="menu-item" id="shareArtifact" type="button">${chromeIcons.globe}<span>Publish link</span></button><div class="menu-rule"></div><button class="menu-item danger" id="end" type="button">${chromeIcons.exit}<span>End session</span></button></div></div></div>
+<div class="layout"><div class="frame"><iframe id="artifact" sandbox="allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads" data-artifact-src="/artifact/${session.key}/index.html"></iframe></div><div class="panel-scrim" id="panelScrim"></div><aside class="panel" id="panel"><div class="panel-head" id="panelHead"><span class="panel-handle" aria-hidden="true"></span><div class="panel-head-row"><h2>Conversation</h2><span class="panel-summary" id="panelSummary" role="status" aria-live="polite"></span><button class="panel-toggle" id="panelToggle" type="button" aria-expanded="false" aria-controls="panel" aria-label="Show conversation">${chromeIcons.chevronUp}</button></div></div><div class="panel-scroll" id="panelScroll"><div class="chat" id="chatLog"></div><div class="chat chat-queued" id="queuedLog"></div></div><div class="composer" id="chatComposer"><div class="presence-banner handoff-banner" id="handoffBanner" hidden><span>This review is open in another Liesel tab. Unsent answers stay in the tab or window where you entered them; taking over in another window does not bring them along.</span><button class="handoff-takeover" id="handoffTakeover" type="button">Take over here</button></div><div class="presence-banner handoff-banner" id="outdatedBanner" hidden><span id="outdatedText">The Liesel server this page was connected to is no longer running. Reloading will work once it is running again.</span><span class="outdated-actions"><button class="handoff-takeover" id="outdatedReload" type="button">Check and reload</button><button class="handoff-takeover" id="outdatedDismiss" type="button">Dismiss</button></span></div><div class="presence-banner" id="presenceBanner" hidden>Your agent is not listening. If this persists, ask your agent to poll for updates from Liesel.</div><textarea id="chatInput" placeholder="Write a message for the agent..."></textarea><div class="chat-attachments" id="chatAttachments"></div><div class="chat-attachment-toolbar"><button class="chat-attach" id="chatAttach" type="button">Attach images</button><input id="chatAttachInput" type="file" accept="${escapeHtml(acceptedMime.join(","))}" multiple hidden><span class="chat-attachment-notice" id="chatAttachmentNotice" role="status"></span></div><div class="send-hint" id="sendHint" hidden>Nothing queued in this tab. Unsent answers stay in the tab or window where you entered them; taking over in another window does not bring them along.</div><div class="actions" id="sendActions"><button class="button button-danger" id="sendAndEnd" type="button">${chromeIcons.exit}<span>Send &amp; End</span></button><button class="button" id="send">Send to Agent</button></div></div></aside></div>
+<div class="share-overlay" id="shareDialog" role="dialog" aria-modal="true" aria-labelledby="shareTitleText" hidden><form class="share-card" id="shareForm"><div class="share-head"><div><div class="share-kicker">Publish to <a class="share-link" href="https://ht-ml.app" target="_blank" rel="noopener noreferrer">ht-ml.app</a></div><h2 id="shareTitleText">Publish artifact</h2></div><button class="share-close" id="shareClose" type="button" aria-label="Close publish dialog"><svg width="14" height="14" viewBox="0 0 10 10" fill="none" aria-hidden="true" focusable="false"><path d="M1 1L9 9M9 1L1 9" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button></div><p class="share-note">ht-ml.app is a separate, third-party hosting service, not part of Liesel. Publishing sends this artifact to its servers.</p><p class="share-copy">This uploads this artifact to ht-ml.app with local assets inlined. Without a password, the page is PUBLIC and anyone with the link can open it. With a password, the page is PRIVATE and viewers must supply the password to view.</p><p class="share-note">Do not publish secrets. The Liesel annotation SDK is not included.</p><div class="share-grid"><label class="share-check"><input id="shareGenerate" type="checkbox"><span>Generate a password (makes this page private)</span></label><label>Password (optional)<input id="sharePassword" name="password" type="password" autocomplete="new-password" placeholder="Leave blank for a public page"></label></div><div class="share-status" id="shareStatus" role="status"></div><div class="share-result" id="shareResult" hidden><label id="shareUrlResult">Share URL<div class="share-copy-row"><input id="shareUrl" readonly><button class="share-copy-btn" id="copyShareUrl" type="button">Copy URL</button></div></label><label id="sharePasswordResult" hidden>Password (shared secret)<div class="share-copy-row"><input id="sharePasswordOut" readonly><button class="share-copy-btn" id="copySharePassword" type="button">Copy password</button></div></label><label id="shareSiteIdResult" hidden>Site ID<div class="share-copy-row"><input id="shareSiteId" readonly><button class="share-copy-btn" id="copyShareSiteId" type="button">Copy site ID</button></div></label><label id="shareUpdateKeyResult">Update key (secret)<div class="share-copy-row"><input id="shareUpdateKey" readonly><button class="share-copy-btn" id="copyUpdateKey" type="button">Copy key</button></div></label><p class="share-note" id="shareUpdateKeyNote">Keep the update key private. ht-ml.app returns it once and it is the only way to update this page later; the service has no delete. Republish this page&#39;s HTML with <code>liesel share &lt;file&gt; --site &lt;site id&gt; --update-key &lt;key&gt;</code>, and add <code>--private</code> to also lock it behind a new generated password.</p></div><div class="share-actions"><button class="share-cancel" id="shareCancel" type="button">Cancel</button><button class="button" id="sharePublish" type="submit">Publish</button></div></form></div>
+<div class="ended-overlay layout-gate-overlay" id="layoutGateOverlay"${layoutGateHidden}><div class="ended-card"><div class="ended-title" id="layoutGateTitle">Checking layout.<br>One moment.</div><p class="ended-copy" id="layoutGateCopy">Liesel is waiting for fonts and final geometry before revealing this artifact.</p><button class="button ended-action" id="layoutGateAction" type="button">Show anyway</button><button class="button ended-action layout-gate-bypass" id="layoutGateBypass" type="button" hidden>Show anyway</button></div></div>
 <div class="ended-overlay" id="endedOverlay" hidden><div class="ended-card"><div class="ended-title">Session ended.<br>Return to your agent to continue.</div><p class="ended-copy">${escapeHtml(session.file)}</p></div></div>
 <div class="whiteboard-overlay" id="whiteboardOverlay" hidden><div class="whiteboard-shell"><div class="whiteboard-error" id="whiteboardError" hidden></div><button class="whiteboard-close" id="whiteboardClose" type="button" aria-label="Close whiteboard"><svg width="14" height="14" viewBox="0 0 10 10" fill="none" aria-hidden="true" focusable="false"><path d="M1 1L9 9M9 1L1 9" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button><iframe id="whiteboardFrame" title="Excalidraw whiteboard" sandbox="allow-scripts allow-popups"></iframe></div></div>
-<script id="easel-session" type="application/json">${sessionJson}</script>
+<script id="liesel-session" type="application/json">${sessionJson}</script>
 <script>${CHROME_BOOT_FAILSAFE_JS}</script>
-<script src="/chrome-client.js" onerror="window.__easelChromeBootFailed()"></script>
+<script src="/chrome-client.js" onerror="window.__lieselChromeBootFailed()"></script>
 </body>
 </html>`;
 }
@@ -4637,11 +4637,11 @@ export function createWhiteboardFrameHtml(channelToken = "") {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Easel Whiteboard</title>
+<title>Liesel Whiteboard</title>
 <link rel="stylesheet" href="/whiteboard-assets/whiteboard.css">
 </head>
 <body>
-<script>window.__easelWhiteboardChannelToken=${JSON.stringify(channelToken)};</script>
+<script>window.__lieselWhiteboardChannelToken=${JSON.stringify(channelToken)};</script>
 <script src="/whiteboard-assets/whiteboard.js"></script>
 </body>
 </html>`;
@@ -4699,7 +4699,7 @@ export function createSdkJs(
 const key=${JSON.stringify(key)};
 const artifactRevision=${revision};
 const artifactLoadToken=${JSON.stringify(loadToken)};
-const deriveQueueKey=${deriveEaselQueueKey.toString()};
+const deriveQueueKey=${deriveLieselQueueKey.toString()};
 const isNativeInteractiveControl=${isNativeInteractiveControl.toString()};
 const MODE_TOGGLE_HOTKEY_KEY=${JSON.stringify(MODE_TOGGLE_HOTKEY_KEY)};
 const isModeToggleHotkeyEvent=${isModeToggleHotkeyEvent.toString()};

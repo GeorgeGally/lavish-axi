@@ -8,7 +8,7 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
-const runBrowserE2e = process.env.EASEL_BROWSER_E2E === "1";
+const runBrowserE2e = process.env.LIESEL_BROWSER_E2E === "1";
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const baseCommit = "5b871af347444feda1d3002952ec5fc179248629";
 
@@ -41,7 +41,7 @@ async function waitForHealth(base, child, output) {
 
 async function startServer(root, env, port) {
   const output = [];
-  const child = spawn(process.execPath, [path.join(root, "bin/easel.js"), "server", "--port", String(port)], {
+  const child = spawn(process.execPath, [path.join(root, "bin/liesel.js"), "server", "--port", String(port)], {
     cwd: root,
     env: { ...process.env, ...env },
     stdio: ["ignore", "pipe", "pipe"],
@@ -99,21 +99,21 @@ test(
   "six legacy tabs migrate before seven sessions exercise live transport",
   { skip: !runBrowserE2e, timeout: 300_000 },
   async () => {
-    const temp = await mkdtemp(path.join(tmpdir(), "easel-event-transport-"));
+    const temp = await mkdtemp(path.join(tmpdir(), "liesel-event-transport-"));
     const oldRoot = path.join(temp, "old-build");
     const archive = path.join(temp, "old-build.tar");
     const port = await freePort();
     const base = `http://127.0.0.1:${port}`;
-    const easelEnv = {
-      EASEL_PORT: String(port),
-      EASEL_STATE_DIR: path.join(temp, "state"),
-      EASEL_NO_OPEN: "1",
-      EASEL_TELEMETRY: "0",
-      EASEL_HOST: "127.0.0.1",
-      EASEL_LINK_HOST: "127.0.0.1",
+    const lieselEnv = {
+      LIESEL_PORT: String(port),
+      LIESEL_STATE_DIR: path.join(temp, "state"),
+      LIESEL_NO_OPEN: "1",
+      LIESEL_TELEMETRY: "0",
+      LIESEL_HOST: "127.0.0.1",
+      LIESEL_LINK_HOST: "127.0.0.1",
     };
     const chromeEnv = {
-      CHROME_DEVTOOLS_AXI_SESSION: `easel-event-transport-${process.pid}`,
+      CHROME_DEVTOOLS_AXI_SESSION: `liesel-event-transport-${process.pid}`,
       CHROME_DEVTOOLS_AXI_USER_DATA_DIR: path.join(temp, "chrome"),
     };
     const sessions = [];
@@ -122,10 +122,10 @@ test(
 
     try {
       await mkdir(oldRoot);
-      run("git", ["archive", "--format=tar", "--output", archive, baseCommit], easelEnv);
-      run("tar", ["-xf", archive, "-C", oldRoot], easelEnv);
+      run("git", ["archive", "--format=tar", "--output", archive, baseCommit], lieselEnv);
+      run("tar", ["-xf", archive, "-C", oldRoot], lieselEnv);
       await symlink(path.join(repoRoot, "node_modules"), path.join(oldRoot, "node_modules"), "dir");
-      oldServer = await startServer(oldRoot, easelEnv, port);
+      oldServer = await startServer(oldRoot, lieselEnv, port);
 
       for (let index = 0; index < 7; index += 1) {
         const file = path.join(temp, `board-${index + 1}.html`);
@@ -135,8 +135,8 @@ test(
         );
         const output = run(
           process.execPath,
-          ["bin/easel.js", file, "--no-open", "--no-gate"],
-          easelEnv,
+          ["bin/liesel.js", file, "--no-open", "--no-gate"],
+          lieselEnv,
           20_000,
           oldRoot,
         );
@@ -170,7 +170,7 @@ test(
           "chrome-devtools-axi",
           [
             "eval",
-            `() => new Promise((resolve, reject) => { const deadline = Date.now() + 8000; const checkReady = () => { if (!window.__easelChromeReady) { if (Date.now() >= deadline) return reject(new Error("old chrome did not load")); return setTimeout(checkReady, 25); } const input = document.getElementById("chatInput"); input.value = ${JSON.stringify(`queued-before-upgrade-${index + 1}`)}; input.dispatchEvent(new Event("input", { bubbles: true })); document.getElementById("send").click(); const queueKey = "easel:queued:${session.key}"; const checkQueue = () => { if (sessionStorage.getItem(queueKey)) return resolve(true); if (Date.now() >= deadline) return reject(new Error("old chrome did not persist its queue")); setTimeout(checkQueue, 25); }; checkQueue(); }; checkReady(); })`,
+            `() => new Promise((resolve, reject) => { const deadline = Date.now() + 8000; const checkReady = () => { if (!window.__lieselChromeReady) { if (Date.now() >= deadline) return reject(new Error("old chrome did not load")); return setTimeout(checkReady, 25); } const input = document.getElementById("chatInput"); input.value = ${JSON.stringify(`queued-before-upgrade-${index + 1}`)}; input.dispatchEvent(new Event("input", { bubbles: true })); document.getElementById("send").click(); const queueKey = "liesel:queued:${session.key}"; const checkQueue = () => { if (sessionStorage.getItem(queueKey)) return resolve(true); if (Date.now() >= deadline) return reject(new Error("old chrome did not persist its queue")); setTimeout(checkQueue, 25); }; checkQueue(); }; checkReady(); })`,
           ],
           chromeEnv,
           10_000,
@@ -185,7 +185,7 @@ test(
         "chrome-devtools-axi",
         [
           "eval",
-          `() => { const frame = document.getElementById("artifact"); const token = new URL(frame.src).searchParams.get("artifact_load_token"); window.dispatchEvent(new MessageEvent("message", { source: frame.contentWindow, data: { type: "easel:reviewState", artifact_load_token: token, state: { card: { selector: "#board-1", text: "draft survives server replacement" }, fields: [] } } })); return sessionStorage.getItem("easel:review-state:${draftSession.key}"); }`,
+          `() => { const frame = document.getElementById("artifact"); const token = new URL(frame.src).searchParams.get("artifact_load_token"); window.dispatchEvent(new MessageEvent("message", { source: frame.contentWindow, data: { type: "liesel:reviewState", artifact_load_token: token, state: { card: { selector: "#board-1", text: "draft survives server replacement" }, fields: [] } } })); return sessionStorage.getItem("liesel:review-state:${draftSession.key}"); }`,
         ],
         chromeEnv,
       );
@@ -193,7 +193,7 @@ test(
 
       await stopServer(oldServer, base, "stop");
       oldServer = undefined;
-      currentServer = await startServer(repoRoot, easelEnv, port);
+      currentServer = await startServer(repoRoot, lieselEnv, port);
       run("chrome-devtools-axi", ["newpage", sessions[6].url, "--background"], chromeEnv);
 
       const sessionUrls = new Set(sessions.map((session) => session.url));
@@ -214,7 +214,7 @@ test(
             "chrome-devtools-axi",
             [
               "eval",
-              `() => new Promise((resolve, reject) => { const deadline = Date.now() + 10000; const check = () => { const draft = sessionStorage.getItem("easel:review-state:${session.key}") || ""; const banner = document.getElementById("outdatedBanner"); if (draft.includes("draft survives server replacement") && banner && !banner.hidden) return resolve(document.getElementById("outdatedText").textContent); if (Date.now() >= deadline) return reject(new Error("old chrome did not protect the draft")); setTimeout(check, 25); }; check(); })`,
+              `() => new Promise((resolve, reject) => { const deadline = Date.now() + 10000; const check = () => { const draft = sessionStorage.getItem("liesel:review-state:${session.key}") || ""; const banner = document.getElementById("outdatedBanner"); if (draft.includes("draft survives server replacement") && banner && !banner.hidden) return resolve(document.getElementById("outdatedText").textContent); if (Date.now() >= deadline) return reject(new Error("old chrome did not protect the draft")); setTimeout(check, 25); }; check(); })`,
             ],
             chromeEnv,
             12_000,
@@ -228,7 +228,7 @@ test(
           "chrome-devtools-axi",
           [
             "eval",
-            `() => new Promise((resolve, reject) => { const deadline = Date.now() + 10000; const expectedDraft = ${index === 0 ? '"draft survives server replacement"' : '""'}; const check = () => { const draft = sessionStorage.getItem("easel:review-state:${session.key}") || ""; if (window.__easelChromeReady && document.getElementById("artifact")?.src && (!expectedDraft || draft.includes(expectedDraft))) return resolve(true); if (Date.now() >= deadline) return reject(new Error("real legacy chrome did not migrate")); setTimeout(check, 25); }; check(); })`,
+            `() => new Promise((resolve, reject) => { const deadline = Date.now() + 10000; const expectedDraft = ${index === 0 ? '"draft survives server replacement"' : '""'}; const check = () => { const draft = sessionStorage.getItem("liesel:review-state:${session.key}") || ""; if (window.__lieselChromeReady && document.getElementById("artifact")?.src && (!expectedDraft || draft.includes(expectedDraft))) return resolve(true); if (Date.now() >= deadline) return reject(new Error("real legacy chrome did not migrate")); setTimeout(check, 25); }; check(); })`,
           ],
           chromeEnv,
           12_000,
@@ -269,7 +269,7 @@ test(
           "chrome-devtools-axi",
           [
             "eval",
-            `() => new Promise((resolve, reject) => { const promptStatuses = []; const browserFetch = window.fetch.bind(window); window.fetch = async (...args) => { const response = await browserFetch(...args); if (String(args[0]).endsWith("/prompts")) promptStatuses.push(response.status); return response; }; const input = document.getElementById("chatInput"); input.value = ${JSON.stringify(message)}; input.dispatchEvent(new Event("input", { bubbles: true })); document.getElementById("send").click(); const deadline = Date.now() + 8000; const queueKey = "easel:queued:${session.key}"; const check = () => { if (!sessionStorage.getItem(queueKey) && promptStatuses.length > 0) return resolve(promptStatuses.at(-1)); if (Date.now() >= deadline) return reject(new Error("prompt acknowledgement did not arrive")); setTimeout(check, 25); }; check(); })`,
+            `() => new Promise((resolve, reject) => { const promptStatuses = []; const browserFetch = window.fetch.bind(window); window.fetch = async (...args) => { const response = await browserFetch(...args); if (String(args[0]).endsWith("/prompts")) promptStatuses.push(response.status); return response; }; const input = document.getElementById("chatInput"); input.value = ${JSON.stringify(message)}; input.dispatchEvent(new Event("input", { bubbles: true })); document.getElementById("send").click(); const deadline = Date.now() + 8000; const queueKey = "liesel:queued:${session.key}"; const check = () => { if (!sessionStorage.getItem(queueKey) && promptStatuses.length > 0) return resolve(promptStatuses.at(-1)); if (Date.now() >= deadline) return reject(new Error("prompt acknowledgement did not arrive")); setTimeout(check, 25); }; check(); })`,
           ],
           chromeEnv,
           10_000,
@@ -278,8 +278,8 @@ test(
 
         const poll = run(
           process.execPath,
-          ["bin/easel.js", "poll", session.file, "--timeout-ms", "5000"],
-          easelEnv,
+          ["bin/liesel.js", "poll", session.file, "--timeout-ms", "5000"],
+          lieselEnv,
           10_000,
         );
         assert.match(poll, new RegExp(message), `board ${index + 1} poll received its exact prompt`);

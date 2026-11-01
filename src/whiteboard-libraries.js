@@ -8,10 +8,10 @@ export const LIBRARY_FILE_EXTENSION = ".excalidrawlib";
 export const LIBRARY_FILE_MAX_BYTES = 10 * 1024 * 1024;
 export const LIBRARY_TOTAL_MAX_BYTES = 25 * 1024 * 1024;
 export const LIBRARY_MAX_ITEMS = 5000;
-export const LIBRARY_REF_CUSTOM_DATA_KEY = "easelLibraryRef";
+export const LIBRARY_REF_CUSTOM_DATA_KEY = "lieselLibraryRef";
 
 const ITEM_NAME_MAX_CHARS = 80;
-const ICON_DIRECTIVE_RE = /^\s*%%\s*easel-icon\s+(\S+)\s+(.+?)\s*$/;
+const ICON_DIRECTIVE_RE = /^\s*%%\s*liesel-icon\s+(\S+)\s+(.+?)\s*$/;
 const FLOWCHART_HEADER_RE = /^(flowchart|graph)\b/i;
 
 export function libraryIdFromFileName(fileName) {
@@ -129,7 +129,7 @@ export function mermaidHeaderLine(source) {
 }
 
 /**
- * `%% easel-icon <node-id> <library-id>/<item name>` lines in a flowchart.
+ * `%% liesel-icon <node-id> <library-id>/<item name>` lines in a flowchart.
  * Mermaid ignores `%%` comment lines, so these never change how plain Mermaid
  * renders the diagram.
  * @param {string} source
@@ -173,9 +173,9 @@ export function toExcalidrawLibraryItems(libraries) {
     for (const item of Array.isArray(library?.items) ? library.items : []) {
       // Excalidraw inserts an item's elements ungrouped unless the item
       // grouped them itself; a shared group makes a drop move as one icon.
-      const extraGroup = item.elements.length > 1 && !sharedGroupId(item.elements) ? [`easel-item:${item.ref}`] : [];
+      const extraGroup = item.elements.length > 1 && !sharedGroupId(item.elements) ? [`liesel-item:${item.ref}`] : [];
       items.push({
-        id: `easel:${item.ref}`,
+        id: `liesel:${item.ref}`,
         status: "published",
         created: 0,
         name: item.name,

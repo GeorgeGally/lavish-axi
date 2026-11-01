@@ -9,14 +9,14 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 import WebSocket from "ws";
 
-process.env.EASEL_HOST = "127.0.0.1";
-process.env.EASEL_LINK_HOST = "127.0.0.1";
+process.env.LIESEL_HOST = "127.0.0.1";
+process.env.LIESEL_LINK_HOST = "127.0.0.1";
 
 import { postAgentReply, VERSION } from "../src/cli.js";
 import { serve } from "../src/server.js";
 import { canonicalFile, sessionKey } from "../src/session-store.js";
 
-const CLI = fileURLToPath(new URL("../bin/easel.js", import.meta.url));
+const CLI = fileURLToPath(new URL("../bin/liesel.js", import.meta.url));
 const REPO_ROOT = fileURLToPath(new URL("..", import.meta.url));
 
 /**
@@ -50,20 +50,20 @@ function runCli(args, { cwd = REPO_ROOT, env = process.env, stdin } = {}) {
 }
 
 function chromeSessionData(html) {
-  const match = String(html).match(/<script id="easel-session" type="application\/json">([\s\S]*?)<\/script>/);
-  assert.ok(match, "chrome page embeds easel-session JSON");
+  const match = String(html).match(/<script id="liesel-session" type="application\/json">([\s\S]*?)<\/script>/);
+  assert.ok(match, "chrome page embeds liesel-session JSON");
   return JSON.parse(match[1]);
 }
 
 function cliEnv(stateDir, port) {
   return {
     ...process.env,
-    EASEL_STATE_DIR: stateDir,
-    EASEL_PORT: String(port),
-    EASEL_HOST: "127.0.0.1",
-    EASEL_LINK_HOST: "127.0.0.1",
-    EASEL_TELEMETRY: "0",
-    EASEL_NO_OPEN: "1",
+    LIESEL_STATE_DIR: stateDir,
+    LIESEL_PORT: String(port),
+    LIESEL_HOST: "127.0.0.1",
+    LIESEL_LINK_HOST: "127.0.0.1",
+    LIESEL_TELEMETRY: "0",
+    LIESEL_NO_OPEN: "1",
   };
 }
 
@@ -112,7 +112,7 @@ async function openLiveEvents(base, key) {
  * @param {{ open?: boolean }} [options]
  */
 async function withArtifact(fn, { open = true } = {}) {
-  const dir = await mkdtemp(path.join(os.tmpdir(), "easel-reply-"));
+  const dir = await mkdtemp(path.join(os.tmpdir(), "liesel-reply-"));
   const stateDir = path.join(dir, "state");
   await mkdir(stateDir);
   const artifact = path.join(dir, "artifact.html");
@@ -159,12 +159,12 @@ async function queuePrompt(base, key, text) {
 }
 
 test("reply help and top-level help say when to prefer reply over poll --agent-reply", async () => {
-  const stateDir = await mkdtemp(path.join(os.tmpdir(), "easel-reply-help-"));
+  const stateDir = await mkdtemp(path.join(os.tmpdir(), "liesel-reply-help-"));
   const env = cliEnv(stateDir, 0);
   try {
     const top = await runCli(["--help"], { env });
     assert.equal(top.status, 0, top.stderr || top.stdout);
-    assert.match(top.stdout, /easel reply <html-file> --agent-reply/);
+    assert.match(top.stdout, /liesel reply <html-file> --agent-reply/);
     assert.match(top.stdout, /not about to long-poll/);
     assert.match(top.stdout, /poll <html-file> --agent-reply/);
 
@@ -174,14 +174,14 @@ test("reply help and top-level help say when to prefer reply over poll --agent-r
     assert.match(reply.stdout, /--agent-reply-file <path>/);
     assert.match(reply.stdout, /Exit 0 only when the server answers that the reply was sent/);
     assert.match(reply.stdout, /not about to wait for more feedback/);
-    assert.match(reply.stdout, /easel poll <html-file> --agent-reply/);
+    assert.match(reply.stdout, /liesel poll <html-file> --agent-reply/);
     assert.match(reply.stdout, /does not exit when the reply is accepted/);
 
     const poll = await runCli(["poll", "--help"], { env });
     assert.equal(poll.status, 0, poll.stderr || poll.stdout);
-    assert.match(poll.stdout, /easel reply <html-file> --agent-reply/);
+    assert.match(poll.stdout, /liesel reply <html-file> --agent-reply/);
     assert.match(poll.stdout, /not about to long-poll/);
-    assert.match(poll.stdout, /easel poll report\.html --agent-reply "Renamed the payment step\."/);
+    assert.match(poll.stdout, /liesel poll report\.html --agent-reply "Renamed the payment step\."/);
   } finally {
     await rm(stateDir, { recursive: true, force: true });
   }
@@ -275,9 +275,9 @@ test("reply refuses a missing session, an unreachable server, and a non-success 
     async ({ artifact, env }) => {
       const missing = await runCli(["reply", artifact, "--agent-reply", "nobody is reviewing"], { env });
       assert.notEqual(missing.status, 0);
-      assert.match(missing.stdout, /No active Easel session for this file/);
+      assert.match(missing.stdout, /No active Liesel session for this file/);
       assert.match(missing.stdout, /NOT_FOUND/);
-      assert.match(missing.stdout, /easel/);
+      assert.match(missing.stdout, /liesel/);
       assert.doesNotMatch(missing.stdout, /status: sent/);
     },
     { open: false },
@@ -285,11 +285,11 @@ test("reply refuses a missing session, an unreachable server, and a non-success 
 
   const holder = createServer((_req, res) => {
     res.setHeader("content-type", "application/json");
-    res.end(JSON.stringify({ version: "not-easel" }));
+    res.end(JSON.stringify({ version: "not-liesel" }));
   });
   await new Promise((resolve) => holder.listen(0, "127.0.0.1", () => resolve()));
   const port = /** @type {import("node:net").AddressInfo} */ (holder.address()).port;
-  const dir = await mkdtemp(path.join(os.tmpdir(), "easel-reply-down-"));
+  const dir = await mkdtemp(path.join(os.tmpdir(), "liesel-reply-down-"));
   const artifact = path.join(dir, "artifact.html");
   await writeFile(artifact, "<!doctype html><html><body>ok</body></html>", "utf8");
   try {
@@ -297,7 +297,7 @@ test("reply refuses a missing session, an unreachable server, and a non-success 
       env: cliEnv(path.join(dir, "state"), port),
     });
     assert.notEqual(down.status, 0);
-    assert.match(down.stdout, /occupied by a non-Easel server|server connection failed|server did not start/);
+    assert.match(down.stdout, /occupied by a non-Liesel server|server connection failed|server did not start/);
     assert.match(down.stdout, /SERVER_ERROR/);
     assert.doesNotMatch(down.stdout, /status: sent/);
   } finally {
@@ -348,7 +348,7 @@ test("reply refuses user-ended and agent-ended sessions without changing the tra
 });
 
 test("reply rejects missing, conflicting, empty, and unreadable reply input", async () => {
-  const dir = await mkdtemp(path.join(os.tmpdir(), "easel-reply-flags-"));
+  const dir = await mkdtemp(path.join(os.tmpdir(), "liesel-reply-flags-"));
   const artifact = path.join(dir, "artifact.html");
   await writeFile(artifact, "<!doctype html><html><body>ok</body></html>", "utf8");
   const env = cliEnv(path.join(dir, "state"), 0);
@@ -428,7 +428,7 @@ test("reply fails with a timeout when the server stalls before headers or mid-bo
         (/** @type {import("axi-sdk-js").AxiError} */ error) => {
           assert.equal(error.code, "SERVER_ERROR");
           assert.match(error.message, /did not confirm the agent reply within 300ms/);
-          assert.ok(error.suggestions.some((hint) => hint.includes("easel reply /tmp/artifact.html")));
+          assert.ok(error.suggestions.some((hint) => hint.includes("liesel reply /tmp/artifact.html")));
           return true;
         },
         stage,

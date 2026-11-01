@@ -97,16 +97,16 @@ function attachmentFile(stateDir, key, id) {
   return path.join(attachmentsDir(stateDir, key), id);
 }
 
-// Limits are configurable in the EASEL_* style, mirroring the idle-timeout
+// Limits are configurable in the LIESEL_* style, mirroring the idle-timeout
 // resolver: unset falls back to the default, `0`/`off` disables a duration, and a
 // non-positive or unparseable value falls back rather than throwing.
 export function resolveAttachmentConfig(env = process.env) {
-  const maxDiskBytes = diskCapEnv(env.EASEL_MAX_ATTACHMENT_DISK_MB);
+  const maxDiskBytes = diskCapEnv(env.LIESEL_MAX_ATTACHMENT_DISK_MB);
   return {
-    maxBytes: positiveIntEnv(env.EASEL_MAX_ATTACHMENT_BYTES, DEFAULT_MAX_ATTACHMENT_BYTES),
-    maxPerPrompt: positiveIntEnv(env.EASEL_MAX_ATTACHMENTS_PER_PROMPT, DEFAULT_MAX_ATTACHMENTS_PER_PROMPT),
-    maxPromptBytes: positiveIntEnv(env.EASEL_MAX_PROMPT_ATTACHMENT_BYTES, DEFAULT_MAX_PROMPT_ATTACHMENT_BYTES),
-    ttlMs: durationEnv(env.EASEL_ATTACHMENT_TTL_MS, DEFAULT_ATTACHMENT_TTL_MS),
+    maxBytes: positiveIntEnv(env.LIESEL_MAX_ATTACHMENT_BYTES, DEFAULT_MAX_ATTACHMENT_BYTES),
+    maxPerPrompt: positiveIntEnv(env.LIESEL_MAX_ATTACHMENTS_PER_PROMPT, DEFAULT_MAX_ATTACHMENTS_PER_PROMPT),
+    maxPromptBytes: positiveIntEnv(env.LIESEL_MAX_PROMPT_ATTACHMENT_BYTES, DEFAULT_MAX_PROMPT_ATTACHMENT_BYTES),
+    ttlMs: durationEnv(env.LIESEL_ATTACHMENT_TTL_MS, DEFAULT_ATTACHMENT_TTL_MS),
     maxDiskBytes,
     // DERIVED from the disk budget, never a separate knob: the most stored objects
     // the byte cap could ever admit is the budget divided by the minimum per-object

@@ -11,10 +11,10 @@ import { readBoard } from "../src/board.js";
 import { AGENT_SECTION_END, AGENT_SECTION_START, initProject } from "../src/project-init.js";
 
 const run = promisify(execFile);
-const CLI = fileURLToPath(new URL("../bin/easel.js", import.meta.url));
+const CLI = fileURLToPath(new URL("../bin/liesel.js", import.meta.url));
 
 async function tempProject(t) {
-  const dir = await mkdtemp(path.join(os.tmpdir(), "easel-init-"));
+  const dir = await mkdtemp(path.join(os.tmpdir(), "liesel-init-"));
   t.after(() => rm(dir, { recursive: true, force: true }));
   return dir;
 }
@@ -33,18 +33,18 @@ test("initProject creates a board with one starter item and the agent instructio
   assert.equal(board.items.length, 1);
   assert.equal(board.items[0].file, "welcome.html");
   const starter = await readFile(path.join(boardDir, "welcome.html"), "utf8");
-  assert.match(starter, /<meta name="easel-title"/);
+  assert.match(starter, /<meta name="liesel-title"/);
 
-  const guide = await readFile(path.join(project, "EASEL.md"), "utf8");
-  assert.match(guide, /easel board open board/);
-  assert.match(guide, /easel poll board/);
+  const guide = await readFile(path.join(project, "LIESEL.md"), "utf8");
+  assert.match(guide, /liesel board open board/);
+  assert.match(guide, /liesel poll board/);
   assert.match(guide, /--agent-reply/);
   assert.match(guide, /foreground/);
 
   for (const name of ["AGENTS.md", "CLAUDE.md"]) {
     const contents = await readFile(path.join(project, name), "utf8");
-    assert.equal(count(contents, AGENT_SECTION_START), 1, `${name} carries the Easel section once`);
-    assert.match(contents, /EASEL\.md/);
+    assert.equal(count(contents, AGENT_SECTION_START), 1, `${name} carries the Liesel section once`);
+    assert.match(contents, /LIESEL\.md/);
   }
 
   assert.equal(result.board.dir, boardDir);
@@ -52,7 +52,7 @@ test("initProject creates a board with one starter item and the agent instructio
     result.files.map((entry) => [path.basename(entry.path), entry.action]),
     [
       ["welcome.html", "created"],
-      ["EASEL.md", "created"],
+      ["LIESEL.md", "created"],
       ["AGENTS.md", "created"],
       ["CLAUDE.md", "created"],
     ],
@@ -65,7 +65,7 @@ test("initProject appends to existing agent files and never overwrites them", as
   const gemini = "# Gemini notes";
   await writeFile(path.join(project, "AGENTS.md"), agents);
   await writeFile(path.join(project, "GEMINI.md"), gemini);
-  await writeFile(path.join(project, "EASEL.md"), "my own easel notes\n");
+  await writeFile(path.join(project, "LIESEL.md"), "my own liesel notes\n");
 
   await initProject({ projectDir: project });
 
@@ -75,7 +75,7 @@ test("initProject appends to existing agent files and never overwrites them", as
   const updatedGemini = await readFile(path.join(project, "GEMINI.md"), "utf8");
   assert.ok(updatedGemini.startsWith(`${gemini}\n`));
   assert.equal(count(updatedGemini, AGENT_SECTION_START), 1);
-  assert.equal(await readFile(path.join(project, "EASEL.md"), "utf8"), "my own easel notes\n");
+  assert.equal(await readFile(path.join(project, "LIESEL.md"), "utf8"), "my own liesel notes\n");
 });
 
 test("initProject is idempotent and leaves a populated board alone", async (t) => {
@@ -110,8 +110,8 @@ test("initProject honours a custom board folder and name", async (t) => {
 
   const board = await readBoard(path.join(project, "designs"));
   assert.equal(board.name, "Checkout");
-  const guide = await readFile(path.join(project, "EASEL.md"), "utf8");
-  assert.match(guide, /easel poll designs/);
+  const guide = await readFile(path.join(project, "LIESEL.md"), "utf8");
+  assert.match(guide, /liesel poll designs/);
 });
 
 test("initProject refuses a board folder outside the project", async (t) => {
@@ -126,24 +126,24 @@ test("starter item carries no eyebrow label", async (t) => {
   assert.doesNotMatch(starter, /eyebrow|text-transform:\s*uppercase/i);
 });
 
-test("easel init runs from the CLI without starting a server", async (t) => {
+test("liesel init runs from the CLI without starting a server", async (t) => {
   const project = await tempProject(t);
   const state = await tempProject(t);
   const { stdout } = await run(process.execPath, [CLI, "init", project], {
-    env: { ...process.env, EASEL_STATE_DIR: state, EASEL_TELEMETRY: "0" },
+    env: { ...process.env, LIESEL_STATE_DIR: state, LIESEL_TELEMETRY: "0" },
   });
-  assert.match(stdout, /EASEL\.md/);
-  assert.match(stdout, /easel board open/);
+  assert.match(stdout, /LIESEL\.md/);
+  assert.match(stdout, /liesel board open/);
   const board = await readBoard(path.join(project, "board"));
   assert.equal(board.items.length, 1);
 });
 
-test("easel update never installs from npm, where the name belongs to another package", async (t) => {
+test("liesel update never installs from npm, where Liesel is not published", async (t) => {
   const state = await tempProject(t);
   const { stdout } = await run(process.execPath, [CLI, "update"], {
-    env: { ...process.env, EASEL_STATE_DIR: state, EASEL_TELEMETRY: "0" },
+    env: { ...process.env, LIESEL_STATE_DIR: state, LIESEL_TELEMETRY: "0" },
     timeout: 10_000,
   });
-  assert.match(stdout, /github:GeorgeGally\/lavish-axi/);
+  assert.match(stdout, /github:GeorgeGally\/liesel/);
   assert.doesNotMatch(stdout, /registry\.npmjs\.org|Updated/);
 });

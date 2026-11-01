@@ -19,7 +19,7 @@ test("check script runs all verification commands", async () => {
 
 test("committed skill matches the generator stub", async () => {
   const { createSkillMarkdown } = await import("../src/skill.js");
-  const committed = await readFile(new URL("../skills/easel/SKILL.md", import.meta.url), "utf8");
+  const committed = await readFile(new URL("../skills/liesel/SKILL.md", import.meta.url), "utf8");
 
   assert.equal(committed, createSkillMarkdown(), "run `npm run build:skill` and commit the result");
 });
@@ -27,7 +27,7 @@ test("committed skill matches the generator stub", async () => {
 test("published package includes the installable skill", async () => {
   const packageJson = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
 
-  assert.ok(packageJson.files.includes("skills/easel"));
+  assert.ok(packageJson.files.includes("skills/liesel"));
 });
 
 test("published package root is a complete Agent Plugin", async () => {
@@ -36,7 +36,7 @@ test("published package root is a complete Agent Plugin", async () => {
   const packageJson = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
 
   assert.ok(packageJson.files.includes("plugin.json"));
-  assert.ok(packageJson.files.includes("skills/easel"));
+  assert.ok(packageJson.files.includes("skills/liesel"));
 });
 
 test("release-please keeps the plugin manifest version in step with the package", async () => {
@@ -45,8 +45,8 @@ test("release-please keeps the plugin manifest version in step with the package"
   assert.deepEqual(config.packages["."]["extra-files"], [{ type: "json", path: "plugin.json", jsonpath: "$.version" }]);
 });
 
-test("public easel skill is not marked internal", async () => {
-  const skillMd = await readFile(new URL("../skills/easel/SKILL.md", import.meta.url), "utf8");
+test("public liesel skill is not marked internal", async () => {
+  const skillMd = await readFile(new URL("../skills/liesel/SKILL.md", import.meta.url), "utf8");
   const frontmatter = skillMd.slice(4, skillMd.indexOf("\n---\n", 4));
 
   assert.doesNotMatch(frontmatter, /^metadata:\n {2}internal: true$/m);
@@ -63,9 +63,15 @@ test("build copies local design assets for published artifact injection", async 
 test("package metadata matches the GitHub repository used for npm provenance", async () => {
   const packageJson = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
 
-  assert.equal(packageJson.repository.url, "git+https://github.com/GeorgeGally/lavish-axi.git");
-  assert.equal(packageJson.bugs.url, "https://github.com/GeorgeGally/lavish-axi/issues");
-  assert.equal(packageJson.homepage, "https://github.com/GeorgeGally/lavish-axi#readme");
+  assert.equal(packageJson.repository.url, "git+https://github.com/GeorgeGally/liesel.git");
+  assert.equal(packageJson.bugs.url, "https://github.com/GeorgeGally/liesel/issues");
+  assert.equal(packageJson.homepage, "https://github.com/GeorgeGally/liesel#readme");
+});
+
+test("package installs liesel, plus an easel alias for one release", async () => {
+  const packageJson = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
+
+  assert.deepEqual(packageJson.bin, { liesel: "dist/cli.mjs", easel: "dist/cli.mjs" });
 });
 
 test("pnpm lock root importer matches the publish manifest", async () => {
@@ -94,6 +100,6 @@ test("release workflow keeps telemetry env during npm publish prepack", async ()
 
   assert.match(
     workflow,
-    /run: npm publish --access public --provenance\n\s+if: \$\{\{ steps\.release\.outputs\.release_created \}\}\n\s+env:\n\s+EASEL_UMAMI_HOST: \$\{\{ vars\.EASEL_UMAMI_HOST \}\}\n\s+EASEL_UMAMI_WEBSITE_ID: \$\{\{ vars\.EASEL_UMAMI_WEBSITE_ID \}\}/,
+    /run: npm publish --access public --provenance\n\s+if: \$\{\{ steps\.release\.outputs\.release_created \}\}\n\s+env:\n\s+LIESEL_UMAMI_HOST: \$\{\{ vars\.LIESEL_UMAMI_HOST \}\}\n\s+LIESEL_UMAMI_WEBSITE_ID: \$\{\{ vars\.LIESEL_UMAMI_WEBSITE_ID \}\}/,
   );
 });

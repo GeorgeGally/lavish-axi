@@ -8,11 +8,11 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 // The behavioral regression boundary for passive layout triage. Before this change the browser's
-// audit returned straight out of `easel poll` with no user action, so several individually
+// audit returned straight out of `liesel poll` with no user action, so several individually
 // reasonable agent fixes produced repeated edit/reload cycles while the user was mid-review. Every
 // assertion here pins the replacement contract in a real browser: detection is passive, the user
 // decides what becomes work, and only a queued batch wakes the agent.
-const runBrowserE2e = process.env.EASEL_BROWSER_E2E === "1";
+const runBrowserE2e = process.env.LIESEL_BROWSER_E2E === "1";
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const fixtures = path.join(repoRoot, "test/fixtures/layout-audit");
 
@@ -44,23 +44,23 @@ test(
   "passive layout-warning triage works end to end in a real browser",
   { skip: !runBrowserE2e, timeout: 420_000 },
   async () => {
-    const temp = await mkdtemp(path.join(tmpdir(), "easel-warning-inbox-"));
+    const temp = await mkdtemp(path.join(tmpdir(), "liesel-warning-inbox-"));
     const port = await freePort();
-    const easelEnv = {
-      EASEL_PORT: String(port),
-      EASEL_STATE_DIR: path.join(temp, "state"),
-      EASEL_NO_OPEN: "1",
-      EASEL_TELEMETRY: "0",
-      EASEL_HOST: "127.0.0.1",
-      EASEL_LINK_HOST: "127.0.0.1",
+    const lieselEnv = {
+      LIESEL_PORT: String(port),
+      LIESEL_STATE_DIR: path.join(temp, "state"),
+      LIESEL_NO_OPEN: "1",
+      LIESEL_TELEMETRY: "0",
+      LIESEL_HOST: "127.0.0.1",
+      LIESEL_LINK_HOST: "127.0.0.1",
     };
     const chromeEnv = {
-      CHROME_DEVTOOLS_AXI_SESSION: `easel-warning-inbox-${process.pid}`,
+      CHROME_DEVTOOLS_AXI_SESSION: `liesel-warning-inbox-${process.pid}`,
       CHROME_DEVTOOLS_AXI_USER_DATA_DIR: path.join(temp, "chrome"),
     };
 
     function openArtifact(file, args = []) {
-      const output = run(process.execPath, ["bin/easel.js", file, "--no-open", ...args], easelEnv);
+      const output = run(process.execPath, ["bin/liesel.js", file, "--no-open", ...args], lieselEnv);
       const url = output.match(/url:\s*"([^"]+)"/)?.[1];
       assert.ok(url, output);
       return url;
@@ -69,8 +69,8 @@ test(
     function poll(file, timeoutMs) {
       return run(
         process.execPath,
-        ["bin/easel.js", "poll", file, "--timeout-ms", String(timeoutMs)],
-        easelEnv,
+        ["bin/liesel.js", "poll", file, "--timeout-ms", String(timeoutMs)],
+        lieselEnv,
         timeoutMs + 45_000,
       );
     }
@@ -101,7 +101,7 @@ test(
           ' label: document.getElementById("warningsButton").getAttribute("aria-label"),' +
           ' gate: document.body.classList.contains("layout-gate-active"),' +
           ' pills: document.querySelectorAll(".bubble.queued").length,' +
-          " loads: window.__easelArtifactLoads," +
+          " loads: window.__lieselArtifactLoads," +
           ' rows: [...document.querySelectorAll(".warning-row")].map((row) => ({' +
           '   title: row.querySelector(".warning-title").textContent,' +
           '   target: row.querySelector(".warning-target").textContent,' +
@@ -121,7 +121,7 @@ test(
         "chrome-devtools-axi",
         [
           "eval",
-          '() => { window.__easelArtifactLoads = 0; if (window.__easelArtifactLoadsWired) return "reset"; window.__easelArtifactLoadsWired = true; document.getElementById("artifact").addEventListener("load", () => { window.__easelArtifactLoads += 1; }); return "wired"; }',
+          '() => { window.__lieselArtifactLoads = 0; if (window.__lieselArtifactLoadsWired) return "reset"; window.__lieselArtifactLoadsWired = true; document.getElementById("artifact").addEventListener("load", () => { window.__lieselArtifactLoads += 1; }); return "wired"; }',
         ],
         chromeEnv,
       );
@@ -413,26 +413,26 @@ test(
       assert.match(cleanFeedback, /Tighten the summary/);
       assert.doesNotMatch(cleanFeedback, /layout-warnings/);
     } finally {
-      run(process.execPath, ["bin/easel.js", "stop", "--port", String(port)], easelEnv, 15_000);
+      run(process.execPath, ["bin/liesel.js", "stop", "--port", String(port)], lieselEnv, 15_000);
       run("chrome-devtools-axi", ["stop"], chromeEnv);
       await rm(temp, { recursive: true, force: true });
     }
   },
 );
 
-test("a live reload preserves the review context Easel owns", { skip: !runBrowserE2e, timeout: 240_000 }, async () => {
-  const temp = await mkdtemp(path.join(tmpdir(), "easel-review-context-"));
+test("a live reload preserves the review context Liesel owns", { skip: !runBrowserE2e, timeout: 240_000 }, async () => {
+  const temp = await mkdtemp(path.join(tmpdir(), "liesel-review-context-"));
   const port = await freePort();
-  const easelEnv = {
-    EASEL_PORT: String(port),
-    EASEL_STATE_DIR: path.join(temp, "state"),
-    EASEL_NO_OPEN: "1",
-    EASEL_TELEMETRY: "0",
-    EASEL_HOST: "127.0.0.1",
-    EASEL_LINK_HOST: "127.0.0.1",
+  const lieselEnv = {
+    LIESEL_PORT: String(port),
+    LIESEL_STATE_DIR: path.join(temp, "state"),
+    LIESEL_NO_OPEN: "1",
+    LIESEL_TELEMETRY: "0",
+    LIESEL_HOST: "127.0.0.1",
+    LIESEL_LINK_HOST: "127.0.0.1",
   };
   const chromeEnv = {
-    CHROME_DEVTOOLS_AXI_SESSION: `easel-review-context-${process.pid}`,
+    CHROME_DEVTOOLS_AXI_SESSION: `liesel-review-context-${process.pid}`,
     CHROME_DEVTOOLS_AXI_USER_DATA_DIR: path.join(temp, "chrome"),
   };
 
@@ -457,14 +457,14 @@ test("a live reload preserves the review context Easel owns", { skip: !runBrowse
   try {
     const artifact = path.join(temp, "review-context.html");
     await copyFile(path.join(fixtures, "review-context.html"), artifact);
-    const output = run(process.execPath, ["bin/easel.js", artifact, "--no-open"], easelEnv);
+    const output = run(process.execPath, ["bin/liesel.js", artifact, "--no-open"], lieselEnv);
     const url = output.match(/url:\s*"([^"]+)"/)?.[1];
     assert.ok(url, output);
     run("chrome-devtools-axi", ["emulate", "--viewport", "1440x1000x1"], chromeEnv);
     run("chrome-devtools-axi", ["open", url], chromeEnv);
     wait(4500);
 
-    // Easel-owned answers: a radio and a checkbox inside a data-easel-question scope.
+    // Liesel-owned answers: a radio and a checkbox inside a data-liesel-question scope.
     click(/radio " Pro"/);
     click(/checkbox " Include beta cohort"/);
     // Unsent annotation text on an element the reload will replace.
@@ -481,7 +481,7 @@ test("a live reload preserves the review context Easel owns", { skip: !runBrowse
     wait(5000);
 
     const after = snapshot();
-    assert.match(after, /radio " Pro" checked/, "an Easel-owned answer survives the reload");
+    assert.match(after, /radio " Pro" checked/, "a Liesel-owned answer survives the reload");
     assert.match(after, /checkbox " Include beta cohort" checked/);
     assert.match(after, /Annotate <p>/, "the open annotation card comes back");
 
@@ -504,7 +504,7 @@ test("a live reload preserves the review context Easel owns", { skip: !runBrowse
     assert.equal(geometry.emptyCopyDisplay, "none");
     assert.ok(geometry.excerptHeight <= geometry.excerptLineHeight + 1, "the anchor excerpt stays on one line");
   } finally {
-    run(process.execPath, ["bin/easel.js", "stop", "--port", String(port)], easelEnv, 15_000);
+    run(process.execPath, ["bin/liesel.js", "stop", "--port", String(port)], lieselEnv, 15_000);
     run("chrome-devtools-axi", ["stop"], chromeEnv);
     await rm(temp, { recursive: true, force: true });
   }

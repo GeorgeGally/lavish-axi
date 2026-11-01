@@ -1,16 +1,17 @@
 {
-  "name": "easel",
+  "name": "liesel",
   "version": "0.2.0",
   "packageManager": "pnpm@11.1.1",
-  "description": "HTML is the new markdown. Easel is a board for reviewing and tuning HTML designs with your agent.",
+  "description": "HTML is the new markdown. Liesel is a board for reviewing and tuning HTML designs with your agent.",
   "type": "module",
   "bin": {
+    "liesel": "dist/cli.mjs",
     "easel": "dist/cli.mjs"
   },
   "files": [
     "dist",
     "plugin.json",
-    "skills/easel",
+    "skills/liesel",
     "LICENSE",
     "THIRD-PARTY-NOTICES.md",
     "README.md"
@@ -71,12 +72,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/GeorgeGally/lavish-axi.git"
+    "url": "git+https://github.com/GeorgeGally/liesel.git"
   },
   "bugs": {
-    "url": "https://github.com/GeorgeGally/lavish-axi/issues"
+    "url": "https://github.com/GeorgeGally/liesel/issues"
   },
-  "homepage": "https://github.com/GeorgeGally/lavish-axi#readme",
+  "homepage": "https://github.com/GeorgeGally/liesel#readme",
   "publishConfig": {
     "access": "public"
   }

@@ -555,28 +555,28 @@ function decodeEntities(value) {
 }
 
 /**
- * A designer's pair file carries its own caption: `<meta name="easel-caption" content="...">`.
+ * A designer's pair file carries its own caption: `<meta name="liesel-caption" content="...">`.
  * @param {string} html
  * @returns {string}
  */
 export function captionFromHtml(html) {
-  return metaContent(html, "easel-caption", 400);
+  return metaContent(html, "liesel-caption", 400);
 }
 
 /**
  * What the board explains above a design, from the file's own metas: an optional
- * `easel-title`, `easel-explain` (falling back to `easel-caption`) for what this
- * version changes and why, `easel-changed` for what the latest edit changed, and
- * `easel-parent` naming the file a derived version grew from.
+ * `liesel-title`, `liesel-explain` (falling back to `liesel-caption`) for what this
+ * version changes and why, `liesel-changed` for what the latest edit changed, and
+ * `liesel-parent` naming the file a derived version grew from.
  * @param {string} html
  * @returns {{ title: string, explain: string, changed: string, parent: string }}
  */
 export function explanationFromHtml(html) {
   return {
-    title: metaContent(html, "easel-title", 120),
-    explain: metaContent(html, "easel-explain", 600) || captionFromHtml(html),
-    changed: metaContent(html, "easel-changed", 400),
-    parent: metaContent(html, "easel-parent", 160).replace(/\.html?$/i, ""),
+    title: metaContent(html, "liesel-title", 120),
+    explain: metaContent(html, "liesel-explain", 600) || captionFromHtml(html),
+    changed: metaContent(html, "liesel-changed", 400),
+    parent: metaContent(html, "liesel-parent", 160).replace(/\.html?$/i, ""),
   };
 }
 
@@ -624,7 +624,7 @@ export async function scanBoardFiles(dir, board) {
 /**
  * The tune panel's control list, declared by the item's own HTML:
  *
- *   <script type="application/easel-tune">
+ *   <script type="application/liesel-tune">
  *   [{"id":"radius","label":"Radius","type":"number","css":"--radius","min":0,"max":40,"step":1,"value":12,"unit":"px"}]
  *   </script>
  *
@@ -633,7 +633,7 @@ export async function scanBoardFiles(dir, board) {
  * @returns {TuneControl[]}
  */
 export function extractTuneSpec(html) {
-  const match = /<script[^>]*type=["']application\/easel-tune["'][^>]*>([\s\S]*?)<\/script>/i.exec(String(html || ""));
+  const match = /<script[^>]*type=["']application\/liesel-tune["'][^>]*>([\s\S]*?)<\/script>/i.exec(String(html || ""));
   if (!match) return [];
   let parsed;
   try {
@@ -721,7 +721,7 @@ export function tuneInstruction(item, spec) {
       return `- ${control.label}: ${value}  (${control.css})`;
     });
   if (lines.length === 0) return `No tune values set for ${item.label} (${item.file}).`;
-  return `Bake these tune values from the board into ${item.file}, then keep the declarations in its application/easel-tune block in step:\n${lines.join("\n")}`;
+  return `Bake these tune values from the board into ${item.file}, then keep the declarations in its application/liesel-tune block in step:\n${lines.join("\n")}`;
 }
 
 /**
