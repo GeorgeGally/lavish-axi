@@ -2467,25 +2467,22 @@ function setTab(id) {
   else fit(false);
 }
 
+// Settings: whether the 3440 ultrawide joins the All view, remembered per board.
 function renderUltrawideToggle() {
-  let toggle = document.getElementById("ultrawideToggle");
-  if (!toggle && deviceBar) {
-    toggle = element("button", { class: "bar-toggle", id: "ultrawideToggle", type: "button" });
-    toggle.addEventListener("click", () => {
-      state.ultrawideInAll = !state.ultrawideInAll;
-      writeStorage(ultrawideStorageKey, state.ultrawideInAll ? "on" : "off");
-      renderUltrawideToggle();
-      relayout();
-      userAdjustedCamera = false;
-      fit(false);
-    });
-    deviceBar.after(toggle);
-  }
-  if (!toggle) return;
-  toggle.hidden = state.deviceMode !== "all";
-  toggle.setAttribute("aria-pressed", String(state.ultrawideInAll));
-  toggle.textContent = state.ultrawideInAll ? "Ultrawide shown" : "Show ultrawide";
-  toggle.title = state.ultrawideInAll ? "Leave the 3440 ultrawide out of All" : "Add the 3440 ultrawide to All";
+  const toggle = /** @type {HTMLInputElement | null} */ (document.getElementById("ultrawideSetting"));
+  if (toggle) toggle.checked = state.ultrawideInAll;
+}
+
+/** @param {boolean} on */
+function setUltrawideInAll(on) {
+  if (on === state.ultrawideInAll) return;
+  state.ultrawideInAll = on;
+  writeStorage(ultrawideStorageKey, on ? "on" : "off");
+  renderUltrawideToggle();
+  if (state.deviceMode !== "all") return;
+  relayout();
+  userAdjustedCamera = false;
+  fit(false);
 }
 
 function renderDevices() {
@@ -3978,30 +3975,27 @@ function markEnded() {
   sendButton.disabled = true;
 }
 
-/** @type {"chat" | "controls" | "agent"} */
+/** @type {"chat" | "controls"} */
 let sideView = "chat";
 
 /**
- * The sidebar shows one of its tabs: Chat, Controls or Agent. Showing one opens a
- * closed sidebar, so a controls-selector click or a send is never answered out of sight.
- * @param {"chat" | "controls" | "agent"} view
+ * The sidebar shows one of its tabs: Chat or Controls. Showing one opens a closed
+ * sidebar, so a controls-selector click or a send is never answered out of sight.
+ * @param {"chat" | "controls"} view
  */
 function showSideView(view) {
   const chat = document.getElementById("chat");
-  sideView = view === "controls" || view === "agent" ? view : "chat";
+  sideView = view === "controls" ? view : "chat";
   if (chat) chat.dataset.view = sideView;
   const panes = {
     chat: document.getElementById("chatPane"),
     controls: document.getElementById("tune"),
-    agent: document.getElementById("agentPane"),
   };
   const tabs = {
     chat: document.getElementById("sideTabChat"),
     controls: document.getElementById("sideTabControls"),
-    agent: document.getElementById("sideTabAgent"),
   };
-  if (sideView === "agent") loadRunner();
-  for (const name of /** @type {const} */ (["chat", "controls", "agent"])) {
+  for (const name of /** @type {const} */ (["chat", "controls"])) {
     const on = name === sideView;
     if (panes[name]) panes[name].hidden = !on;
     if (tabs[name]) {
@@ -4020,9 +4014,34 @@ function toggleSideView() {
   showSideView(sideView === "chat" ? "controls" : "chat");
 }
 
+/* ---------------------------------------------------------------- settings */
+
+// Settings opens from the gear in the top bar: the ultrawide toggle and the agent picker.
+// It closes on Escape, its close button, the gear, or a press outside it.
+const settingsPanel = document.getElementById("settings");
+const settingsToggle = document.getElementById("settingsToggle");
+
+function settingsOpen() {
+  return Boolean(settingsPanel && !settingsPanel.hidden);
+}
+
+/** @param {boolean} open */
+function setSettingsOpen(open) {
+  if (!settingsPanel || open === settingsOpen()) return;
+  settingsPanel.hidden = !open;
+  settingsToggle?.setAttribute("aria-expanded", String(open));
+  if (open) {
+    renderUltrawideToggle();
+    loadRunner();
+    document.getElementById("settingsClose")?.focus({ preventScroll: true });
+  } else if (settingsPanel.contains(document.activeElement)) {
+    settingsToggle?.focus({ preventScroll: true });
+  }
+}
+
 /* ---------------------------------------------------------------- agent runner */
 
-// The Agent tab: which agent CLI answers this board's notes (src/board-runner.js), and the
+// The agent settings: which agent CLI answers this board's notes (src/board-runner.js), and the
 // state and output of its latest run. The form is filled once per load, never from a live
 // event, so a half-typed command is not overwritten by a run that finishes meanwhile.
 const runnerState = {
@@ -4049,7 +4068,7 @@ function runnerElements() {
     stop: /** @type {HTMLButtonElement | null} */ (document.getElementById("agentStop")),
     retry: /** @type {HTMLButtonElement | null} */ (document.getElementById("agentRetry")),
     line: document.getElementById("runnerLine"),
-    dot: document.getElementById("agentTabDot"),
+    dot: document.getElementById("settingsDot"),
   };
 }
 
@@ -5851,7 +5870,8 @@ function boardKey(event, preventDefault, fromItem = "") {
   else if (event.key === "Escape") {
     // Escape closes an open note or history first, then turns notes or the controls
     // selector off, and with neither on it closes the tuned element.
-    if (noteWindow) closeNoteWindow();
+    if (settingsOpen()) setSettingsOpen(false);
+    else if (noteWindow) closeNoteWindow();
     else if (historyItem || compare) closeBuildPreview();
     else if (armedMode) setArmedMode("");
     else closeTune();
@@ -5886,8 +5906,14 @@ window.addEventListener("keydown", (event) => {
     }
     return;
   }
-  // The Agent form is an ordinary form: Tab moves between its fields and keys type.
-  if (event.target instanceof Element && event.target.closest("#agentForm") && !event.metaKey && !event.ctrlKey) {
+  // Escape closes Settings first, even from one of its fields.
+  if (event.key === "Escape" && settingsOpen()) {
+    event.preventDefault();
+    setSettingsOpen(false);
+    return;
+  }
+  // Settings is an ordinary form: Tab moves between its fields and keys type.
+  if (event.target instanceof Element && event.target.closest("#settings") && !event.metaKey && !event.ctrlKey) {
     return;
   }
   // Tab switches the sidebar between Chat and Controls; in a text field it keeps its meaning.
@@ -5939,12 +5965,25 @@ window.addEventListener("resize", () => {
 
 document.getElementById("sideTabChat")?.addEventListener("click", () => showSideView("chat"));
 document.getElementById("sideTabControls")?.addEventListener("click", () => showSideView("controls"));
-document.getElementById("sideTabAgent")?.addEventListener("click", () => showSideView("agent"));
+settingsToggle?.addEventListener("click", () => setSettingsOpen(!settingsOpen()));
+document.getElementById("settingsClose")?.addEventListener("click", () => setSettingsOpen(false));
+document.addEventListener(
+  "pointerdown",
+  (event) => {
+    if (!settingsOpen() || !(event.target instanceof window.Node)) return;
+    if (settingsPanel?.contains(event.target) || settingsToggle?.contains(event.target)) return;
+    setSettingsOpen(false);
+  },
+  true,
+);
+document.getElementById("ultrawideSetting")?.addEventListener("change", (event) => {
+  setUltrawideInAll(/** @type {HTMLInputElement} */ (event.currentTarget).checked);
+});
 document.getElementById("agentForm")?.addEventListener("submit", saveRunner);
 document.getElementById("agentSelect")?.addEventListener("change", syncRunnerFields);
 document.getElementById("agentStop")?.addEventListener("click", () => runnerAction("stop"));
 document.getElementById("agentRetry")?.addEventListener("click", () => runnerAction("run"));
-document.getElementById("runnerLine")?.addEventListener("click", () => showSideView("agent"));
+document.getElementById("runnerLine")?.addEventListener("click", () => setSettingsOpen(true));
 document.getElementById("agentOutput")?.addEventListener("scroll", (event) => {
   const output = /** @type {HTMLElement} */ (event.currentTarget);
   runnerState.pinnedToEnd = output.scrollHeight - output.scrollTop - output.clientHeight < 24;

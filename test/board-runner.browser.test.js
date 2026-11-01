@@ -36,7 +36,7 @@ process.stdin.on("end", async () => {
 `;
 
 test(
-  "the Agent tab picks an installed agent, and a sent note runs it, edits the item and answers in Chat",
+  "Settings picks an installed agent, and a sent note runs it, edits the item and answers in Chat",
   { skip: !runBrowserE2e || !findChrome(), timeout: 120_000 },
   async () => {
     const temp = await realpath(await mkdtemp(path.join(tmpdir(), "liesel-runner-e2e-")));
@@ -88,10 +88,12 @@ test(
         }
         throw new Error(`timed out: ${label}`);
       };
-      await until(`document.readyState === "complete" && !!document.getElementById("sideTabAgent")`, "board loaded");
+      await until(`document.readyState === "complete" && !!document.getElementById("settingsToggle")`, "board loaded");
 
-      // Agent tab: only installed agents plus Custom, defaulting to the board's own folder.
-      await evaluate(`document.getElementById("sideTabAgent").click()`);
+      // Settings: only installed agents plus Custom, defaulting to the board's own folder.
+      assert.equal(await evaluate(`!!document.getElementById("sideTabAgent")`), false);
+      await evaluate(`document.getElementById("settingsToggle").click()`);
+      assert.equal(await evaluate(`document.getElementById("settings").hidden`), false);
       await until(`document.getElementById("agentSelect").options.length > 1`, "agents listed");
       const view = await fetch(`${base}/api/boards/${opened.key}/runner`).then((response) => response.json());
       const offered = await evaluate(`[...document.getElementById("agentSelect").options].map((o) => o.value)`);
@@ -99,7 +101,7 @@ test(
       assert.equal(offered.at(-1), "custom");
       assert.equal(await evaluate(`document.getElementById("agentCwd").value`), boardDir);
       assert.equal(await evaluate(`document.getElementById("agentCommandField").hidden`), true);
-      await shoot("01-agent-tab");
+      await shoot("01-agent-settings");
 
       await evaluate(`(() => {
         const select = document.getElementById("agentSelect");
@@ -113,7 +115,11 @@ test(
       await until(`/^Saved/.test(document.getElementById("agentSaveStatus").textContent)`, "saved");
       assert.doesNotMatch(await readFile(path.join(boardDir, "board.json"), "utf8"), /fake-agent/);
 
-      // Send a note from Chat; the agent starts at once.
+      // Send a note from Chat; the agent starts at once. Escape closes Settings.
+      await evaluate(
+        `document.getElementById("agentCwd").dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))`,
+      );
+      assert.equal(await evaluate(`document.getElementById("settings").hidden`), true);
       await evaluate(`document.getElementById("sideTabChat").click()`);
       await evaluate(`(() => {
         const input = document.getElementById("composerInput");
@@ -126,7 +132,7 @@ test(
         await evaluate(`document.getElementById("runnerLine").textContent`),
         /^Custom command is working on 1 noteOutput$/,
       );
-      assert.equal(await evaluate(`document.getElementById("agentTabDot").dataset.state`), "running");
+      assert.equal(await evaluate(`document.getElementById("settingsDot").dataset.state`), "running");
       await shoot("03-chat-running");
 
       await until(`document.getElementById("runnerLine").hidden`, "run finishes", 300);
@@ -137,7 +143,8 @@ test(
       assert.match(await readFile(path.join(boardDir, "01-hero.html"), "utf8"), /Hello from the runner/);
       await shoot("04-chat-replied");
 
-      await evaluate(`document.getElementById("sideTabAgent").click()`);
+      await evaluate(`document.getElementById("settingsToggle").click()`);
+      await until(`!document.getElementById("settings").hidden`, "settings open");
       await until(`document.getElementById("agentRunState").dataset.state === "finished"`, "finished state");
       assert.match(await evaluate(`document.getElementById("agentOutput").textContent`), /Reading the notes/);
       await shoot("05-agent-finished");

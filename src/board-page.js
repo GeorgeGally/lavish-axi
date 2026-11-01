@@ -87,6 +87,10 @@ export function createBoardHtml(
     <button class="zoom-text" id="fit" type="button" title="Fit everything (0)">Fit</button>
     <button class="zoom-text" id="actual" type="button" title="Actual size (1)">100%</button>
   </div>
+  <button class="icon-button settings-toggle" id="settingsToggle" type="button" aria-expanded="false" aria-controls="settings" aria-label="Settings" title="Settings">
+    <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>
+    <span class="run-dot" id="settingsDot" hidden></span>
+  </button>
 </header>
 <main class="plane" id="plane">
   <div class="canvas" id="canvas"></div>
@@ -97,7 +101,6 @@ export function createBoardHtml(
     <div class="side-tabs" role="tablist" aria-label="Sidebar">
       <button class="side-tab" id="sideTabChat" type="button" role="tab" aria-selected="true" aria-controls="chatPane" title="Chat (Tab)">Chat</button>
       <button class="side-tab" id="sideTabControls" type="button" role="tab" aria-selected="false" aria-controls="tune" tabindex="-1" title="Controls (Tab)">Controls</button>
-      <button class="side-tab" id="sideTabAgent" type="button" role="tab" aria-selected="false" aria-controls="agentPane" tabindex="-1" title="Who handles notes">Agent<span class="run-dot" id="agentTabDot" hidden></span></button>
     </div>
     <span class="presence" id="presence" data-state="waiting" role="status" aria-live="polite"></span>
     <button class="icon-button chat-collapse" id="chatToggle" type="button" aria-expanded="true" aria-label="Hide sidebar" title="Hide sidebar">
@@ -134,39 +137,56 @@ export function createBoardHtml(
       <div class="versions" id="tuneVersions"></div>
     </div>
   </section>
-  <section class="side-pane agent-pane" id="agentPane" role="tabpanel" aria-labelledby="sideTabAgent" hidden>
-    <p class="agent-lede">Pick the agent that answers notes on this board. When you send notes, ${PRODUCT_NAME} starts it in the folder below, hands it the notes, and posts its answer in Chat.</p>
-    <form class="agent-form" id="agentForm">
-      <label class="agent-field">
-        <span class="agent-label">Agent</span>
-        <select class="agent-input" id="agentSelect"></select>
-      </label>
-      <label class="agent-field" id="agentCommandField" hidden>
-        <span class="agent-label">Command</span>
-        <input class="agent-input" id="agentCommand" type="text" spellcheck="false" autocomplete="off" placeholder="my-agent --headless">
-        <span class="agent-hint">Runs in the folder below. The notes arrive on stdin and in <code>$LIESEL_PROMPT_FILE</code>; what it prints becomes the reply.</span>
-      </label>
-      <label class="agent-field" id="agentCwdField">
-        <span class="agent-label">Working folder</span>
-        <input class="agent-input" id="agentCwd" type="text" spellcheck="false" autocomplete="off">
-        <span class="agent-hint">The agent can edit files here. The board's own folder is the default.</span>
-      </label>
-      <div class="agent-actions">
-        <button class="button button-primary" id="agentSave" type="submit">Save</button>
-        <span class="chat-status" id="agentSaveStatus" role="status"></span>
-      </div>
-    </form>
-    <div class="agent-run" id="agentRun" hidden>
-      <div class="agent-run-head">
-        <span class="run-state" id="agentRunState" data-state="running"></span>
-        <button class="tune-link" id="agentStop" type="button" hidden>Stop</button>
-        <button class="tune-link" id="agentRetry" type="button" hidden>Run again</button>
-      </div>
-      <p class="agent-run-error" id="agentRunError" hidden></p>
-      <pre class="agent-output" id="agentOutput" tabindex="0" aria-label="Agent output"></pre>
-    </div>
-  </section>
 </aside>
+<div class="settings" id="settings" role="dialog" aria-labelledby="settingsTitle" hidden>
+  <div class="settings-head">
+    <h2 class="settings-title" id="settingsTitle">Settings</h2>
+    <button class="icon-button" id="settingsClose" type="button" aria-label="Close settings" title="Close (Esc)">&times;</button>
+  </div>
+  <div class="settings-body">
+    <section class="settings-section" aria-labelledby="viewHeading">
+      <h3 class="settings-heading" id="viewHeading">View</h3>
+      <label class="settings-check">
+        <input type="checkbox" id="ultrawideSetting">
+        <span class="settings-check-text">Show ultrawide<span class="agent-hint">Adds the 3440 ultrawide to the All view.</span></span>
+      </label>
+    </section>
+    <section class="settings-section agent-pane" id="agentPane" aria-labelledby="agentHeading">
+      <h3 class="settings-heading" id="agentHeading">Agent</h3>
+      <p class="agent-lede">Pick the agent that answers notes on this board. When you send notes, ${PRODUCT_NAME} starts it in the folder below, hands it the notes, and posts its answer in Chat.</p>
+      <form class="agent-form" id="agentForm">
+        <label class="agent-field">
+          <span class="agent-label">Answered by</span>
+          <select class="agent-input" id="agentSelect"></select>
+        </label>
+        <label class="agent-field" id="agentCommandField" hidden>
+          <span class="agent-label">Command</span>
+          <input class="agent-input" id="agentCommand" type="text" spellcheck="false" autocomplete="off" placeholder="my-agent --headless">
+          <span class="agent-hint">Runs in the folder below. The notes arrive on stdin and in <code>$LIESEL_PROMPT_FILE</code>; what it prints becomes the reply.</span>
+        </label>
+        <label class="agent-field" id="agentCwdField">
+          <span class="agent-label">Working folder</span>
+          <input class="agent-input" id="agentCwd" type="text" spellcheck="false" autocomplete="off">
+          <span class="agent-hint">The agent can edit files here. The board's own folder is the default.</span>
+        </label>
+        <div class="agent-actions">
+          <button class="button button-primary" id="agentSave" type="submit">Save</button>
+          <span class="chat-status" id="agentSaveStatus" role="status"></span>
+        </div>
+      </form>
+      <div class="agent-run" id="agentRun" hidden>
+        <div class="agent-run-head">
+          <span class="run-state" id="agentRunState" data-state="running"></span>
+          <button class="tune-link" id="agentStop" type="button" hidden>Stop</button>
+          <button class="tune-link" id="agentRetry" type="button" hidden>Run again</button>
+        </div>
+        <p class="agent-run-error" id="agentRunError" hidden></p>
+        <pre class="agent-output" id="agentOutput" tabindex="0" aria-label="Agent output"></pre>
+      </div>
+    </section>
+  </div>
+</div>
+<!-- /settings -->
 <button class="chat-open" id="chatOpen" type="button" hidden>Notes</button>
 <div class="ended" id="ended" hidden>Session ended. Run <code>liesel board open</code> when you want it reopened.</div>
 <script id="liesel-board" type="application/json">${bootstrap}</script>

@@ -245,7 +245,7 @@ textarea:focus-visible {
   font-size: 16px;
 }
 
-/* All view only: whether the 3440 ultrawide joins the row. */
+/* Quiet bar toggles: Duplicate, History, Old notes. */
 .bar-toggle {
   height: 34px;
   padding: 0 12px;
@@ -2412,16 +2412,134 @@ body[data-dragging="true"] .shield {
   margin: 0 0 0.5em;
 }
 
-/* Agent: who answers this board's notes, and its latest run. */
-.agent-pane {
+/* Settings: a quiet sheet under the gear in the top bar. */
+.settings-toggle {
+  position: relative;
+  flex: none;
+  width: 34px;
+  height: 34px;
+  margin-left: 4px;
+}
+
+.settings-toggle[aria-expanded="true"] {
+  background: rgba(22, 24, 29, 0.06);
+  color: var(--ink);
+}
+
+.settings-toggle .run-dot {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+}
+
+.settings {
+  position: fixed;
+  top: calc(var(--bar-height) + 8px);
+  right: 16px;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  width: min(380px, calc(100vw - 32px));
+  max-height: calc(100dvh - var(--bar-height) - 24px);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: var(--shadow-float);
+}
+
+.settings[hidden] {
+  display: none;
+}
+
+.settings-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 16px 4px 24px;
+}
+
+.settings-title {
+  margin: 0;
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+
+.settings-body {
   overflow-y: auto;
   overscroll-behavior: contain;
-  padding: 8px 20px 28px;
+  padding: 8px 24px 28px;
   scrollbar-width: thin;
 }
 
+.settings-section + .settings-section {
+  margin-top: 28px;
+  padding-top: 24px;
+  border-top: 1px solid var(--line);
+}
+
+.settings-heading {
+  margin: 0 0 12px;
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+
+.settings-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  cursor: pointer;
+}
+
+.settings-check input {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin: 1px 0 0;
+  accent-color: var(--ink);
+}
+
+.settings-check input:focus-visible {
+  outline: 2px solid var(--select);
+  outline-offset: 2px;
+}
+
+.settings-check-text {
+  display: grid;
+  gap: 4px;
+  color: var(--ink-2);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+/* Where the bar runs out of room its end is cut off, so the gear moves up beside the
+   brand and stays reachable. */
+@media (max-width: 1024px) {
+  .bar .brand {
+    order: -2;
+  }
+
+  .settings-toggle {
+    order: -1;
+    margin-left: -4px;
+  }
+}
+
+@media (max-width: 760px) {
+  .settings {
+    right: 16px;
+    left: 16px;
+    width: auto;
+  }
+}
+
+/* Agent: who answers this board's notes, and its latest run. */
 .agent-lede {
-  margin: 4px 0 20px;
+  margin: 0 0 20px;
   color: var(--ink-3);
   font-size: 13px;
   line-height: 1.5;
@@ -2578,22 +2696,22 @@ input.agent-input {
   display: none;
 }
 
-.side-tab .run-dot {
+.run-dot {
   width: 6px;
   height: 6px;
   border-radius: 50%;
   background: #16a34a;
 }
 
-.side-tab .run-dot[hidden] {
+.run-dot[hidden] {
   display: none;
 }
 
-.side-tab .run-dot[data-state="running"] {
+.run-dot[data-state="running"] {
   animation: pulse 1.2s ease-in-out infinite;
 }
 
-.side-tab .run-dot[data-state="failed"] {
+.run-dot[data-state="failed"] {
   background: var(--danger);
 }
 
