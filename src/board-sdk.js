@@ -1354,6 +1354,12 @@
         schedulePins();
         return;
       }
+      if (data.type === "scroll-to") {
+        // A locked partner scrolled: follow it to the same place.
+        window.scrollTo({ left: Number(data.x) || 0, top: Number(data.y) || 0, behavior: "instant" });
+        schedulePins();
+        return;
+      }
       if (data.type === "tune-spec") {
         post({ type: "tune-spec", controls: collectTuneControls() });
         return;
@@ -1494,8 +1500,24 @@
   // The board's own keys - 0, 1, +, - and Escape, and Cmd +/-/0 - reach it from here
   // too, so the camera answers whichever document has focus.
   // Cmd-Z and Cmd-Shift-Z step the tune changes, and Tab switches the sidebar's tabs.
-  // Up and Down (or [ and ]) widen and narrow the controls selection.
-  const BOARD_KEYS = new Set(["0", "1", "+", "=", "-", "Escape", "z", "Z", "Tab", "ArrowUp", "ArrowDown", "[", "]"]);
+  // Cmd-D duplicates the design. Up and Down (or [ and ]) widen and narrow the controls selection.
+  const BOARD_KEYS = new Set([
+    "0",
+    "1",
+    "+",
+    "=",
+    "-",
+    "Escape",
+    "z",
+    "Z",
+    "Tab",
+    "ArrowUp",
+    "ArrowDown",
+    "[",
+    "]",
+    "d",
+    "D",
+  ]);
   const MODIFIER_KEYS = new Set(["Meta", "Alt", "Control", "Shift"]);
   function forwardKey(event) {
     if (MODIFIER_KEYS.has(event.key) || event.code === "Space") return;
@@ -1506,6 +1528,8 @@
     }
     const ours = BOARD_KEYS.has(event.key) && !event.altKey && !editable(event.target);
     if (!ours) return;
+    // D is the board's only with Cmd: Cmd-D duplicates the design.
+    if (/^d$/i.test(event.key) && !event.metaKey && !event.ctrlKey) return;
     // Tab would move focus inside the design; Cmd +/-/0 would zoom the browser window.
     if (event.key === "Tab") {
       if (event.metaKey || event.ctrlKey) return;
@@ -1587,6 +1611,21 @@
 
   for (const type of ["scroll", "resize"])
     window.addEventListener(type, schedulePins, { capture: true, passive: true });
+
+  // Where the page itself is scrolled to, at most once a frame, so a design locked to
+  // another (a duplicate and its original) can scroll as one.
+  let scrollReportFrame = 0;
+  window.addEventListener(
+    "scroll",
+    () => {
+      if (scrollReportFrame) return;
+      scrollReportFrame = window.requestAnimationFrame(() => {
+        scrollReportFrame = 0;
+        post({ type: "scrolled", x: Math.round(window.scrollX), y: Math.round(window.scrollY) });
+      });
+    },
+    { passive: true },
+  );
 
   /* ----------------------------------------------------------- image drops */
 

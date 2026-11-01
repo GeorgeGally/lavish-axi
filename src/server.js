@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import { EventEmitter } from "node:events";
 import { existsSync } from "node:fs";
-import { copyFile, mkdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { createServer, get as httpGet } from "node:http";
 import { isIP } from "node:net";
 import { homedir } from "node:os";
@@ -63,9 +63,12 @@ import {
   BoardError,
   boardDirPath,
   boardFilePath,
+  duplicateFileName,
+  duplicateItem,
   explanationFromHtml,
   extractTuneSpec,
   injectBoardSdk,
+  normalizeBoard,
   pairInfo,
   scanBoardFiles,
   placeItem,
@@ -1332,6 +1335,123 @@ export async function serve({
           });
         });
         res.json({ status: "ok", versions: item.versions });
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // Duplicate one design: its file is copied to a new file in the board folder and the
+  // copy becomes its own item beside it, carrying the reviewer's tune values, element
+  // tunes and image drops. The original's file and record are never written.
+  app.post("/api/boards/:key/duplicate", async (req, res, next) => {
+    try {
+      if (!boardWriteGuard(req, res)) return;
+      const itemId = String(req.body?.item || "");
+      await withBoardWrite(req.params.key, res, async ({ dir, board }) => {
+        const source = board.items.find((entry) => entry.id === itemId);
+        if (!source) throw new BoardError(`Unknown board item: ${itemId}`);
+        const sourceFile = await itemFileFor(dir, source);
+        if (!sourceFile) throw new BoardError("That design's file is missing");
+        const directory = await realpath(dir);
+        const name = duplicateFileName(board, source.file, (candidate) => existsSync(path.join(directory, candidate)));
+        // The bytes land under a name no scan picks up, and take their real name only
+        // once the board already knows the item, so the copy never appears twice.
+        const temporary = path.join(directory, `.easel-copy-${crypto.randomBytes(6).toString("hex")}.tmp`);
+        await copyFile(sourceFile, temporary);
+        const next = {
+          ...board,
+          items: board.items.map((entry) => ({ ...entry })),
+          pairs: board.pairs.map((pair) => ({ ...pair })),
+        };
+        let item;
+        try {
+          item = duplicateItem(next, source.id, name);
+          await writeBoard(directory, next);
+          if (existsSync(path.join(directory, name))) throw new BoardError(`${name} already exists`);
+          await rename(temporary, path.join(directory, name));
+        } catch (error) {
+          await rm(temporary, { force: true });
+          if (item) await writeBoard(directory, board);
+          throw error;
+        }
+        const saved = await recordBuilds(directory, await readBoard(directory));
+        const { specs, captions } = await boardItemMeta(directory, saved);
+        const published = publicBoard(saved, specs, captions);
+        logEvent?.(`board item duplicated key=${req.params.key} from=${source.id} to=${item.id}`);
+        res.json({ status: "ok", item: published.items.find((entry) => entry.id === item.id), pairs: published.pairs });
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // Only a duplicate can be deleted from the board. Its file moves into the board's
+  // trash folder with its record, so Undo puts back exactly what was there.
+  const BOARD_TRASH_DIR = ".easel-trash";
+  app.post("/api/boards/:key/delete", async (req, res, next) => {
+    try {
+      if (!boardWriteGuard(req, res)) return;
+      const itemId = String(req.body?.item || "");
+      await withBoardWrite(req.params.key, res, async ({ dir, board }) => {
+        const item = board.items.find((entry) => entry.id === itemId);
+        if (!item) throw new BoardError(`Unknown board item: ${itemId}`);
+        if (!item.copyOf) throw new BoardError("Only a duplicate can be deleted from the board");
+        const directory = await realpath(dir);
+        const token = crypto.randomBytes(8).toString("hex");
+        const trash = path.join(directory, BOARD_TRASH_DIR, token);
+        await mkdir(trash, { recursive: true });
+        const pairs = board.pairs.filter((pair) => pair.a === item.id || pair.b === item.id);
+        await writeFile(path.join(trash, "record.json"), `${JSON.stringify({ item, pairs }, null, 2)}\n`);
+        const file = await itemFileFor(directory, item);
+        if (file) await rename(file, path.join(trash, path.basename(item.file)));
+        const saved = await writeBoard(directory, {
+          ...board,
+          items: board.items.filter((entry) => entry.id !== item.id),
+          pairs: board.pairs.filter((pair) => !pairs.includes(pair)),
+        });
+        logEvent?.(`board item deleted key=${req.params.key} item=${item.id}`);
+        res.json({ status: "ok", token, pairs: saved.pairs });
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post("/api/boards/:key/restore", async (req, res, next) => {
+    try {
+      if (!boardWriteGuard(req, res)) return;
+      const token = String(req.body?.token || "");
+      if (!/^[0-9a-f]{16}$/.test(token)) throw new BoardError("Nothing to restore");
+      await withBoardWrite(req.params.key, res, async ({ dir, board }) => {
+        const directory = await realpath(dir);
+        const trash = path.join(directory, BOARD_TRASH_DIR, token);
+        const record = JSON.parse(await readFile(path.join(trash, "record.json"), "utf8").catch(() => "null"));
+        const restored = normalizeBoard({ tabs: board.tabs, items: [record?.item] }, board.name).items[0];
+        if (!restored) throw new BoardError("Nothing to restore");
+        if (board.items.some((entry) => entry.id === restored.id || entry.file === restored.file)) {
+          throw new BoardError(`${restored.file} is already on the board`);
+        }
+        const target = path.join(directory, restored.file);
+        if (existsSync(target)) throw new BoardError(`${restored.file} already exists`);
+        const kept = path.join(trash, path.basename(restored.file));
+        // The record first, so a scan that sees the file back already knows the item.
+        const known = new Set([...board.items.map((entry) => entry.id), restored.id]);
+        const pairs = (Array.isArray(record.pairs) ? record.pairs : []).filter(
+          (pair) => known.has(String(pair?.a || "")) && known.has(String(pair?.b || "")),
+        );
+        await writeBoard(directory, { ...board, items: [...board.items, restored], pairs: [...board.pairs, ...pairs] });
+        if (existsSync(kept)) await rename(kept, target);
+        await rm(trash, { recursive: true, force: true });
+        const saved = await recordBuilds(directory, await readBoard(directory));
+        const { specs, captions } = await boardItemMeta(directory, saved);
+        const published = publicBoard(saved, specs, captions);
+        logEvent?.(`board item restored key=${req.params.key} item=${restored.id}`);
+        res.json({
+          status: "ok",
+          item: published.items.find((entry) => entry.id === restored.id),
+          pairs: published.pairs,
+        });
       });
     } catch (error) {
       next(error);

@@ -32,7 +32,7 @@ const MAX_NOTE_IMAGES = 8;
  *   tune: Record<string, string>, elementTune: Record<string, Record<string, string>>,
  *   imageDrops: Array<{ selector: string, kind: "img" | "background", oldSource: string, file: string }>,
  *   builds: Array<{ at: string, hash: string, label: string }>,
- *   versions: TuneVersion[], tuneSpec?: TuneControl[],
+ *   versions: TuneVersion[], tuneSpec?: TuneControl[], copyOf?: string,
  * }} BoardItem
  */
 /** @typedef {{ format: number, name: string, tabs: BoardTab[], items: BoardItem[], pairs: Array<{ a: string, b: string, locked: boolean }> }} Board */
@@ -183,6 +183,8 @@ function normalizeItems(value, tabIds, fallbackTab) {
     if (seen.has(id)) continue;
     seen.add(id);
     const tab = tabIds.has(String(entry.tab || "")) ? String(entry.tab) : fallbackTab;
+    // A duplicate names the item it was made from, so the board can stand it beside it.
+    const copyOf = slug(text(entry.copyOf, 60), "");
     items.push({
       id,
       label: text(entry.label, 120) || id,
@@ -205,6 +207,7 @@ function normalizeItems(value, tabIds, fallbackTab) {
       // the build names itself, so a round is a point on a line, not a new object.
       builds: normalizeBuilds(entry.builds),
       versions: normalizeVersions(entry.versions),
+      ...(copyOf && copyOf !== id ? { copyOf } : {}),
     });
   }
   return items;
@@ -402,6 +405,75 @@ export function addItem(board, { file, label, tab, w, h }) {
     versions: [],
   };
   board.items.push(item);
+  return item;
+}
+
+/** "hero copy 2" back to "hero", and "hero-copy-2" back to "hero". */
+function withoutCopySuffix(value, separator) {
+  const pattern = separator === " " ? /\s+copy(?:\s+\d+)?$/i : /-copy(?:-\d+)?$/i;
+  return String(value || "").replace(pattern, "") || String(value || "");
+}
+
+/**
+ * The file a duplicate of `file` is written to: `name-copy.html`, then `name-copy-2.html`
+ * and so on, never a file that exists or an item id the board already uses.
+ * @param {Board} board
+ * @param {string} file
+ * @param {(name: string) => boolean} exists
+ */
+export function duplicateFileName(board, file, exists) {
+  const extension = path.extname(file) || ".html";
+  const stem = withoutCopySuffix(path.basename(file, path.extname(file)), "-");
+  const ids = new Set(board.items.map((item) => item.id));
+  const files = new Set(board.items.map((item) => item.file.toLowerCase()));
+  for (let number = 1; number < 1000; number += 1) {
+    const name = `${stem}-copy${number === 1 ? "" : `-${number}`}${extension}`;
+    const id = slug(path.basename(name, extension), "item");
+    if (ids.has(id) || files.has(name.toLowerCase()) || exists(name)) continue;
+    return name;
+  }
+  throw new BoardError("Too many copies of this design");
+}
+
+/**
+ * A duplicate of one item, as its own item on the same tab: the reviewer's tune values,
+ * element tunes and image drops come along, its notes and history do not. It is locked
+ * as a pair with the item it was made from, so the two scroll together.
+ * @param {Board} board
+ * @param {string} sourceId
+ * @param {string} file the copy's file, from `duplicateFileName`
+ */
+export function duplicateItem(board, sourceId, file) {
+  const source = board.items.find((entry) => entry.id === sourceId);
+  if (!source) throw new BoardError(`Unknown board item: ${sourceId}`);
+  if (board.items.length >= MAX_ITEMS) throw new BoardError("This board is full");
+  const extension = path.extname(file);
+  const id = uniqueId(board, slug(path.basename(file, extension), "item"));
+  const number = /-copy-(\d+)$/i.exec(path.basename(file, extension))?.[1];
+  const label = `${withoutCopySuffix(source.label, " ")} copy${number ? ` ${number}` : ""}`;
+  /** @type {BoardItem} */
+  const item = {
+    id,
+    label: text(label, 120) || id,
+    file: path.basename(file),
+    tab: source.tab,
+    x: source.x + source.w + 48,
+    y: source.y,
+    w: source.w,
+    h: source.h,
+    status: "open",
+    notes: [],
+    tune: { ...source.tune },
+    elementTune: Object.fromEntries(
+      Object.entries(source.elementTune || {}).map(([selector, css]) => [selector, { ...css }]),
+    ),
+    imageDrops: (source.imageDrops || []).map((drop) => ({ ...drop })),
+    builds: [],
+    versions: [],
+    copyOf: source.id,
+  };
+  board.items.push(item);
+  pairItems(board, source.id, item.id, true);
   return item;
 }
 

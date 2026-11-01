@@ -769,3 +769,102 @@ test("a build's thumbnail is served once taken, and never without Chrome", async
   assert.match(frame, new RegExp(`/item/v1/build/${hash}/`));
   assert.match(frame, /scale\(0\.25\)/);
 });
+
+test("a duplicate is a new file and item beside its design, and only a duplicate is deleted, with undo", async (t) => {
+  const { base, boardDirectory } = await setup(t);
+  const registered = await register(base, boardDirectory);
+  const board = await readBoard(boardDirectory);
+  const v1 = board.items.find((item) => item.id === "v1");
+  v1.label = "Hero";
+  v1.tune = { radius: "20" };
+  v1.elementTune = { h1: { color: "red" } };
+  v1.notes = [{ id: "n1", number: 1, label: "", selector: "h1", tag: "h1", text: "Too loud", x: 1, y: 2 }];
+  await writeFile(boardFilePath(boardDirectory), `${JSON.stringify(board, null, 2)}\n`);
+  const original = await readFile(path.join(boardDirectory, "v1.html"), "utf8");
+  const post = (route, body, headers = write(base)) =>
+    fetch(`${base}/api/boards/${registered.key}/${route}`, { method: "POST", headers, body: JSON.stringify(body) });
+
+  const foreign = await post(
+    "duplicate",
+    { item: "v1" },
+    { "content-type": "application/json", origin: "https://evil.example" },
+  );
+  assert.equal(foreign.status, 403);
+
+  const made = await post("duplicate", { item: "v1" });
+  assert.equal(made.status, 200);
+  const payload = await made.json();
+  assert.equal(payload.item.id, "v1-copy");
+  assert.equal(payload.item.file, "v1-copy.html");
+  assert.equal(payload.item.label, "Hero copy");
+  assert.equal(payload.item.copyOf, "v1");
+  assert.equal(payload.item.tuneSpec.length, 3);
+  assert.deepEqual(payload.item.tune, { radius: "20" });
+  assert.deepEqual(payload.item.notes, []);
+  assert.deepEqual(payload.pairs, [{ a: "v1", b: "v1-copy", locked: true }]);
+  assert.equal(await readFile(path.join(boardDirectory, "v1-copy.html"), "utf8"), original);
+  const again = await post("duplicate", { item: "v1" }).then((response) => response.json());
+  assert.equal(again.item.file, "v1-copy-2.html");
+  assert.equal(again.item.label, "Hero copy 2");
+
+  // A tune on the copy never touches the original.
+  await post("tune", { item: "v1-copy", values: { radius: "4" } });
+  const tuned = await readBoard(boardDirectory);
+  assert.deepEqual(tuned.items.find((item) => item.id === "v1").tune, { radius: "20" });
+  assert.equal(tuned.items.find((item) => item.id === "v1").notes.length, 1);
+  assert.deepEqual(tuned.items.find((item) => item.id === "v1-copy").tune, { radius: "4" });
+  // A reload's folder scan does not add the copy a second time.
+  const listed = await fetch(`${base}/api/boards/${registered.key}`).then((response) => response.json());
+  assert.equal(listed.items.filter((item) => item.file === "v1-copy.html").length, 1);
+
+  // A note on the copy reaches the agent naming the copy.
+  await fetch(`${base}/api/${registered.key}/prompts`, {
+    method: "POST",
+    headers: write(base),
+    body: JSON.stringify({
+      prompts: [
+        {
+          uid: "u1",
+          prompt_id: "p-1",
+          prompt: "Bigger",
+          selector: "h1",
+          tag: "pin",
+          item: { id: "v1-copy", label: "Hero copy" },
+          pin: { id: "c1", number: 1 },
+        },
+      ],
+      domSnapshot: "",
+    }),
+  });
+  const polled = await fetch(
+    `${base}/api/poll?file=${encodeURIComponent(boardFilePath(boardDirectory))}&timeoutMs=4000`,
+  ).then((response) => response.json());
+  assert.deepEqual(polled.prompts[0].item, { id: "v1-copy", label: "Hero copy" });
+
+  const refused = await post("delete", { item: "v1" });
+  assert.equal(refused.status, 400);
+  const removed = await post("delete", { item: "v1-copy" });
+  assert.equal(removed.status, 200);
+  const { token } = await removed.json();
+  assert.match(token, /^[0-9a-f]{16}$/);
+  await assert.rejects(stat(path.join(boardDirectory, "v1-copy.html")));
+  const afterDelete = await fetch(`${base}/api/boards/${registered.key}`).then((response) => response.json());
+  assert.equal(
+    afterDelete.items.some((item) => item.id === "v1-copy"),
+    false,
+  );
+  assert.equal(
+    afterDelete.pairs.some((pair) => pair.b === "v1-copy"),
+    false,
+  );
+  assert.ok(afterDelete.items.some((item) => item.id === "v1"));
+
+  const restored = await post("restore", { token });
+  assert.equal(restored.status, 200);
+  const back = await restored.json();
+  assert.equal(back.item.id, "v1-copy");
+  assert.deepEqual(back.item.tune, { radius: "4" });
+  assert.ok(back.pairs.some((pair) => pair.a === "v1" && pair.b === "v1-copy"));
+  assert.equal(await readFile(path.join(boardDirectory, "v1-copy.html"), "utf8"), original);
+  assert.equal((await post("restore", { token })).status, 400);
+});

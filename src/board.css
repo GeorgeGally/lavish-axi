@@ -487,6 +487,61 @@ body[data-pan="true"] .shield {
   color: var(--ink);
 }
 
+/* Duplicate, and Rename and Delete on a copy: quiet until the design is hovered, and in
+   the flow so the row never jumps when they show. */
+.artboard-label .item-actions {
+  gap: 0.15em;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.artboard-label .item-actions[hidden] {
+  display: none;
+}
+
+.artboard-label:hover .item-actions,
+.artboard-label:focus-within .item-actions,
+.artboard[data-hover="true"] + .artboard-label .item-actions {
+  opacity: 1;
+}
+
+.artboard-label .item-action {
+  height: 2em;
+  padding: 0 0.55em;
+  border: 0;
+  border-radius: 0.5em;
+  background: transparent;
+  color: var(--ink-3);
+  font: inherit;
+  cursor: pointer;
+}
+
+.artboard-label .item-action:hover {
+  background: rgba(22, 24, 29, 0.06);
+  color: var(--ink);
+}
+
+/* The design the top bar's Duplicate and History act on. */
+.artboard-label[data-picked="true"] .name {
+  color: var(--select);
+}
+
+.artboard-label .rename-input {
+  height: 1.7em;
+  padding: 0 0.4em;
+  border: 1px solid var(--line-strong);
+  border-radius: 0.4em;
+  background: var(--surface-strong);
+  color: var(--ink);
+  font: inherit;
+  font-weight: 600;
+}
+
+.artboard-label .rename-input:focus {
+  outline: none;
+  border-color: var(--select);
+}
+
 /* Accept / Keep today sits in the label row beside the version's name, so it stays
    put however tall the artboards are. It takes the label's counter-scaled size. */
 .choice {

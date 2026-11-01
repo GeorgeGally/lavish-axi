@@ -76,6 +76,7 @@ export function createBoardHtml(
   <nav class="tabs" id="tabs" role="tablist" aria-label="Board tabs"></nav>
   <div class="bar-spacer"></div>
   <span class="mode-state" id="modeState" role="status" aria-live="polite" hidden></span>
+  <button class="bar-toggle" id="duplicateToggle" type="button" hidden>Duplicate</button>
   <button class="bar-toggle" id="historyToggle" type="button" hidden>History</button>
   <button class="bar-toggle" id="oldNotesToggle" type="button">Old notes shown</button>
   <div class="segmented" id="devices" role="group" aria-label="Device"></div>

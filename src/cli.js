@@ -758,6 +758,7 @@ function boardSummary(board, dir) {
       })),
       tune: Object.keys(item.tune).length > 0 ? item.tune : undefined,
       versions: item.versions.length,
+      ...(item.copyOf ? { copy_of: item.copyOf } : {}),
     })),
     pairs: board.pairs,
   };
@@ -778,6 +779,7 @@ export function createBoardHelpOutput() {
       `Add a variant with \`${CLI_NAME} board add <dir> <file.html>\`; the open board shows it within a few seconds`,
       "Every item is rendered in its own sandboxed frame on one pannable plane. Tabs switch boards of variants, and a pair of items can be locked so they move together during a comparison",
       "Ask the reviewer to annotate by clicking elements: each click drops a numbered pin and lands as a chip in the composer. Each note arrives as a prompt with a target item {id,label} and a pin {number, selector}",
+      "The reviewer can duplicate a design on the board: the copy is its own HTML file and item (`copy_of` names the design it came from), so a note naming the copy's item id is applied to the copy's file only, never the original",
       "Items may declare tune controls in a `<script type=\"application/easel-tune\">` JSON array of {id,label,type:'number'|'color'|'select'|'spring'|'easing'|'pad'|'timeline',css:'--var',min,max,step,unit,value,options,duration}; the tune panel writes those CSS custom properties live and can save versions",
     ],
   };

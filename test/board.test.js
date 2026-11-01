@@ -8,6 +8,8 @@ import {
   addItem,
   BoardError,
   boardFilePath,
+  duplicateFileName,
+  duplicateItem,
   ensureTab,
   extractTuneSpec,
   injectBoardSdk,
@@ -321,4 +323,89 @@ test("board keeps an image drop, an element tune and a line of builds", () => {
     item.builds.map((build) => build.label),
     ["", "Round 2"],
   );
+});
+
+test("a duplicate's file is name-copy, then name-copy-2, never one that exists", () => {
+  const board = normalizeBoard({ items: [{ id: "hero", file: "hero.html" }] }, "b");
+  assert.equal(
+    duplicateFileName(board, "hero.html", () => false),
+    "hero-copy.html",
+  );
+  assert.equal(
+    duplicateFileName(board, "hero.html", (name) => name === "hero-copy.html"),
+    "hero-copy-2.html",
+  );
+  // A copy of a copy counts on from the same name instead of growing "-copy-copy".
+  const withCopy = normalizeBoard(
+    {
+      items: [
+        { id: "hero", file: "hero.html" },
+        { id: "hero-copy", file: "hero-copy.html", copyOf: "hero" },
+      ],
+    },
+    "b",
+  );
+  assert.equal(
+    duplicateFileName(withCopy, "hero-copy.html", () => false),
+    "hero-copy-2.html",
+  );
+});
+
+test("a duplicate carries tune values, element tunes and image drops, not notes or history, and is locked beside its design", () => {
+  const board = normalizeBoard(
+    {
+      tabs: [
+        { id: "main", label: "Main" },
+        { id: "cards", label: "Cards" },
+      ],
+      items: [
+        {
+          id: "hero",
+          label: "Hero",
+          file: "hero.html",
+          tab: "cards",
+          x: 10,
+          y: 20,
+          w: 800,
+          h: 600,
+          status: "accepted",
+          notes: [{ id: "n1", number: 1, text: "bigger" }],
+          tune: { radius: "12" },
+          elementTune: { h1: { color: "red" } },
+          imageDrops: [
+            { selector: "img.hero", kind: "img", oldSource: "a.png", file: `assets/drops/${"a".repeat(64)}.png` },
+          ],
+          builds: [{ at: "2026-01-01", hash: "abcdef12", label: "" }],
+          versions: [{ id: "v1", label: "V1", values: { radius: "4" } }],
+        },
+      ],
+    },
+    "b",
+  );
+  const copy = duplicateItem(board, "hero", "hero-copy.html");
+  assert.equal(copy.id, "hero-copy");
+  assert.equal(copy.label, "Hero copy");
+  assert.equal(copy.file, "hero-copy.html");
+  assert.equal(copy.tab, "cards");
+  assert.equal(copy.copyOf, "hero");
+  assert.equal(copy.status, "open");
+  assert.deepEqual(copy.tune, { radius: "12" });
+  assert.deepEqual(copy.elementTune, { h1: { color: "red" } });
+  assert.equal(copy.imageDrops.length, 1);
+  assert.deepEqual(copy.notes, []);
+  assert.deepEqual(copy.builds, []);
+  assert.deepEqual(copy.versions, []);
+  assert.deepEqual(board.pairs, [{ a: "hero", b: "hero-copy", locked: true }]);
+  // The copy is its own record: changing it leaves the original alone.
+  copy.tune.radius = "30";
+  copy.elementTune.h1.color = "blue";
+  const original = board.items.find((item) => item.id === "hero");
+  assert.equal(original?.tune.radius, "12");
+  assert.equal(original?.elementTune.h1.color, "red");
+  assert.equal(original?.notes.length, 1);
+  // It survives a save and load with the design it came from.
+  const saved = normalizeBoard(JSON.parse(JSON.stringify(board)), "b");
+  assert.equal(saved.items.find((item) => item.id === "hero-copy")?.copyOf, "hero");
+  assert.equal(duplicateItem(saved, "hero-copy", "hero-copy-2.html").label, "Hero copy 2");
+  assert.throws(() => duplicateItem(board, "nope", "x.html"), BoardError);
 });

@@ -42,6 +42,8 @@ const annotateHintStorageKey = `easel:gesture-hint:${key}`;
 const state = {
   tabs: Array.isArray(bootstrap.tabs) ? bootstrap.tabs : [],
   items: Array.isArray(bootstrap.items) ? bootstrap.items : [],
+  /** @type {Array<{ a: string, b: string, locked?: boolean }>} */
+  pairs: Array.isArray(bootstrap.pairs) ? bootstrap.pairs : [],
   chat: Array.isArray(bootstrap.chat) ? bootstrap.chat : [],
   ended: Boolean(bootstrap.ended),
   activeTab: "",
@@ -325,7 +327,10 @@ function buildGroups() {
   const paired = items.filter((item) => item.pair);
   /** @type {Map<string, any[]>} */
   const children = new Map();
+  // A duplicate stands beside the design it was made from, so it is placed after.
+  const copies = items.filter((item) => isCopyOnTab(item, items));
   for (const item of items) {
+    if (copies.includes(item)) continue;
     if (!item.pair) {
       const parent = parentOf(item, paired);
       if (parent) {
@@ -390,8 +395,54 @@ function buildGroups() {
       .filter((member) => member.item.changed)
       .map((member) => ({ label: member.label, text: capitalize(member.item.changed) }));
   }
+  insertCopies(groups, copies);
   insertCompare(groups);
   return groups;
+}
+
+/** A duplicate whose design is on the same tab: it is laid out beside that design. */
+function isCopyOnTab(item, items) {
+  return Boolean(item.copyOf) && items.some((entry) => entry.id === item.copyOf);
+}
+
+/**
+ * Each duplicate takes the place right after the design it was made from (after that
+ * design's earlier copies), in whichever row holds it, so the two read side by side.
+ */
+function insertCopies(groups, copies) {
+  const pending = [...copies].sort((a, b) => (Number(a.created) || 0) - (Number(b.created) || 0));
+  for (let pass = 0; pass < 3 && pending.length > 0; pass += 1) {
+    for (const item of [...pending]) {
+      const found = locateMember(groups, item.copyOf);
+      if (!found) continue;
+      const { list, index } = found;
+      let at = index + 1;
+      while (at < list.length && list[at].item.copyOf === item.copyOf) at += 1;
+      if (!list[index].label) list[index].label = "Original";
+      list.splice(at, 0, { item, label: item.label, children: [] });
+      pending.splice(pending.indexOf(item), 1);
+    }
+  }
+  // A copy of a copy whose chain could not be placed stands alone.
+  for (const item of pending)
+    groups.push({
+      key: `item:${item.id}`,
+      members: [{ item, label: item.label, children: [] }],
+      single: true,
+      title: item.label,
+      lines: [],
+      changes: [],
+    });
+}
+
+function locateMember(groups, itemId) {
+  for (const group of groups) {
+    for (const list of [group.members, ...group.members.map((member) => member.children)]) {
+      const index = list.findIndex((member) => member.item.id === itemId);
+      if (index >= 0) return { list, index };
+    }
+  }
+  return null;
 }
 
 function groupOfItem(itemId) {
@@ -685,11 +736,19 @@ function createArtboard(item, device) {
     event.stopPropagation();
     openTune(item.id, device.id);
   });
-  label.append(name, updated, width, tune);
+  const actions = itemActions(item);
+  label.append(name, updated, width, actions, tune);
   label.addEventListener("click", () => {
     pickedItem = item.id;
     renderHistoryToggle();
   });
+  if (item.copyOf) {
+    name.title = "Double-click to rename";
+    name.addEventListener("dblclick", (event) => {
+      event.stopPropagation();
+      startRename(item.id);
+    });
+  }
   canvas.append(root, label);
   // Every frame loads up front: the layout needs each page's real height.
   iframe.src = itemUrl(item, device.id);
@@ -706,6 +765,7 @@ function createArtboard(item, device) {
     name,
     width,
     updated,
+    actions,
     loaded: false,
   };
   state.artboards.set(id, record);
@@ -772,7 +832,9 @@ function render() {
         record.label.style.top = `${board.y - layout.labelReserve}px`;
         record.label.style.width = `${board.width}px`;
         record.label.style.height = `${layout.labelReserve}px`;
-        record.name.textContent = index === 0 ? member.label : "";
+        if (renaming !== member.item.id || index !== 0) record.name.textContent = index === 0 ? member.label : "";
+        record.actions.hidden = index !== 0;
+        record.label.dataset.picked = String(index === 0 && pickedItem === member.item.id);
         if (index === 0) renderBuilds(record, member.item);
         else record.buildsEl?.remove();
         record.updated.hidden = !(index === 0 && updatedItems.has(member.item.id));
@@ -880,6 +942,230 @@ function renderBuilds(record, item) {
     }),
   );
 }
+
+/* --------------------------------------------------------------- duplicates */
+
+// A duplicate is its own file and item, made from one design so the reviewer can change
+// it and compare: it stands beside that design and is locked to it, so the two scroll
+// together. Only a duplicate can be renamed here or deleted (with Undo).
+/** The item being renamed, whose name holds an input until Enter or Escape. */
+let renaming = "";
+
+/** Every design locked to this one, directly or through another (a copy of a copy). */
+function lockedPartners(itemId) {
+  const seen = new Set([itemId]);
+  const queue = [itemId];
+  while (queue.length > 0) {
+    const current = queue.shift();
+    for (const pair of state.pairs) {
+      if (!pair || pair.locked === false) continue;
+      const other = pair.a === current ? pair.b : pair.b === current ? pair.a : "";
+      if (!other || seen.has(other) || !itemById(other)) continue;
+      seen.add(other);
+      queue.push(other);
+    }
+  }
+  seen.delete(itemId);
+  return [...seen];
+}
+
+// A frame the board just scrolled to follow its partner reports that scroll back; for a
+// moment its reports are echoes, not the reviewer, and are not passed on again.
+const SCROLL_ECHO_MS = 250;
+/** @type {Map<string, number>} */
+const scrollFollowedAt = new Map();
+/** Where each frame was last scrolled by the reviewer, so a locked frame that loads joins it. */
+/** @type {Map<string, { x: number, y: number, at: number }>} */
+const lastScroll = new Map();
+
+function syncLockedScroll(itemId, deviceId, x, y) {
+  const now = performance.now();
+  if (now - (scrollFollowedAt.get(artboardKey(itemId, deviceId)) || 0) < SCROLL_ECHO_MS) return;
+  lastScroll.set(artboardKey(itemId, deviceId), { x, y, at: now });
+  for (const partner of lockedPartners(itemId)) {
+    scrollFollowedAt.set(artboardKey(partner, deviceId), now);
+    postToArtboard(partner, deviceId, { type: "scroll-to", x, y });
+  }
+}
+
+/** A frame that has just loaded takes the place its locked group is scrolled to. */
+function joinLockedScroll(itemId, deviceId) {
+  const partners = lockedPartners(itemId);
+  if (partners.length === 0) return;
+  const at = [itemId, ...partners]
+    .map((id) => lastScroll.get(artboardKey(id, deviceId)))
+    .filter(Boolean)
+    .sort((a, b) => (b?.at || 0) - (a?.at || 0))[0];
+  if (!at) return;
+  scrollFollowedAt.set(artboardKey(itemId, deviceId), performance.now());
+  postToArtboard(itemId, deviceId, { type: "scroll-to", x: at.x, y: at.y });
+}
+
+/** The quiet buttons on a design's label: Duplicate, and Rename and Delete on a copy. */
+function itemActions(item) {
+  const actions = element("span", { class: "item-actions" });
+  const button = (text, title, run) => {
+    const node = element("button", { class: "item-action", type: "button", text, title });
+    node.addEventListener("click", (event) => {
+      event.stopPropagation();
+      run();
+    });
+    return node;
+  };
+  actions.append(button("Duplicate", "Duplicate this design (⌘D)", () => duplicateDesign(item.id)));
+  if (item.copyOf) {
+    actions.append(
+      button("Rename", "Rename this copy", () => startRename(item.id)),
+      button("Delete", "Delete this copy", () => deleteCopy(item.id)),
+    );
+  }
+  return actions;
+}
+
+function boardPost(route, body) {
+  return fetch(`/api/boards/${encodeURIComponent(key)}/${route}`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  }).then((response) =>
+    response
+      .json()
+      .catch(() => ({}))
+      .then((payload) => (response.ok ? payload : Promise.reject(new Error(payload?.error || "not accepted")))),
+  );
+}
+
+/** One short message at the foot of the board, with at most one action. */
+function showBoardToast(text, detail, actionLabel = "", action = null) {
+  hideDropToast();
+  const toast = element("div", { class: "drop-toast", id: "dropToast", role: "status" });
+  toast.append(element("span", { class: "drop-toast-text", text }));
+  if (detail) toast.append(element("span", { class: "drop-toast-file", text: detail }));
+  if (actionLabel && action) {
+    const undo = element("button", { class: "drop-toast-undo", type: "button", text: actionLabel });
+    undo.addEventListener("click", () => {
+      hideDropToast();
+      action();
+    });
+    toast.append(undo);
+  }
+  document.body.append(toast);
+  dropToastTimer = window.setTimeout(hideDropToast, 10000);
+}
+
+function adoptItem(item, pairs) {
+  if (!item?.id) return;
+  state.items = [...state.items.filter((entry) => entry.id !== item.id), item];
+  if (Array.isArray(pairs)) state.pairs = pairs;
+  pickedItem = item.id;
+  relayout();
+  // A board the reviewer has not moved refits, so the design and its copy both show.
+  if (!userAdjustedCamera) fit(false);
+}
+
+let duplicating = false;
+function duplicateDesign(itemId) {
+  const source = itemById(itemId);
+  if (!source || state.ended || duplicating) return;
+  duplicating = true;
+  boardPost("duplicate", { item: source.id })
+    .then((payload) => {
+      adoptItem(payload.item, payload.pairs);
+      showBoardToast(`Duplicated as ${payload.item.label}`, payload.item.file, "Rename", () =>
+        startRename(payload.item.id),
+      );
+    })
+    .catch((error) => {
+      dockStatus.textContent = `Could not duplicate ${source.label}: ${error.message}`;
+    })
+    .finally(() => {
+      duplicating = false;
+    });
+}
+
+function deleteCopy(itemId) {
+  const item = itemById(itemId);
+  if (!item?.copyOf || state.ended) return;
+  boardPost("delete", { item: item.id })
+    .then((payload) => {
+      state.items = state.items.filter((entry) => entry.id !== item.id);
+      if (Array.isArray(payload.pairs)) state.pairs = payload.pairs;
+      if (pickedItem === item.id) pickedItem = item.copyOf;
+      relayout();
+      showBoardToast(`Deleted ${item.label}`, item.file, "Undo", () => restoreCopy(payload.token, item));
+    })
+    .catch((error) => {
+      dockStatus.textContent = `Could not delete ${item.label}: ${error.message}`;
+    });
+}
+
+function restoreCopy(token, item) {
+  boardPost("restore", { token })
+    .then((payload) => adoptItem(payload.item, payload.pairs))
+    .catch((error) => {
+      dockStatus.textContent = `Could not bring back ${item.label}: ${error.message}`;
+    });
+}
+
+/** Rename a copy in place: its name becomes an input, Enter keeps it, Escape does not. */
+function startRename(itemId) {
+  const item = itemById(itemId);
+  const record = [...state.artboards.values()].find(
+    (entry) => entry.itemId === itemId && !entry.root.hidden && !entry.actions.hidden,
+  );
+  if (!item?.copyOf || !record || state.ended) return;
+  renaming = item.id;
+  const input = element("input", { class: "rename-input", type: "text", "aria-label": "Name of this copy" });
+  input.value = item.label;
+  input.size = Math.max(8, item.label.length + 2);
+  let done = false;
+  const finish = (keep) => {
+    if (done) return;
+    done = true;
+    renaming = "";
+    const label = input.value.trim().slice(0, 120);
+    if (keep && label && label !== item.label) {
+      item.label = label;
+      boardPost("place", { items: [{ id: item.id, label }] }).catch(() => {
+        dockStatus.textContent = "Could not save that name.";
+      });
+    }
+    relayout();
+  };
+  input.addEventListener("keydown", (event) => {
+    event.stopPropagation();
+    if (event.key === "Enter") finish(true);
+    else if (event.key === "Escape") finish(false);
+  });
+  input.addEventListener("input", () => {
+    input.size = Math.max(8, input.value.length + 2);
+  });
+  input.addEventListener("blur", () => finish(true));
+  for (const type of ["click", "dblclick", "pointerdown"]) {
+    input.addEventListener(type, (event) => event.stopPropagation());
+  }
+  record.name.replaceChildren(input);
+  input.focus();
+  input.select();
+}
+
+/** The top bar's Duplicate is for the design picked by its label. */
+function pickedDesign() {
+  return activeItems().find((item) => item.id === pickedItem) || null;
+}
+
+function renderDuplicateToggle() {
+  const toggle = document.getElementById("duplicateToggle");
+  if (!toggle) return;
+  const item = pickedDesign();
+  toggle.hidden = !item || state.ended;
+  if (item) toggle.title = `Duplicate ${item.label} (⌘D)`;
+}
+
+document.getElementById("duplicateToggle")?.addEventListener("click", () => {
+  const item = pickedDesign();
+  if (item) duplicateDesign(item.id);
+});
 
 /* ----------------------------------------------------------------- history */
 
@@ -1000,6 +1286,7 @@ function renderHistoryToggle() {
   toggle.hidden = !item || historyBuilds(item).length < 2;
   toggle.setAttribute("aria-pressed", String(Boolean(historyItem)));
   toggle.title = item ? `History of ${designName(item, "")}` : "History";
+  renderDuplicateToggle();
 }
 
 document.getElementById("historyToggle")?.addEventListener("click", () => {
@@ -5225,7 +5512,7 @@ function itemsSignature(items) {
   return items
     .map(
       (item) =>
-        `${item.id}|${item.file}|${item.tab}|${item.caption || ""}|${item.title || ""}|${item.changed || ""}|${item.parent || ""}|${item.status || ""}|${(item.builds || []).map((build) => build.hash).join(",")}`,
+        `${item.id}|${item.file}|${item.tab}|${item.copyOf || ""}|${item.copyOf ? item.label : ""}|${item.caption || ""}|${item.title || ""}|${item.changed || ""}|${item.parent || ""}|${item.status || ""}|${(item.builds || []).map((build) => build.hash).join(",")}`,
     )
     .join("\n");
 }
@@ -5255,6 +5542,7 @@ function refreshBoard() {
       });
       const previousTabs = state.tabs.map((tab) => tab.id).join(",");
       state.tabs = payload.tabs || state.tabs;
+      if (Array.isArray(payload.pairs)) state.pairs = payload.pairs;
       if (Array.isArray(payload.chat)) state.chat = payload.chat;
       if (!state.tabs.some((tab) => tab.id === state.activeTab)) state.activeTab = state.tabs[0]?.id || "";
       if (state.tabs.map((tab) => tab.id).join(",") !== previousTabs) renderTabs();
@@ -5325,6 +5613,7 @@ function onArtboardMessage(event) {
     return;
   }
   if (data.type === "ready") {
+    joinLockedScroll(itemId, deviceId);
     postPins(itemId, deviceId);
     postTune(itemId, deviceId);
     postElementTune(itemId, deviceId);
@@ -5368,6 +5657,10 @@ function onArtboardMessage(event) {
     setArmedMode("");
     return;
   }
+  if (data.type === "scrolled") {
+    syncLockedScroll(itemId, deviceId, Number(data.x) || 0, Number(data.y) || 0);
+    return;
+  }
   if (data.type === "key") {
     noteChord();
     boardKey(
@@ -5378,6 +5671,7 @@ function onArtboardMessage(event) {
         shiftKey: data.shiftKey === true,
       },
       () => {},
+      itemId,
     );
     return;
   }
@@ -5512,7 +5806,15 @@ window.addEventListener("message", onArtboardMessage);
  * @param {{ key: string, metaKey: boolean, ctrlKey: boolean, shiftKey?: boolean }} event
  * @param {() => void} preventDefault
  */
-function boardKey(event, preventDefault) {
+function boardKey(event, preventDefault, fromItem = "") {
+  // Cmd-D duplicates the picked design, or the focused one that handed the key up.
+  if ((event.metaKey || event.ctrlKey) && !event.shiftKey && /^d$/i.test(event.key)) {
+    const target = pickedDesign() || (fromItem ? itemById(fromItem) : null);
+    if (!target) return;
+    preventDefault();
+    duplicateDesign(target.id);
+    return;
+  }
   if ((event.metaKey || event.ctrlKey) && /^z$/i.test(event.key)) {
     if (!tuneItemId) return;
     preventDefault();
@@ -5594,6 +5896,8 @@ window.addEventListener("keydown", (event) => {
     return;
   }
   if (event.altKey || (isTextTarget(event.target) && !event.metaKey && !event.ctrlKey)) return;
+  // Cmd-D in a text field is the field's, never a duplicate.
+  if (/^d$/i.test(event.key) && isTextTarget(event.target)) return;
   // Undo while typing belongs to the field being typed in.
   if (/^z$/i.test(event.key) && isTypingTarget(event.target)) return;
   boardKey(event, () => event.preventDefault());
