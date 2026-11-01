@@ -96,6 +96,7 @@ export function createBoardHtml(
     <div class="side-tabs" role="tablist" aria-label="Sidebar">
       <button class="side-tab" id="sideTabChat" type="button" role="tab" aria-selected="true" aria-controls="chatPane" title="Chat (Tab)">Chat</button>
       <button class="side-tab" id="sideTabControls" type="button" role="tab" aria-selected="false" aria-controls="tune" tabindex="-1" title="Controls (Tab)">Controls</button>
+      <button class="side-tab" id="sideTabAgent" type="button" role="tab" aria-selected="false" aria-controls="agentPane" tabindex="-1" title="Who handles notes">Agent<span class="run-dot" id="agentTabDot" hidden></span></button>
     </div>
     <span class="presence" id="presence" data-state="waiting" role="status" aria-live="polite"></span>
     <button class="icon-button chat-collapse" id="chatToggle" type="button" aria-expanded="true" aria-label="Hide sidebar" title="Hide sidebar">
@@ -104,6 +105,7 @@ export function createBoardHtml(
   </header>
   <section class="side-pane chat-pane" id="chatPane" role="tabpanel" aria-labelledby="sideTabChat">
     <div class="chat-log" id="chatLog"></div>
+    <button class="runner-line" id="runnerLine" type="button" hidden></button>
     <div class="chat-foot">
       <div class="chat-drafts" id="chatDrafts"></div>
       <div class="composer-images" id="composerImages" hidden></div>
@@ -129,6 +131,38 @@ export function createBoardHtml(
         <button class="tune-link" id="tuneReset" type="button">Reset</button>
       </div>
       <div class="versions" id="tuneVersions"></div>
+    </div>
+  </section>
+  <section class="side-pane agent-pane" id="agentPane" role="tabpanel" aria-labelledby="sideTabAgent" hidden>
+    <p class="agent-lede">Pick the agent that answers notes on this board. When you send notes, ${PRODUCT_NAME} starts it in the folder below, hands it the notes, and posts its answer in Chat.</p>
+    <form class="agent-form" id="agentForm">
+      <label class="agent-field">
+        <span class="agent-label">Agent</span>
+        <select class="agent-input" id="agentSelect"></select>
+      </label>
+      <label class="agent-field" id="agentCommandField" hidden>
+        <span class="agent-label">Command</span>
+        <input class="agent-input" id="agentCommand" type="text" spellcheck="false" autocomplete="off" placeholder="my-agent --headless">
+        <span class="agent-hint">Runs in the folder below. The notes arrive on stdin and in <code>$EASEL_PROMPT_FILE</code>; what it prints becomes the reply.</span>
+      </label>
+      <label class="agent-field" id="agentCwdField">
+        <span class="agent-label">Working folder</span>
+        <input class="agent-input" id="agentCwd" type="text" spellcheck="false" autocomplete="off">
+        <span class="agent-hint">The agent can edit files here. The board's own folder is the default.</span>
+      </label>
+      <div class="agent-actions">
+        <button class="button button-primary" id="agentSave" type="submit">Save</button>
+        <span class="chat-status" id="agentSaveStatus" role="status"></span>
+      </div>
+    </form>
+    <div class="agent-run" id="agentRun" hidden>
+      <div class="agent-run-head">
+        <span class="run-state" id="agentRunState" data-state="running"></span>
+        <button class="tune-link" id="agentStop" type="button" hidden>Stop</button>
+        <button class="tune-link" id="agentRetry" type="button" hidden>Run again</button>
+      </div>
+      <p class="agent-run-error" id="agentRunError" hidden></p>
+      <pre class="agent-output" id="agentOutput" tabindex="0" aria-label="Agent output"></pre>
     </div>
   </section>
 </aside>

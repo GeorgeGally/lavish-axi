@@ -3679,21 +3679,30 @@ function markEnded() {
   sendButton.disabled = true;
 }
 
-/** @type {"chat" | "controls"} */
+/** @type {"chat" | "controls" | "agent"} */
 let sideView = "chat";
 
 /**
- * The sidebar shows one of its two tabs, Chat or Controls. Showing one opens a
+ * The sidebar shows one of its tabs: Chat, Controls or Agent. Showing one opens a
  * closed sidebar, so a controls-selector click or a send is never answered out of sight.
- * @param {"chat" | "controls"} view
+ * @param {"chat" | "controls" | "agent"} view
  */
 function showSideView(view) {
   const chat = document.getElementById("chat");
-  sideView = view === "controls" ? "controls" : "chat";
+  sideView = view === "controls" || view === "agent" ? view : "chat";
   if (chat) chat.dataset.view = sideView;
-  const panes = { chat: document.getElementById("chatPane"), controls: document.getElementById("tune") };
-  const tabs = { chat: document.getElementById("sideTabChat"), controls: document.getElementById("sideTabControls") };
-  for (const name of /** @type {const} */ (["chat", "controls"])) {
+  const panes = {
+    chat: document.getElementById("chatPane"),
+    controls: document.getElementById("tune"),
+    agent: document.getElementById("agentPane"),
+  };
+  const tabs = {
+    chat: document.getElementById("sideTabChat"),
+    controls: document.getElementById("sideTabControls"),
+    agent: document.getElementById("sideTabAgent"),
+  };
+  if (sideView === "agent") loadRunner();
+  for (const name of /** @type {const} */ (["chat", "controls", "agent"])) {
     const on = name === sideView;
     if (panes[name]) panes[name].hidden = !on;
     if (tabs[name]) {
@@ -3710,6 +3719,186 @@ function showSideView(view) {
 
 function toggleSideView() {
   showSideView(sideView === "chat" ? "controls" : "chat");
+}
+
+/* ---------------------------------------------------------------- agent runner */
+
+// The Agent tab: which agent CLI answers this board's notes (src/board-runner.js), and the
+// state and output of its latest run. The form is filled once per load, never from a live
+// event, so a half-typed command is not overwritten by a run that finishes meanwhile.
+const runnerState = {
+  /** @type {any} */
+  view: null,
+  formFilled: false,
+  /** Whether the output was scrolled to its end before the latest chunk arrived. */
+  pinnedToEnd: true,
+};
+
+function runnerElements() {
+  return {
+    select: /** @type {HTMLSelectElement | null} */ (document.getElementById("agentSelect")),
+    command: /** @type {HTMLInputElement | null} */ (document.getElementById("agentCommand")),
+    commandField: document.getElementById("agentCommandField"),
+    cwd: /** @type {HTMLInputElement | null} */ (document.getElementById("agentCwd")),
+    cwdField: document.getElementById("agentCwdField"),
+    save: /** @type {HTMLButtonElement | null} */ (document.getElementById("agentSave")),
+    saveStatus: document.getElementById("agentSaveStatus"),
+    run: document.getElementById("agentRun"),
+    runState: document.getElementById("agentRunState"),
+    runError: document.getElementById("agentRunError"),
+    output: document.getElementById("agentOutput"),
+    stop: /** @type {HTMLButtonElement | null} */ (document.getElementById("agentStop")),
+    retry: /** @type {HTMLButtonElement | null} */ (document.getElementById("agentRetry")),
+    line: document.getElementById("runnerLine"),
+    dot: document.getElementById("agentTabDot"),
+  };
+}
+
+function loadRunner() {
+  return fetch(`/api/boards/${encodeURIComponent(key)}/runner`)
+    .then((response) => (response.ok ? response.json() : null))
+    .then((view) => {
+      if (!view) return;
+      runnerState.view = view;
+      if (!runnerState.formFilled) fillRunnerForm();
+      renderRunner();
+    })
+    .catch(() => {});
+}
+
+function fillRunnerForm() {
+  const view = runnerState.view;
+  const els = runnerElements();
+  if (!view || !els.select || !els.cwd || !els.command) return;
+  runnerState.formFilled = true;
+  const options = [{ id: "off", label: "Off: an agent polls this board itself" }, ...(view.agents || [])];
+  els.select.replaceChildren(...options.map((agent) => element("option", { value: agent.id, text: agent.label })));
+  els.select.value = view.config?.agent || "off";
+  els.command.value = view.config?.command || "";
+  els.cwd.value = view.config?.cwd || view.default_cwd || "";
+  syncRunnerFields();
+}
+
+function syncRunnerFields() {
+  const els = runnerElements();
+  if (!els.select) return;
+  const agent = els.select.value;
+  if (els.commandField) els.commandField.hidden = agent !== "custom";
+  if (els.cwdField) els.cwdField.hidden = agent === "off";
+}
+
+function runnerNoteCount(count) {
+  return `${count} note${count === 1 ? "" : "s"}`;
+}
+
+function renderRunner() {
+  const view = runnerState.view;
+  const els = runnerElements();
+  const run = view?.run || null;
+  const waiting = Number(view?.pending_prompts) || 0;
+  const configured = Boolean(view?.config);
+  if (els.run) els.run.hidden = !run && !(configured && waiting > 0);
+  if (els.runState) {
+    els.runState.dataset.state = run?.status || "idle";
+    els.runState.textContent = !run
+      ? `${runnerNoteCount(waiting)} waiting`
+      : run.status === "running"
+        ? `${run.label} is working on ${runnerNoteCount(run.notes)}${run.queued ? ", more waiting" : ""}`
+        : run.status === "finished"
+          ? `${run.label} finished at ${formatTime(run.ended_at)}`
+          : `${run.label} failed at ${formatTime(run.ended_at)}`;
+  }
+  if (els.runError) {
+    els.runError.hidden = run?.status !== "failed";
+    els.runError.textContent =
+      run?.status === "failed"
+        ? `${run.error}.${waiting > 0 ? ` ${runnerNoteCount(waiting)} still waiting.` : ""}`
+        : "";
+  }
+  if (els.stop) els.stop.hidden = run?.status !== "running";
+  if (els.retry) {
+    els.retry.hidden = !configured || run?.status === "running" || waiting === 0;
+    els.retry.textContent = run?.status === "failed" ? "Run again" : `Run ${runnerNoteCount(waiting)}`;
+  }
+  if (els.output) {
+    const text = run?.output || "";
+    if (els.output.textContent !== text) {
+      els.output.textContent = text;
+      if (runnerState.pinnedToEnd) els.output.scrollTop = els.output.scrollHeight;
+    }
+    els.output.hidden = !text;
+  }
+  if (els.dot) {
+    els.dot.hidden = run?.status !== "running" && run?.status !== "failed";
+    els.dot.dataset.state = run?.status || "";
+  }
+  if (els.line) {
+    const show = run?.status === "running" || run?.status === "failed";
+    els.line.hidden = !show;
+    els.line.dataset.state = run?.status || "";
+    els.line.replaceChildren(
+      ...(!show
+        ? []
+        : [
+            element("span", {
+              class: "runner-line-text",
+              text:
+                run.status === "running"
+                  ? `${run.label} is working on ${runnerNoteCount(run.notes)}`
+                  : `${run.label} failed: ${run.error}`,
+            }),
+            element("span", { class: "runner-line-link", text: "Output" }),
+          ]),
+    );
+  }
+}
+
+function saveRunner(event) {
+  event?.preventDefault();
+  const els = runnerElements();
+  if (!els.select || !els.save) return;
+  const agent = els.select.value;
+  els.save.disabled = true;
+  if (els.saveStatus) els.saveStatus.textContent = "";
+  fetch(`/api/boards/${encodeURIComponent(key)}/runner`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ agent, command: els.command?.value || "", cwd: els.cwd?.value || "" }),
+  })
+    .then(async (response) => {
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body?.error || "Could not save");
+      runnerState.view = body;
+      if (els.cwd && body.config?.cwd) els.cwd.value = body.config.cwd;
+      if (els.saveStatus) {
+        els.saveStatus.textContent = body.config
+          ? `Saved. Notes you send go to ${els.select?.selectedOptions[0]?.textContent || "the agent"}.`
+          : "Saved. Notes wait for an agent that polls this board.";
+      }
+      renderRunner();
+    })
+    .catch((error) => {
+      if (els.saveStatus) els.saveStatus.textContent = error instanceof Error ? error.message : String(error);
+    })
+    .finally(() => {
+      if (els.save) els.save.disabled = false;
+    });
+}
+
+function runnerAction(action) {
+  fetch(`/api/boards/${encodeURIComponent(key)}/runner/${action}`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: "{}",
+  }).catch(() => {});
+}
+
+/** @param {any} data */
+function onRunnerEvent(data) {
+  if (!runnerState.view) runnerState.view = { agents: [], config: null, run: null, pending_prompts: 0 };
+  runnerState.view.run = data?.run || null;
+  if (typeof data?.pending_prompts === "number") runnerState.view.pending_prompts = data.pending_prompts;
+  renderRunner();
 }
 
 function setChatCollapsed(collapsed) {
@@ -4554,10 +4743,13 @@ function connectLiveEvents() {
         return;
       }
       if (payload?.type === "agent-presence") setPresence(payload.data?.state);
+      if (payload?.type === "runner") onRunnerEvent(payload.data);
       if (payload?.type === "agent-reply") refreshBoard();
       if (payload?.type === "chat-sync") {
         if (Array.isArray(payload.data?.chat)) state.chat = payload.data.chat;
         renderChatPanel();
+        // A note sent or answered changes how many wait for the agent.
+        if (runnerState.view) loadRunner();
       }
       if (payload?.type === "ended") markEnded();
     });
@@ -4892,6 +5084,10 @@ window.addEventListener("keydown", (event) => {
     }
     return;
   }
+  // The Agent form is an ordinary form: Tab moves between its fields and keys type.
+  if (event.target instanceof Element && event.target.closest("#agentForm") && !event.metaKey && !event.ctrlKey) {
+    return;
+  }
   // Tab switches the sidebar between Chat and Controls; in a text field it keeps its meaning.
   if (event.key === "Tab" && !event.metaKey && !event.ctrlKey && !event.altKey && !isTypingTarget(event.target)) {
     boardKey(event, () => event.preventDefault());
@@ -4937,6 +5133,16 @@ window.addEventListener("resize", () => {
 
 document.getElementById("sideTabChat")?.addEventListener("click", () => showSideView("chat"));
 document.getElementById("sideTabControls")?.addEventListener("click", () => showSideView("controls"));
+document.getElementById("sideTabAgent")?.addEventListener("click", () => showSideView("agent"));
+document.getElementById("agentForm")?.addEventListener("submit", saveRunner);
+document.getElementById("agentSelect")?.addEventListener("change", syncRunnerFields);
+document.getElementById("agentStop")?.addEventListener("click", () => runnerAction("stop"));
+document.getElementById("agentRetry")?.addEventListener("click", () => runnerAction("run"));
+document.getElementById("runnerLine")?.addEventListener("click", () => showSideView("agent"));
+document.getElementById("agentOutput")?.addEventListener("scroll", (event) => {
+  const output = /** @type {HTMLElement} */ (event.currentTarget);
+  runnerState.pinnedToEnd = output.scrollHeight - output.scrollTop - output.clientHeight < 24;
+});
 document.getElementById("tuneSave")?.addEventListener("click", saveTuneVersion);
 document.getElementById("tuneCopy")?.addEventListener("click", copyTune);
 document.getElementById("tuneSend")?.addEventListener("click", sendTune);
@@ -4993,5 +5199,6 @@ renderChatPanel();
 bindNavigation();
 if (state.ended) markEnded();
 connectLiveEvents();
+loadRunner();
 setInterval(refreshBoard, 2000);
 setInterval(checkViewed, 500);

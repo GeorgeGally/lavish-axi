@@ -80,6 +80,19 @@ import { createBoardHtml } from "./board-page.js";
 import { THUMB_SCALE, captureCrop, cropBox, cropFrameHtml, findChrome, thumbFrameHtml } from "./board-crop.js";
 import { createBoardNotifier, newSubmissionId, resolveNotifyCommand, runNotifyCommand } from "./board-notify.js";
 import {
+  CUSTOM_AGENT,
+  RUNNER_AGENTS,
+  RUNNER_DEFAULT_TIMEOUT_MS,
+  RUNNER_OUTPUT_KEEP,
+  buildRunnerPrompt,
+  createRunnerConfigStore,
+  detectInstalledAgents,
+  findExecutable,
+  runAgent,
+  runnerAgentLabel,
+  validateRunnerConfig,
+} from "./board-runner.js";
+import {
   bindHost,
   extraAllowedHosts,
   hostForUrl,
@@ -2060,6 +2073,325 @@ export async function serve({
       .catch(() => {});
   }
 
+  // The built-in agent runner (src/board-runner.js). A board whose user picked an agent on
+  // this machine gets its notes handled by that agent, launched headless by this server:
+  // take the batch like a poll, run the agent in the chosen folder, post its last message as
+  // the reply. One run per board; notes sent during a run wait for the next one. A poll that
+  // is already listening on the board keeps the notes: an agent driving its own loop wins.
+  const runnerConfigs = createRunnerConfigStore(attachmentStateRoot);
+  /**
+   * @typedef {{
+   *   id: number, status: "running" | "finished" | "failed", agent: string, label: string,
+   *   cwd: string, notes: number, started_at: string, ended_at: string, output: string,
+   *   reply: string, error: string, queued: boolean, stop: null | (() => void),
+   * }} BoardRun
+   */
+  /** @type {Map<string, BoardRun>} */
+  const boardRuns = new Map();
+  /** Boards whose trigger is between its check and its take, so a second trigger waits its turn. */
+  const boardRunStarting = new Set();
+  let boardRunSeq = 0;
+  const runnerTimeoutMs = (() => {
+    const value = Number(productEnv("RUNNER_TIMEOUT_MS", env));
+    return Number.isFinite(value) && value >= 1000 ? Math.min(value, 2147483647) : RUNNER_DEFAULT_TIMEOUT_MS;
+  })();
+  /** @type {Map<string, ReturnType<typeof setTimeout>>} */
+  const runnerBroadcastTimers = new Map();
+
+  function activeRunCount() {
+    let count = 0;
+    for (const run of boardRuns.values()) if (run.status === "running") count += 1;
+    return count;
+  }
+
+  /** @param {BoardRun | undefined} run */
+  function publicRun(run) {
+    if (!run) return null;
+    return {
+      id: run.id,
+      status: run.status,
+      agent: run.agent,
+      label: run.label,
+      cwd: run.cwd,
+      notes: run.notes,
+      started_at: run.started_at,
+      ended_at: run.ended_at,
+      output: run.output,
+      reply: run.reply,
+      error: run.error,
+      queued: run.queued,
+    };
+  }
+
+  // Output streams in fast; the board hears about it at most every 250ms, and at once on a
+  // status change.
+  function broadcastRun(key, { now = false } = {}) {
+    const send = () => {
+      runnerBroadcastTimers.delete(key);
+      // Snapshot the run before reading the queue, as runnerView does.
+      const run = publicRun(boardRuns.get(key));
+      store
+        .findByKey(key)
+        .catch(() => null)
+        .then((session) =>
+          broadcastLiveEvent("runner", key, {
+            run,
+            ...(session ? { pending_prompts: Number(session.pending_prompts) || 0 } : {}),
+          }),
+        );
+    };
+    if (now) {
+      clearTimeout(runnerBroadcastTimers.get(key));
+      send();
+      return;
+    }
+    if (runnerBroadcastTimers.has(key)) return;
+    const timer = setTimeout(send, 250);
+    timer.unref?.();
+    runnerBroadcastTimers.set(key, timer);
+  }
+
+  async function runnerExecutable(config) {
+    if (config.agent === "custom") return "";
+    const agent = RUNNER_AGENTS.find((entry) => entry.id === config.agent);
+    return agent ? findExecutable(agent.bin, { env }) : "";
+  }
+
+  /** @param {string} key */
+  function triggerBoardRunner(key) {
+    if (shuttingDown) return;
+    const current = boardRuns.get(key);
+    if (current?.status === "running") {
+      current.queued = true;
+      broadcastRun(key);
+      return;
+    }
+    if (boardRunStarting.has(key)) return;
+    boardRunStarting.add(key);
+    startBoardRun(key)
+      .catch((error) => writeLog(`[easel] runner failed key=${key}: ${error?.message || error}`))
+      .finally(() => boardRunStarting.delete(key));
+  }
+
+  /** @param {string} key */
+  async function startBoardRun(key) {
+    if (activePolls.has(key)) return;
+    const resolved = await boardForRequest(key);
+    if (!resolved || resolved.session.status === "ended") return;
+    const config = await runnerConfigs.get(resolved.session.file);
+    if (!config) return;
+    const label = runnerAgentLabel(config.agent);
+    const executable = await runnerExecutable(config);
+    if (config.agent !== "custom" && !executable) {
+      boardRuns.set(key, {
+        ...emptyRun(config, label),
+        status: "failed",
+        ended_at: new Date().toISOString(),
+        error: `${label} is no longer installed on this machine`,
+      });
+      broadcastRun(key, { now: true });
+      return;
+    }
+    // Another listener may have claimed the board while the config was read.
+    if (activePolls.has(key)) return;
+    const taken = await store.takeFeedback(key);
+    if (taken.status !== "feedback") return;
+    const prompts = Array.isArray(taken.prompts) ? taken.prompts : [];
+    if (prompts.length === 0) {
+      await restoreClosedFeedback(key, taken);
+      return;
+    }
+    /** @type {BoardRun} */
+    const run = { ...emptyRun(config, label), notes: prompts.length };
+    boardRuns.set(key, run);
+    finishFeedbackDelivery(key, taken);
+    refreshIdleTimer();
+    broadcastRun(key, { now: true });
+    writeLog(`[easel] runner start key=${key} agent=${config.agent} notes=${prompts.length} cwd=${config.cwd}`);
+    const prompt = buildRunnerPrompt({
+      boardDir: resolved.dir,
+      boardName: resolved.board.name || path.basename(resolved.dir),
+      items: resolved.board.items,
+      prompts,
+      cwd: config.cwd,
+    });
+    const outcome = await runAgent({
+      config,
+      executable,
+      prompt,
+      boardDir: resolved.dir,
+      env,
+      extraEnv: {
+        EASEL_BOARD: resolved.board.name || path.basename(resolved.dir),
+        EASEL_BOARD_DIR: resolved.dir,
+        EASEL_BOARD_JSON: resolved.session.file,
+        EASEL_BOARD_ID: key,
+        EASEL_NOTE_COUNT: String(prompts.length),
+      },
+      timeoutMs: runnerTimeoutMs,
+      onSpawn: (stop) => {
+        run.stop = stop;
+      },
+      onOutput: (chunk) => {
+        run.output = (run.output + chunk).slice(-RUNNER_OUTPUT_KEEP);
+        broadcastRun(key);
+      },
+    }).catch((error) => ({
+      ok: false,
+      output: run.output,
+      reply: "",
+      error: error instanceof Error ? error.message : String(error),
+      stopped: false,
+    }));
+    run.stop = null;
+    run.output = outcome.output || run.output;
+    run.ended_at = new Date().toISOString();
+    // The status flips only after its side effect landed, so whoever reads "finished" sees the
+    // reply and whoever reads "failed" sees the notes back on the queue.
+    if (outcome.ok) {
+      run.reply = outcome.reply || `${label} finished.`;
+      await publishAgentReply(key, run.reply);
+      run.status = "finished";
+    } else {
+      // Nothing was answered, so the notes go back on the queue as they were: a retry, the
+      // next note, or a poll picks them up again.
+      run.error = outcome.error || "Failed";
+      await restoreClosedFeedback(key, taken);
+      clearFeedbackDelivery(key, activePolls, deliveredFeedback, events);
+      void publishChatSync(key);
+      run.status = "failed";
+    }
+    writeLog(`[easel] runner ${run.status} key=${key} agent=${config.agent}${run.error ? `: ${run.error}` : ""}`);
+    const queued = run.queued;
+    run.queued = false;
+    broadcastRun(key, { now: true });
+    refreshIdleTimer();
+    // A failed run does not chain: the same notes would fail the same way until the user acts.
+    if (run.status === "finished" && !shuttingDown) {
+      const session = await store.findByKey(key);
+      // After this start has fully unwound, so the next one is not mistaken for it.
+      if (queued || Number(session?.pending_prompts) > 0) setImmediate(() => triggerBoardRunner(key));
+    }
+  }
+
+  function emptyRun(config, label) {
+    boardRunSeq += 1;
+    return {
+      id: boardRunSeq,
+      status: /** @type {const} */ ("running"),
+      agent: config.agent,
+      label,
+      cwd: config.cwd,
+      notes: 0,
+      started_at: new Date().toISOString(),
+      ended_at: "",
+      output: "",
+      reply: "",
+      error: "",
+      queued: false,
+      stop: null,
+    };
+  }
+
+  async function runnerView(key, session) {
+    const installed = await detectInstalledAgents({ env });
+    const config = await runnerConfigs.get(session.file);
+    // The run first, then the queue: a run reads "failed" only after its notes are back, so
+    // this order never shows a failed run with its notes missing.
+    const run = publicRun(boardRuns.get(key));
+    const current = (await store.findByKey(key)) || session;
+    return {
+      agents: [
+        ...installed.map((agent) => ({ id: agent.id, label: agent.label })),
+        { id: CUSTOM_AGENT.id, label: CUSTOM_AGENT.label },
+      ],
+      config,
+      default_cwd: path.dirname(session.file),
+      run,
+      pending_prompts: Number(current.pending_prompts) || 0,
+      listener: activePolls.has(key),
+    };
+  }
+
+  app.get("/api/boards/:key/runner", async (req, res, next) => {
+    try {
+      if (hasPresentOriginOrReferer(req) && !isSameOriginRequest(req, allowedHostnames, allowAnyHostname)) {
+        res.status(403).json({ status: "error", error: "cross-origin runner read rejected" });
+        return;
+      }
+      const resolved = await boardForRequest(req.params.key);
+      if (!resolved) {
+        res.status(404).json({ status: "error", error: "board not found" });
+        return;
+      }
+      res.json(await runnerView(req.params.key, resolved.session));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // Choosing the agent is the one place a board learns a command to run, so it takes the
+  // same same-origin guard as a prompt: only this server's own board page can set it.
+  app.post("/api/boards/:key/runner", async (req, res, next) => {
+    try {
+      if (!boardWriteGuard(req, res)) return;
+      const resolved = await boardForRequest(req.params.key);
+      if (!resolved) {
+        res.status(404).json({ status: "error", error: "board not found" });
+        return;
+      }
+      const agent = String(req.body?.agent || "").trim();
+      if (!agent || agent === "off") {
+        await runnerConfigs.set(resolved.session.file, null);
+        res.json(await runnerView(req.params.key, resolved.session));
+        return;
+      }
+      const installed = (await detectInstalledAgents({ env })).map((entry) => entry.id);
+      const checked = await validateRunnerConfig(
+        { ...req.body, cwd: String(req.body?.cwd || "").trim() || resolved.dir },
+        { installed },
+      );
+      if ("error" in checked) {
+        res.status(400).json({ status: "error", error: checked.error });
+        return;
+      }
+      await runnerConfigs.set(resolved.session.file, checked.config);
+      writeLog(`[easel] runner set key=${req.params.key} agent=${checked.config.agent} cwd=${checked.config.cwd}`);
+      res.json(await runnerView(req.params.key, resolved.session));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post("/api/boards/:key/runner/run", async (req, res, next) => {
+    try {
+      if (!boardWriteGuard(req, res)) return;
+      const resolved = await boardForRequest(req.params.key);
+      if (!resolved) {
+        res.status(404).json({ status: "error", error: "board not found" });
+        return;
+      }
+      triggerBoardRunner(req.params.key);
+      res.json({ status: "ok" });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post("/api/boards/:key/runner/stop", async (req, res, next) => {
+    try {
+      if (!boardWriteGuard(req, res)) return;
+      const run = boardRuns.get(req.params.key);
+      if (run?.status === "running") {
+        run.queued = false;
+        run.stop?.();
+      }
+      res.json({ status: "ok" });
+    } catch (error) {
+      next(error);
+    }
+  });
+
   app.post("/api/:key/prompts", async (req, res, next) => {
     try {
       if (!isSameOriginRequest(req, allowedHostnames, allowAnyHostname)) {
@@ -2129,6 +2461,13 @@ export async function serve({
         ...serializeChatSync(publishedSession),
       });
       if (freshFeedback || shouldEndSession) notifyBoardSubmission(req.params.key, publishedSession);
+      if (
+        freshFeedback &&
+        !shouldEndSession &&
+        path.basename(String(publishedSession.file || "")) === BOARD_FILE_NAME
+      ) {
+        triggerBoardRunner(req.params.key);
+      }
       if (shouldEndSession) await shutdownIfNoLiveSessions();
     } catch (error) {
       next(error);
@@ -3225,6 +3564,9 @@ export async function serve({
       bindRecoveryTimer = null;
     }
     boardNotifier.close();
+    for (const run of boardRuns.values()) run.stop?.();
+    for (const timer of runnerBroadcastTimers.values()) clearTimeout(timer);
+    runnerBroadcastTimers.clear();
     // Only the chrome whose artifact is being reopened is reloaded: the replacement server
     // adopts that session via state.json once it binds, and the caller named it. Every other
     // open review page is told why this server went away and left alone - a forced reload of a
@@ -3273,10 +3615,12 @@ export async function serve({
       idleTimer = null;
     }
     if (shuttingDown || idleTimeoutMs == null) return;
-    if (liveEventClients.size > 0 || activePolls.size > 0) return;
+    // A running board agent is a live connection too: its reply has nowhere to go if the
+    // server steps down under it.
+    if (liveEventClients.size > 0 || activePolls.size > 0 || activeRunCount() > 0) return;
     idleTimer = setTimeout(() => {
       idleTimer = null;
-      if (!shuttingDown && liveEventClients.size === 0 && activePolls.size === 0) {
+      if (!shuttingDown && liveEventClients.size === 0 && activePolls.size === 0 && activeRunCount() === 0) {
         shutdown("", "", `idle-timeout after ${idleTimeoutMs}ms with no connections`);
       }
     }, idleTimeoutMs);
@@ -3289,7 +3633,7 @@ export async function serve({
   // idle timer reap it once those connections drop. Best-effort: never let a read failure
   // block the end response.
   async function shutdownIfNoLiveSessions() {
-    if (liveEventClients.size > 0 || activePolls.size > 0) return;
+    if (liveEventClients.size > 0 || activePolls.size > 0 || activeRunCount() > 0) return;
     try {
       const sessions = await store.listSessions();
       if (sessions.every((session) => session.status === "ended")) {

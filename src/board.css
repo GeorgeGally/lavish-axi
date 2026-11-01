@@ -2226,3 +2226,229 @@ body[data-dragging="true"] .shield {
 .entry-text p {
   margin: 0 0 0.5em;
 }
+
+/* Agent: who answers this board's notes, and its latest run. */
+.agent-pane {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 8px 20px 28px;
+  scrollbar-width: thin;
+}
+
+.agent-lede {
+  margin: 4px 0 20px;
+  color: var(--ink-3);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.agent-form {
+  display: grid;
+  gap: 18px;
+}
+
+.agent-field {
+  display: grid;
+  gap: 6px;
+}
+
+.agent-field[hidden] {
+  display: none;
+}
+
+.agent-label {
+  color: var(--ink-2);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.agent-input {
+  display: block;
+  width: 100%;
+  height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  background: var(--surface-strong);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  outline: none;
+  transition: border-color 100ms ease;
+}
+
+input.agent-input {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+}
+
+.agent-input:focus {
+  border-color: var(--ink-3);
+}
+
+.agent-input:focus-visible {
+  outline: 2px solid var(--select);
+  outline-offset: 2px;
+}
+
+.agent-hint {
+  color: var(--ink-3);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.agent-hint code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+}
+
+/* Generous air above the actions, as on Controls. */
+.agent-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 10px;
+  padding-top: 20px;
+  border-top: 1px solid var(--line);
+}
+
+.agent-run {
+  display: grid;
+  gap: 12px;
+  margin-top: 32px;
+}
+
+.agent-run[hidden] {
+  display: none;
+}
+
+.agent-run-head {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-width: 0;
+}
+
+.run-state {
+  flex: 1;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.run-state::before {
+  content: "";
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--ink-4);
+}
+
+.run-state[data-state="running"]::before {
+  background: #16a34a;
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+.run-state[data-state="finished"]::before {
+  background: #16a34a;
+}
+
+.run-state[data-state="failed"]::before {
+  background: var(--danger);
+}
+
+.agent-run-error {
+  margin: 0;
+  color: var(--danger);
+  font-size: 13px;
+}
+
+.agent-run-error[hidden] {
+  display: none;
+}
+
+.agent-output {
+  margin: 0;
+  max-height: 52vh;
+  overflow: auto;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-strong);
+  color: var(--ink-2);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  scrollbar-width: thin;
+}
+
+.agent-output[hidden] {
+  display: none;
+}
+
+.side-tab .run-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #16a34a;
+}
+
+.side-tab .run-dot[hidden] {
+  display: none;
+}
+
+.side-tab .run-dot[data-state="running"] {
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+.side-tab .run-dot[data-state="failed"] {
+  background: var(--danger);
+}
+
+/* In Chat, one line says the agent is on it (or failed) and opens its output. */
+.runner-line {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  width: 100%;
+  padding: 10px 20px;
+  border-top: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink-2);
+  font-size: 13px;
+  text-align: left;
+}
+
+.runner-line[hidden] {
+  display: none;
+}
+
+.runner-line[data-state="failed"] {
+  color: var(--danger);
+}
+
+.runner-line:hover {
+  color: var(--ink);
+}
+
+.runner-line-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.runner-line-link {
+  flex: none;
+  color: var(--ink-3);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}

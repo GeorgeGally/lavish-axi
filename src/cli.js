@@ -106,6 +106,7 @@ const COMMANDS = new Set([
   "libraries",
   "board",
   "init",
+  "mcp",
 ]);
 // SDK-reserved built-ins (e.g. `update`) must reach runAxiCli untouched; otherwise
 // the bare-arg normalization below would rewrite them into the hidden `open` command.
@@ -263,6 +264,7 @@ export async function run(argv) {
         board: boardCommand,
         init: initCommand,
         update: updateCommand,
+        mcp: mcpCommand,
       },
       getCommandHelp: (command) => getCommandHelp(command, { agent }),
     });
@@ -2091,6 +2093,81 @@ async function serverCommand(args) {
   return "";
 }
 
+// `easel mcp`: the board loop as MCP tools over stdio (src/mcp.js). stdout belongs to the
+// protocol from here on, so this never returns an AXI result: it exits when stdin closes.
+async function mcpCommand() {
+  const { createEaselMcpTools, createMcpHandler, EASEL_MCP_INSTRUCTIONS, runMcpStdio } = await import("./mcp.js");
+  const boardFile = async (/** @type {string} */ input) => {
+    if (!String(input || "").trim()) {
+      throw new AxiError("A board folder is required", "VALIDATION_ERROR", [
+        "Pass `board`: the board folder's absolute path",
+      ]);
+    }
+    return canonicalFile(await resolveBoardTarget(path.resolve(input)));
+  };
+  const tools = createEaselMcpTools({
+    openBoard: async ({ board, name }) => {
+      const dir = boardDirPath(path.resolve(board));
+      const output = await boardOpenCommand(["--no-open", ...(name ? ["--name", String(name)] : [])], dir);
+      return {
+        board: output.board,
+        next_step: `Give the user the board URL. Then call easel_poll with board "${dir}" to wait for their notes.`,
+      };
+    },
+    boardStatus: async ({ board }) => {
+      const dir = boardDirPath(path.resolve(board));
+      return { board: boardSummary(await readBoard(dir), dir) };
+    },
+    poll: async ({ board, timeout_seconds, reply }) => {
+      const file = await boardFile(board);
+      const baseUrl = await ensureServer();
+      const seconds = Number(timeout_seconds);
+      const timeoutMs = Math.round(Math.min(600, Math.max(1, Number.isFinite(seconds) ? seconds : 50)) * 1000);
+      const query = new URLSearchParams({ file, timeoutMs: String(timeoutMs), owner: "mcp" });
+      const response = await fetchJson(`${baseUrl}/api/poll?${query}`, {
+        retries: 0,
+        ...(reply
+          ? {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ agent_reply: reply }),
+            }
+          : {}),
+      });
+      const output = createPollOutput({ file, response });
+      return {
+        ...output,
+        next_step:
+          output.session.status === "feedback"
+            ? "Apply each prompt to the HTML file of the item it names (easel_board_status maps item ids to files), then call easel_reply with a short answer, or easel_poll with `reply` to answer and keep waiting."
+            : output.session.status === "waiting"
+              ? "No notes yet. Call easel_poll again to keep waiting."
+              : output.next_step,
+      };
+    },
+    reply: async ({ board, message, thread, pending }) => {
+      const file = await boardFile(board);
+      const text = await resolveAgentReply([
+        "--agent-reply",
+        message,
+        ...(thread ? ["--thread", thread] : []),
+        ...(pending ? ["--pending", pending] : []),
+      ]);
+      if (!String(text || "").trim()) {
+        throw new AxiError("The reply was empty", "VALIDATION_ERROR", ["Pass a non-empty `message`"]);
+      }
+      const baseUrl = await ensureServer();
+      await postAgentReply(`${baseUrl}/api/${sessionKey(file)}/agent-reply`, text, file);
+      return { reply: { board: file, status: "sent" } };
+    },
+  });
+  await runMcpStdio({
+    handle: createMcpHandler({ tools, name: CLI_NAME, version: VERSION, instructions: EASEL_MCP_INSTRUCTIONS }),
+  });
+  process.exit(0);
+  return "";
+}
+
 async function visibleSessions() {
   const store = new SessionStore(stateFile());
   const sessions = (await store.listSessions()).filter((session) => session.status !== "ended");
@@ -3030,7 +3107,7 @@ export function getCommandHelp(command, { agent = "generic" } = {}) {
 }
 
 function createTopLevelHelp({ agent = "generic" } = {}) {
-  return `easel - Easel AXI\n\nUsage:\n  easel\n  easel <html-file> [--no-open] [--no-gate] [--reopen]\n  easel poll <html-file> [--owner <label>] [--takeover] [--agent-reply "..."] [--agent-reply-file <path>]\n  easel reply <html-file> (--agent-reply "..." | --agent-reply-file <path>) [--pending <item-id>] [--thread <thread>]\n  easel end <html-file>\n  easel export <html-file> [--out <path>]\n  easel share <html-file> [--private | --password <pw>] [--token <t>]\n  easel share <html-file> --site <site_id> --update-key <key> [--private | --password <pw>]\n  easel share --unpublish --site <site_id> --update-key <key>\n  easel stop\n  easel playbook [playbook_id]\n  easel design\n  easel libraries [--search <text>] [--library <id>]\n  easel setup hooks\n  easel setup plugin\n\n${DESIGN_SYSTEM_HINT}\n\nNote: poll long-polls until the user sends feedback, ends the session, or leaves every review window disconnected past the reconnect grace period, staying silent while it waits - never kill it. Layout issues the browser detects are passive: they collect in the user's Layout issues inbox in the Easel top bar and reach the agent only when the user selects them and queues the fixes, as an ordinary tag "layout-warnings" prompt. Do not pass --timeout-ms during normal agent use; it is for tests and debugging only. ${pollExecutionGuidance({ agent })} ${POLL_SEND_AND_END_RULE} Use \`easel reply\` when handing a result back without waiting for more feedback: it exits 0 only after the server accepts the reply, so the board stops showing Working. \`poll --agent-reply\` posts a reply and then keeps waiting.\n\n`;
+  return `easel - Easel AXI\n\nUsage:\n  easel\n  easel <html-file> [--no-open] [--no-gate] [--reopen]\n  easel poll <html-file> [--owner <label>] [--takeover] [--agent-reply "..."] [--agent-reply-file <path>]\n  easel reply <html-file> (--agent-reply "..." | --agent-reply-file <path>) [--pending <item-id>] [--thread <thread>]\n  easel end <html-file>\n  easel export <html-file> [--out <path>]\n  easel share <html-file> [--private | --password <pw>] [--token <t>]\n  easel share <html-file> --site <site_id> --update-key <key> [--private | --password <pw>]\n  easel share --unpublish --site <site_id> --update-key <key>\n  easel stop\n  easel playbook [playbook_id]\n  easel design\n  easel libraries [--search <text>] [--library <id>]\n  easel setup hooks\n  easel setup plugin\n  easel mcp\n\n${DESIGN_SYSTEM_HINT}\n\nNote: poll long-polls until the user sends feedback, ends the session, or leaves every review window disconnected past the reconnect grace period, staying silent while it waits - never kill it. Layout issues the browser detects are passive: they collect in the user's Layout issues inbox in the Easel top bar and reach the agent only when the user selects them and queues the fixes, as an ordinary tag "layout-warnings" prompt. Do not pass --timeout-ms during normal agent use; it is for tests and debugging only. ${pollExecutionGuidance({ agent })} ${POLL_SEND_AND_END_RULE} Use \`easel reply\` when handing a result back without waiting for more feedback: it exits 0 only after the server accepts the reply, so the board stops showing Working. \`poll --agent-reply\` posts a reply and then keeps waiting.\n\n`;
 }
 
 function createCommandHelp({ agent = "generic" } = {}) {
@@ -3046,6 +3123,7 @@ function createCommandHelp({ agent = "generic" } = {}) {
     libraries: `Usage: easel libraries [--search <text>] [--library <id>]\n\nList the Excalidraw libraries (.excalidrawlib files) the user copied into ~/.easel/excalidraw-libraries, or EASEL_STATE_DIR/excalidraw-libraries when set. Their items appear in every whiteboard's library panel. --search lists item refs whose ref contains every search word; --library lists one library's item refs. Easel only reads this directory and never downloads libraries.\n\nExamples:\n  easel libraries\n  easel libraries --search lambda\n  easel libraries --library aws-architecture-icons\n`,
     design: `Usage: easel design\n\nShow a copy-pasteable CDN snippet for Tailwind CSS browser runtime v4 + DaisyUI v5 + themes, the whiteboard (Mermaid) opt-in snippet, a content-to-playbook router, an optional layout safety CSS snippet, plus technical reference for DaisyUI components. ${PLAYBOOK_ROUTER_HELP} Easel artifacts stay portable HTML. This CDN snippet is the design fallback, not the default: inspect the subject project before falling back, and paste the layout safety CSS only when useful for dense nested grid/flex layouts, badges, wide fonts, or local media. ${DESIGN_PRIORITY_RULE}\n`,
     init: `Usage: ${CLI_NAME} init [dir] [--board <folder>] [--name "<board name>"]\n\nSet a project up for design review with any coding agent. Creates a board folder (default \`${DEFAULT_BOARD_DIR}\`) holding board.json and a starter design, writes EASEL.md with the review loop, and appends a short Easel section pointing at EASEL.md to AGENTS.md and CLAUDE.md (creating them when missing) and to GEMINI.md when the project has one. Existing files are never overwritten: a file that already carries the section, or a CLAUDE.md that imports AGENTS.md, is left alone, so running init again is safe. No server is started.\n\nExamples:\n  ${CLI_NAME} init\n  ${CLI_NAME} init ~/code/shop --board designs --name "Checkout"\n`,
+    mcp: `Usage: ${CLI_NAME} mcp\n\nServe the board loop as Model Context Protocol tools over stdio, for chat apps and agents that speak MCP instead of running shell commands. Register it as a stdio server whose command is \`${CLI_NAME} mcp\`. Tools: easel_board_open (open or create a board, returns its URL), easel_board_status (items and their files), easel_poll (wait up to timeout_seconds, default 50, for the user's notes; returns waiting when none arrive, so call it again), and easel_reply (answer, settling the delivered notes; thread and pending as on \`${CLI_NAME} reply\`). It talks to the same local server as the CLI, so \`${CLI_NAME} poll\` and a board's built-in agent runner behave the same alongside it.\n`,
     board: `Usage:\n  ${CLI_NAME} board open <dir> [--name "<board name>"] [--reopen] [--no-open]\n  ${CLI_NAME} board add <dir> <file.html> [--label "<label>"] [--tab <tab>]\n  ${CLI_NAME} board place <dir> <item> [--x <n>] [--y <n>] [--w <n>] [--h <n>] [--tab <tab>] [--label "<label>"] [--status <status>]\n  ${CLI_NAME} board pair <dir> <item> <item> [--unlock]\n  ${CLI_NAME} board status <dir>\n\nA board is a directory holding board.json and one HTML file per item. Every item of the active tab renders as its own sandboxed frame on one pannable, zoomable plane, so versions of the same design can be compared side by side; a locked pair moves together. The reviewer presses Cmd to turn notes on and clicks an element to drop a numbered pin, and the selection lands as a chip in the single composer at the bottom - several notes, then one send. Each note reaches the agent as an ordinary prompt carrying the item {id,label} and the pin {number, selector}, and the pin turns green when the handler replies. Items can declare tune controls in a \`<script type="application/easel-tune">\` JSON array of {id,label,type:'number'|'color'|'select'|'spring'|'easing'|'pad'|'timeline',css:'--var',min,max,step,unit,value,options,duration}: the tune panel writes those CSS custom properties live and saves versions with thumbnails, and Copy hands the values back to the agent. board.json holds only positions, labels, status, notes and tune values - never markup. Poll the board with \`${CLI_NAME} poll <dir>\`, which resolves the directory to its board.json.\n\nExamples:\n  ${CLI_NAME} board open hero-directions --name "Hero directions"\n  ${CLI_NAME} board add hero-directions v5.html --label "Hero · E"\n  ${CLI_NAME} board place hero-directions v5 --x 640 --y 0\n  ${CLI_NAME} board pair hero-directions v1 v3\n  ${CLI_NAME} poll hero-directions\n`,
     setup: `Usage: easel setup hooks\n       easel setup plugin\n\nhooks: install or repair agent SessionStart hooks for easel ambient context in Claude Code, Codex, OpenCode, and GitHub Copilot CLI. Restart your agent session afterward to receive the context. This is the primary integration - it carries live session state.\n\nplugin: register the installed easel package as an Agent Plugin (agent-plugins.org) in VS Code, Cursor, and GitHub Copilot CLI. The installed package directory is itself the plugin root, so nothing is downloaded and no marketplace is involved. Reload each client afterward. Codex users should use \`setup hooks\` instead.\n\nBoth actions are explicit opt-in, idempotent, and repair a stale path after a reinstall.\n`,
     server: `Usage: easel server [--port ${DEFAULT_PORT}] [--verbose] [--also-listen <host>...]\n\nRun the local Easel server. Pass --verbose (or set EASEL_DEBUG=1) to log session and watcher events to stderr. Detached server output is appended to ~/.easel/server.log, or EASEL_STATE_DIR/server.log when set, for startup and crash diagnostics.\n\nBy default Easel binds to 127.0.0.1 and, when Tailscale is running, this machine's Tailscale IPv4. Any explicit EASEL_HOST overrides automatic Tailscale binding; wildcard values such as 0.0.0.0 or :: are restricted to loopback. An explicit non-wildcard EASEL_HOST sets the bind address, and the server also listens on 127.0.0.1 so every local CLI finds it; --also-listen adds further concrete addresses (the CLI passes it when it replaces a server, to keep every address the old one served). An address that cannot be bound is retried in the background and reported as network_warning. Binding beyond loopback exposes an unauthenticated server that can read and serve arbitrary local files to anything that can reach it, so only do so on a trusted network. With automatic binding enabled, a successfully bound Tailscale listener uses its MagicDNS name in generated session links; otherwise EASEL_LINK_HOST can set the link hostname. See README's Allowed hosts section for Host allowlisting and EASEL_ALLOWED_HOSTS. EASEL_NO_OPEN=1 (or --no-open) suppresses the local browser launch.\n`,
