@@ -910,15 +910,20 @@
   }
   // The board's own keys - 0, 1, +, - and Escape, and Cmd +/-/0 - reach it from here
   // too, so the camera answers whichever document has focus.
-  // Cmd-Z and Cmd-Shift-Z step the tune panel's changes.
-  const BOARD_KEYS = new Set(["0", "1", "+", "=", "-", "Escape", "z", "Z"]);
+  // Cmd-Z and Cmd-Shift-Z step the tune changes, and Tab switches the sidebar's tabs.
+  const BOARD_KEYS = new Set(["0", "1", "+", "=", "-", "Escape", "z", "Z", "Tab"]);
   const MODIFIER_KEYS = new Set(["Meta", "Alt", "Control", "Shift"]);
   function forwardKey(event) {
     if (MODIFIER_KEYS.has(event.key) || event.code === "Space") return;
     const ours = BOARD_KEYS.has(event.key) && !event.altKey && !editable(event.target);
     if (!ours) return;
-    // Cmd +/-/0 would zoom the browser window instead of the board.
-    if ((event.metaKey || event.ctrlKey) && !/^z$/i.test(event.key)) event.preventDefault();
+    // Tab would move focus inside the design; Cmd +/-/0 would zoom the browser window.
+    if (event.key === "Tab") {
+      if (event.metaKey || event.ctrlKey) return;
+      event.preventDefault();
+    } else if (event.metaKey || event.ctrlKey) {
+      if (!/^z$/i.test(event.key)) event.preventDefault();
+    }
     post({ type: "key", key: event.key, metaKey: event.metaKey, ctrlKey: event.ctrlKey, shiftKey: event.shiftKey });
   }
   document.addEventListener(

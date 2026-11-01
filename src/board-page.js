@@ -90,38 +90,46 @@ export function createBoardHtml(
   <div class="canvas" id="canvas"></div>
   <div class="empty" id="empty" hidden>Nothing on this board yet.</div>
 </main>
-<aside class="tune" id="tune" hidden aria-label="Tune">
-  <div class="tune-head">
-    <span class="tune-title" id="tuneTitle">Tune</span>
-    <span class="tune-sub" id="tuneSub"></span>
-    <button class="icon-button" id="tuneClose" type="button" aria-label="Close">&times;</button>
-  </div>
-  <div class="tune-body" id="tuneBody"></div>
-  <div class="tune-actions">
-    <button class="button tune-primary" id="tuneSend" type="button">Send</button>
-    <button class="tune-link" id="tuneSave" type="button">Save version</button>
-    <button class="tune-link" id="tuneCopy" type="button">Copy</button>
-    <button class="tune-link" id="tuneReset" type="button">Reset</button>
-  </div>
-  <div class="versions" id="tuneVersions"></div>
-</aside>
-<aside class="chat" id="chat" aria-label="Notes">
+<aside class="chat" id="chat" data-view="chat" aria-label="Sidebar">
   <header class="chat-head">
+    <div class="side-tabs" role="tablist" aria-label="Sidebar">
+      <button class="side-tab" id="sideTabChat" type="button" role="tab" aria-selected="true" aria-controls="chatPane" title="Chat (Tab)">Chat</button>
+      <button class="side-tab" id="sideTabControls" type="button" role="tab" aria-selected="false" aria-controls="tune" tabindex="-1" title="Controls (Tab)">Controls</button>
+    </div>
     <span class="presence" id="presence" data-state="waiting" role="status" aria-live="polite"></span>
-    <button class="icon-button chat-collapse" id="chatToggle" type="button" aria-expanded="true" aria-label="Hide notes" title="Hide notes">
+    <button class="icon-button chat-collapse" id="chatToggle" type="button" aria-expanded="true" aria-label="Hide sidebar" title="Hide sidebar">
       <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="M5 3l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
     </button>
   </header>
-  <div class="chat-log" id="chatLog"></div>
-  <div class="chat-foot">
-    <div class="chat-drafts" id="chatDrafts"></div>
-    <div class="composer-images" id="composerImages" hidden></div>
-    <textarea id="composerInput" rows="2" placeholder="Write a note, or paste an image"></textarea>
-    <div class="chat-actions">
-      <span class="chat-status" id="dockStatus" role="status"></span>
-      <button class="button button-primary" id="send" type="button">Send</button>
+  <section class="side-pane chat-pane" id="chatPane" role="tabpanel" aria-labelledby="sideTabChat">
+    <div class="chat-log" id="chatLog"></div>
+    <div class="chat-foot">
+      <div class="chat-drafts" id="chatDrafts"></div>
+      <div class="composer-images" id="composerImages" hidden></div>
+      <textarea id="composerInput" rows="2" placeholder="Write a note, or paste an image"></textarea>
+      <div class="chat-actions">
+        <span class="chat-status" id="dockStatus" role="status"></span>
+        <button class="button button-primary" id="send" type="button">Send</button>
+      </div>
     </div>
-  </div>
+  </section>
+  <section class="side-pane tune" id="tune" role="tabpanel" aria-labelledby="sideTabControls" hidden>
+    <p class="tune-empty tune-idle" id="tuneIdle">Option-click an element to tune it, or press Tune on a design.</p>
+    <div class="tune-loaded" id="tuneLoaded" hidden>
+      <div class="tune-head">
+        <span class="tune-title" id="tuneTitle">Tune</span>
+        <span class="tune-sub" id="tuneSub"></span>
+      </div>
+      <div class="tune-body" id="tuneBody"></div>
+      <div class="tune-actions">
+        <button class="button button-primary" id="tuneSend" type="button">Send</button>
+        <button class="tune-link" id="tuneSave" type="button">Save version</button>
+        <button class="tune-link" id="tuneCopy" type="button">Copy</button>
+        <button class="tune-link" id="tuneReset" type="button">Reset</button>
+      </div>
+      <div class="versions" id="tuneVersions"></div>
+    </div>
+  </section>
 </aside>
 <button class="chat-open" id="chatOpen" type="button" hidden>Notes</button>
 <div class="ended" id="ended" hidden>Session ended. Run <code>easel board open</code> when you want it reopened.</div>

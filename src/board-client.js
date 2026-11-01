@@ -2770,6 +2770,7 @@ function sendPromptsNow(noteIds, message, images, context = {}) {
   }
   if (prompts.length === 0) return Promise.resolve(false);
   for (const entry of sent) postPins(entry.item.id, noteDevice(entry.note));
+  showSideView("chat");
   renderChatPanel();
   return fetch(`/api/${encodeURIComponent(key)}/prompts`, {
     method: "POST",
@@ -3071,11 +3072,18 @@ function renderUnread() {
   const open = document.getElementById("chatOpen");
   if (!open) return;
   const collapsed = document.getElementById("chat")?.classList.contains("collapsed");
-  if (!collapsed) writeStorage(readStorageKey, String(agentEntries().length));
-  const count = collapsed ? unreadCount() : 0;
+  const hidden = collapsed || sideView !== "chat";
+  if (!hidden) writeStorage(readStorageKey, String(agentEntries().length));
+  const count = hidden ? unreadCount() : 0;
   open.replaceChildren(document.createTextNode("Notes"));
-  if (count > 0) open.append(element("span", { class: "unread", text: String(count) }));
-  open.setAttribute("aria-label", count > 0 ? `Notes, ${count} new` : "Notes");
+  if (collapsed && count > 0) open.append(element("span", { class: "unread", text: String(count) }));
+  open.setAttribute("aria-label", collapsed && count > 0 ? `Notes, ${count} new` : "Notes");
+  const tab = document.getElementById("sideTabChat");
+  if (tab) {
+    tab.replaceChildren(document.createTextNode("Chat"));
+    if (count > 0 && !collapsed) tab.append(element("span", { class: "unread", text: String(count) }));
+    tab.setAttribute("aria-label", count > 0 && !collapsed ? `Chat, ${count} new` : "Chat");
+  }
 }
 
 function renderChatPanel() {
@@ -3391,6 +3399,7 @@ function sendFollowup(threadId, followup, text) {
       ...(note.heading ? { heading: note.heading } : {}),
     };
   }
+  showSideView("chat");
   renderChatPanel();
   return fetch(`/api/${encodeURIComponent(key)}/prompts`, {
     method: "POST",
@@ -3589,6 +3598,39 @@ function markEnded() {
   sendButton.disabled = true;
 }
 
+/** @type {"chat" | "controls"} */
+let sideView = "chat";
+
+/**
+ * The sidebar shows one of its two tabs, Chat or Controls. Showing one opens a
+ * closed sidebar, so an Option click or a send is never answered out of sight.
+ * @param {"chat" | "controls"} view
+ */
+function showSideView(view) {
+  const chat = document.getElementById("chat");
+  sideView = view === "controls" ? "controls" : "chat";
+  if (chat) chat.dataset.view = sideView;
+  const panes = { chat: document.getElementById("chatPane"), controls: document.getElementById("tune") };
+  const tabs = { chat: document.getElementById("sideTabChat"), controls: document.getElementById("sideTabControls") };
+  for (const name of /** @type {const} */ (["chat", "controls"])) {
+    const on = name === sideView;
+    if (panes[name]) panes[name].hidden = !on;
+    if (tabs[name]) {
+      tabs[name].setAttribute("aria-selected", String(on));
+      tabs[name].tabIndex = on ? 0 : -1;
+    }
+  }
+  if (chat?.classList.contains("collapsed")) {
+    setChatCollapsed(false);
+    if (!userAdjustedCamera) fit(false);
+  }
+  renderUnread();
+}
+
+function toggleSideView() {
+  showSideView(sideView === "chat" ? "controls" : "chat");
+}
+
 function setChatCollapsed(collapsed) {
   const chat = document.getElementById("chat");
   const open = document.getElementById("chatOpen");
@@ -3707,8 +3749,8 @@ function openTune(itemId, deviceId) {
     if (item.tune[control.id] === undefined || item.tune[control.id] === "")
       item.tune[control.id] = control.value ?? "";
   }
-  const panel = document.getElementById("tune");
-  if (panel) panel.hidden = false;
+  showTuneLoaded(true);
+  showSideView("controls");
   markTuneSent(false);
   renderTune();
   if (tuneSpecFor(itemId).length === 0) postToArtboard(itemId, deviceId, { type: "tune-spec" });
@@ -3724,10 +3766,17 @@ function closeTune() {
     postToArtboard(tuneTarget.itemId, tuneTarget.deviceId, { type: "style-reset" });
     postElementTune(tuneTarget.itemId, tuneTarget.deviceId);
   }
-  const panel = document.getElementById("tune");
-  if (panel) panel.hidden = true;
+  showTuneLoaded(false);
   tuneItemId = "";
   tuneTarget = null;
+}
+
+/** Controls shows what is being tuned, or how to start when nothing is. */
+function showTuneLoaded(loaded) {
+  const idle = document.getElementById("tuneIdle");
+  const panel = document.getElementById("tuneLoaded");
+  if (idle) idle.hidden = loaded;
+  if (panel) panel.hidden = !loaded;
 }
 
 /**
@@ -3738,8 +3787,8 @@ function openTargetTune(record, point) {
   tuneTarget = { itemId: record.itemId, deviceId: record.device.id, pending: true };
   tuneItemId = record.itemId;
   tuneDeviceId = record.device.id;
-  const panel = document.getElementById("tune");
-  if (panel) panel.hidden = false;
+  showTuneLoaded(true);
+  showSideView("controls");
   markTuneSent(false);
   renderTune();
   postToArtboard(record.itemId, record.device.id, {
@@ -4002,13 +4051,12 @@ function renderTargetTune() {
   syncTuneSend();
 }
 
-/** The panel names what it tunes, in one all-caps line: `H1 · THE EVERYDAY COLLECTION`. */
+/** Controls names what it tunes in one plain line: `H1 · The everyday collection`. */
 function tuneTitleText(label) {
   return String(label || "")
     .replace(/[“”"]/g, "")
     .replace(/\s+/g, " ")
-    .trim()
-    .toUpperCase();
+    .trim();
 }
 
 function renderTune() {
@@ -4082,7 +4130,7 @@ function createTuneControl(item, control, onChange) {
     }
     if (!spring || typeof spring !== "object" || Array.isArray(spring)) spring = {};
     spring = { type: "spring", stiffness: 180, damping: 20, mass: 1, ...spring };
-    const host = element("div", { class: "dialkit-root", "data-theme": "dark" });
+    const host = element("div", { class: "dialkit-root", "data-theme": "light" });
     wrapper.append(host);
     const panelId = `easel-${item.id}-${control.id}`;
     const kit = dial.createDialKit(control.label, { motion: spring }, { id: panelId });
@@ -4140,7 +4188,7 @@ function createTuneControl(item, control, onChange) {
     const match = String(item.tune[control.id]).match(/cubic-bezier\(([^)]+)\)/);
     let ease = match ? match[1].split(",").map(Number) : presets.Ease;
     if (ease.length !== 4 || ease.some((n) => !Number.isFinite(n))) ease = presets.Ease;
-    const host = element("div", { class: "dialkit-root", "data-theme": "dark" });
+    const host = element("div", { class: "dialkit-root", "data-theme": "light" });
     const select = element("select", { "aria-label": `${control.label} preset` });
     select.append(element("option", { value: "", text: "Custom curve" }));
     for (const name of Object.keys(presets)) select.append(element("option", { value: name, text: name }));
@@ -4174,7 +4222,7 @@ function createTuneControl(item, control, onChange) {
     }
     if (!value || typeof value !== "object" || Array.isArray(value)) value = {};
     value = { x: Number(value.x) || 0, y: Number(value.y) || 0 };
-    const host = element("div", { class: "dialkit-root", "data-theme": "dark" });
+    const host = element("div", { class: "dialkit-root", "data-theme": "light" });
     wrapper.append(host);
     let mounted;
     const props = () => ({
@@ -4400,8 +4448,7 @@ function copyTune() {
   const done = () => {
     if (sub) sub.textContent = "Copied";
     setTimeout(() => {
-      if (sub && sub.textContent === "Copied")
-        sub.textContent = tuneTarget ? tuneTarget.sectionLabel || "" : designName(item, tuneDeviceId);
+      if (sub && sub.textContent === "Copied") sub.textContent = "";
     }, 1600);
   };
   if (navigator.clipboard?.writeText) navigator.clipboard.writeText(text).then(done, done);
@@ -4695,6 +4742,11 @@ function boardKey(event, preventDefault) {
     return;
   }
   if (event.metaKey || event.ctrlKey) return;
+  if (event.key === "Tab") {
+    preventDefault();
+    toggleSideView();
+    return;
+  }
   if (event.key === "0") {
     userAdjustedCamera = true;
     fit();
@@ -4738,6 +4790,11 @@ window.addEventListener("keydown", (event) => {
     }
     return;
   }
+  // Tab switches the sidebar between Chat and Controls; in a text field it keeps its meaning.
+  if (event.key === "Tab" && !event.metaKey && !event.ctrlKey && !event.altKey && !isTypingTarget(event.target)) {
+    boardKey(event, () => event.preventDefault());
+    return;
+  }
   if (event.altKey || (isTextTarget(event.target) && !event.metaKey && !event.ctrlKey)) return;
   // Undo while typing belongs to the field being typed in.
   if (/^z$/i.test(event.key) && isTypingTarget(event.target)) return;
@@ -4777,7 +4834,8 @@ window.addEventListener("resize", () => {
   }, 150);
 });
 
-document.getElementById("tuneClose")?.addEventListener("click", closeTune);
+document.getElementById("sideTabChat")?.addEventListener("click", () => showSideView("chat"));
+document.getElementById("sideTabControls")?.addEventListener("click", () => showSideView("controls"));
 document.getElementById("tuneSave")?.addEventListener("click", saveTuneVersion);
 document.getElementById("tuneCopy")?.addEventListener("click", copyTune);
 document.getElementById("tuneSend")?.addEventListener("click", sendTune);
