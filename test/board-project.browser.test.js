@@ -66,15 +66,33 @@ test(
         }
         throw new Error(`timed out: ${label}`);
       };
-      const devState = `document.getElementById("devState").dataset.state`;
+      const devState = `document.getElementById("devStatus").dataset.state`;
       await send("Page.navigate", { url: opened.url });
-      await until(`document.readyState === "complete" && !!document.getElementById("devState")`, "board loaded");
-      // Nobody pressed Start: opening the board is enough.
+      await until(`document.readyState === "complete" && !!document.getElementById("devStatus")`, "board loaded");
+      // Nobody pressed Start: opening the board is enough, and the top bar says nothing of it.
       await until(`${devState} === "running"`, "dev server running on open");
-      assert.match(await evaluate(`document.getElementById("devState").textContent`), /^Dev server on · :\d+$/);
+      assert.equal(await evaluate(`!!document.getElementById("devState")`), false);
 
-      // The state in the top bar opens Settings, where Stop lives.
-      await evaluate(`document.getElementById("devState").click()`);
+      // Add page is one small control that opens a path field; Escape puts it back.
+      await evaluate(`document.getElementById("addPageToggle").click()`);
+      assert.equal(await evaluate(`document.getElementById("addPageForm").hidden`), false);
+      assert.equal(await evaluate(`document.activeElement.id`), "addPageInput");
+      await evaluate(
+        `document.getElementById("addPageInput").dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))`,
+      );
+      assert.equal(await evaluate(`document.getElementById("addPageForm").hidden`), true);
+      assert.equal(await evaluate(`document.getElementById("addPageToggle").hidden`), false);
+      await evaluate(`document.getElementById("addPageToggle").click()`);
+      await evaluate(`(() => {
+        document.getElementById("addPageInput").value = "/store";
+        document.getElementById("addPageForm").requestSubmit();
+      })()`);
+      await until(`document.getElementById("addPageForm").hidden`, "field closes after adding");
+      const board = await fetch(`${base}/api/boards/${opened.key}`).then((response) => response.json());
+      assert.ok(JSON.stringify(board).includes('"page":"/store"'), "the page joined the board");
+
+      // Stop lives in Settings.
+      await evaluate(`document.getElementById("settingsToggle").click()`);
       await until(`!document.getElementById("settings").hidden`, "settings open");
       assert.equal(await evaluate(`document.getElementById("devStop").hidden`), false);
       assert.equal(await evaluate(`document.getElementById("devRestart").hidden`), false);
@@ -85,7 +103,7 @@ test(
 
       // A reload is the board opening again: a Stop the user pressed holds.
       await send("Page.navigate", { url: opened.url });
-      await until(`document.readyState === "complete" && !!document.getElementById("devState")`, "board reloaded");
+      await until(`document.readyState === "complete" && !!document.getElementById("devStatus")`, "board reloaded");
       await sleep(1200);
       assert.equal(await evaluate(devState), "stopped");
 

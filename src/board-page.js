@@ -79,10 +79,12 @@ export function createBoardHtml(
   </button>
   <div class="board-name" id="boardName">${escapeHtml(board.name)}</div>
   <div class="project-bar" id="projectBar" hidden>
-    <button class="dev-state" id="devState" type="button" data-state="stopped" aria-live="polite" title="Dev server settings"></button>
-    <form class="add-page" id="addPageForm" autocomplete="off">
-      <input class="add-page-input" id="addPageInput" type="text" placeholder="/path" spellcheck="false" aria-label="Page path on the dev server">
-      <button class="bar-toggle" type="submit">Add page</button>
+    <button class="bar-toggle add-page-toggle" id="addPageToggle" type="button" aria-expanded="false" aria-controls="addPageForm">
+      <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>
+      Add page
+    </button>
+    <form class="add-page" id="addPageForm" autocomplete="off" hidden>
+      <input class="add-page-input" id="addPageInput" type="text" placeholder="/path, then Enter" spellcheck="false" aria-label="Page path on the dev server">
     </form>
   </div>
   <nav class="tabs" id="tabs" role="tablist" aria-label="Board tabs"></nav>

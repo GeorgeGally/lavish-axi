@@ -104,14 +104,18 @@ test("Duplicate on a design's label shows at rest; only a copy's Rename and Dele
   assert.match(client, /button\("Delete", "Delete this copy", \(\) => deleteCopy\(item\.id\), true\)/);
 });
 
-test("a project board's top bar shows the dev server's state and opens Settings, which holds Start, Stop and Restart", () => {
+test("a project board's top bar has only a small Add page; the dev server lives in Settings", () => {
   const html = createBoardHtml({ key: "k", file: "/repo/.liesel/board.json" }, /** @type {any} */ (board), {
     project: { root: "/repo" },
   });
   const bar = html.slice(html.indexOf('<header class="bar"'), html.indexOf("</header>"));
   const settings = html.slice(html.indexOf('id="settings"'), html.indexOf("<!-- /settings -->"));
-  assert.match(bar, /<button class="dev-state" id="devState" type="button"/);
-  assert.doesNotMatch(bar, /devToggle|>Start</);
+  // The dev server starts by itself, so the bar carries no state pill and no Start.
+  assert.doesNotMatch(bar, /devState|devToggle|dev-state|>Start</);
+  // Add page is one control; its path field opens in its place.
+  assert.match(bar, /id="addPageToggle"[^>]*aria-expanded="false"[^>]*aria-controls="addPageForm"/);
+  assert.match(bar, /<form class="add-page" id="addPageForm" autocomplete="off" hidden>/);
+  assert.doesNotMatch(bar.slice(bar.indexOf('id="addPageForm"')), /type="submit"/);
   for (const id of ["devStart", "devStop", "devRestart", "devCommand", "devPort", "devOutput", "projectRoot"]) {
     assert.match(settings, new RegExp(`id="${id}"`), id);
   }

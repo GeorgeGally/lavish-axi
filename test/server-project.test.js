@@ -186,6 +186,7 @@ test("the board opening starts the detected dev server; Stop holds until Start, 
   assert.equal(reopened.body.dev.running, false, "reopening the board does not undo a Stop");
   const held = await fetch(`${running.proxy}/`).then((response) => response.text());
   assert.match(held, /The dev server is stopped/);
+  assert.match(held, /<button type="button" data-liesel-dev="start">Start<\/button>/);
 
   const started = await post(base, `/api/boards/${key}/project/start`, {});
   assert.equal(started.body.dev.running, true);
@@ -206,6 +207,7 @@ test("a project with nothing to run says why in its frames, and a failed start s
   assert.match(frame, /No dev server found/);
   assert.match(frame, /no package\.json/);
   assert.doesNotMatch(frame, /http-equiv="refresh"/);
+  assert.match(frame, /data-liesel-dev="settings">Open Settings</);
   const manual = await post(base, `/api/boards/${opened.key}/project/start`, {});
   assert.equal(manual.status, 400);
 
@@ -227,6 +229,11 @@ test("a project with nothing to run says why in its frames, and a failed start s
   const reason = await fetch(`${failed.proxy}/`).then((response) => response.text());
   assert.match(reason, /The dev server stopped/);
   assert.match(reason, /Exited with 127 · vite: not found/);
+  assert.match(
+    reason,
+    /<button type="button" data-liesel-dev="restart">Restart<\/button>/,
+    "a quiet Restart, in the frame",
+  );
 });
 
 test("a live page runs on the project's dev server with the SDK, and a note reaches the agent with its path and selector", async (t) => {

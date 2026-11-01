@@ -594,17 +594,22 @@ function escapeHtml(value) {
   );
 }
 
+const LIVE_ACTION_LABELS = { restart: "Restart", start: "Start", settings: "Open Settings" };
+
 /**
  * The page a live frame shows when there is no dev server to show. A `busy` page (the
  * server is starting) says so calmly and looks again every two seconds, so the frame
- * turns into the real page as soon as the server answers.
- * @param {{ title: string, message: string, sdkSrc: string, busy?: boolean }} options
+ * turns into the real page as soon as the server answers. A page that says what went
+ * wrong carries one `action` button; the board SDK hands its press to the board.
+ * @param {{ title: string, message: string, sdkSrc: string, busy?: boolean, action?: "restart" | "start" | "settings" | "" }} options
  */
-export function liveFallbackHtml({ title, message, sdkSrc, busy = false }) {
+export function liveFallbackHtml({ title, message, sdkSrc, busy = false, action = "" }) {
   const refresh = busy ? '<meta http-equiv="refresh" content="2">' : "";
   const mark = busy ? '<span class="busy" aria-hidden="true"></span>' : "";
+  const label = !busy && action ? LIVE_ACTION_LABELS[action] : "";
+  const button = label ? `<button type="button" data-liesel-dev="${action}">${label}</button>` : "";
   return injectLiveSdk(
-    `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">${refresh}<title>${escapeHtml(title)}</title><style>html,body{margin:0}body{background:#f4f4f2;color:#16181d;font:16px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,system-ui,sans-serif;-webkit-font-smoothing:antialiased}main{box-sizing:border-box;min-height:100vh;display:grid;place-content:center;justify-items:center;gap:12px;max-width:min(760px,86vw);margin:0 auto;padding:32px;text-align:center}h1{font-size:clamp(26px,2.4vw,40px);line-height:1.25;font-weight:600;letter-spacing:-0.01em;margin:0}p{margin:0;color:#6b717c;font-size:clamp(17px,1.5vw,24px);overflow-wrap:anywhere}.busy{width:clamp(30px,2.6vw,44px);height:clamp(30px,2.6vw,44px);margin-bottom:12px;border-radius:50%;border:2px solid #dcdcd8;border-top-color:#16181d;animation:spin 900ms linear infinite}@keyframes spin{to{transform:rotate(1turn)}}@media (prefers-reduced-motion:reduce){.busy{animation-duration:2.4s}}</style></head><body><main data-liesel-placeholder${busy ? ' data-busy="true"' : ""}>${mark}<h1>${escapeHtml(title)}</h1>${message ? `<p>${escapeHtml(message)}</p>` : ""}</main></body></html>`,
+    `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">${refresh}<title>${escapeHtml(title)}</title><style>html,body{margin:0}body{background:#f4f4f2;color:#16181d;font:16px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,system-ui,sans-serif;-webkit-font-smoothing:antialiased}main{box-sizing:border-box;min-height:100vh;display:grid;place-content:center;justify-items:center;gap:12px;max-width:min(760px,86vw);margin:0 auto;padding:32px;text-align:center}h1{font-size:clamp(26px,2.4vw,40px);line-height:1.25;font-weight:600;letter-spacing:-0.01em;margin:0}p{margin:0;color:#6b717c;font-size:clamp(17px,1.5vw,24px);overflow-wrap:anywhere}.busy{width:clamp(30px,2.6vw,44px);height:clamp(30px,2.6vw,44px);margin-bottom:12px;border-radius:50%;border:2px solid #dcdcd8;border-top-color:#16181d;animation:spin 900ms linear infinite}@keyframes spin{to{transform:rotate(1turn)}}@media (prefers-reduced-motion:reduce){.busy{animation-duration:2.4s}}button{margin-top:clamp(20px,2vw,32px);height:clamp(40px,3.4vw,56px);padding:0 clamp(18px,1.8vw,28px);border:1px solid #cfcfca;border-radius:12px;background:#fff;color:#16181d;font:inherit;font-size:clamp(15px,1.3vw,20px);font-weight:500;cursor:pointer}button:hover{border-color:#9a9fa8}</style></head><body><main data-liesel-placeholder${busy ? ' data-busy="true"' : ""}>${mark}<h1>${escapeHtml(title)}</h1>${message ? `<p>${escapeHtml(message)}</p>` : ""}${button}</main></body></html>`,
     sdkSrc,
   );
 }
@@ -620,7 +625,7 @@ export function liveFallbackHtml({ title, message, sdkSrc, busy = false }) {
  *   sdkSrc: string,
  *   reservedPorts?: () => number[],
  *   onAnswer?: () => void,
- *   statusMessage?: () => { title: string, message: string, busy?: boolean },
+ *   statusMessage?: () => { title: string, message: string, busy?: boolean, action?: "restart" | "start" | "settings" | "" },
  * }} options
  */
 export function createLiveProxy({
@@ -661,12 +666,13 @@ export function createLiveProxy({
     }
     return next;
   };
-  const fallback = (res, status, title, message, busy = false) => {
+  /** @param {"" | "start" | "restart" | "settings"} [action] */
+  const fallback = (res, status, title, message, busy = false, action = "") => {
     if (res.headersSent) {
       res.destroy();
       return;
     }
-    const html = liveFallbackHtml({ title, message, sdkSrc, busy });
+    const html = liveFallbackHtml({ title, message, sdkSrc, busy, action });
     res.writeHead(status, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
     res.end(html);
   };
@@ -683,7 +689,7 @@ export function createLiveProxy({
         title: "No dev server",
         message: "Start the project's dev server from the board.",
       };
-      fallback(res, 503, status.title, status.message, Boolean(status.busy));
+      fallback(res, 503, status.title, status.message, Boolean(status.busy), status.action || "");
       return;
     }
     const upstream = httpRequest(
@@ -745,7 +751,7 @@ export function createLiveProxy({
         title: "Dev server not answering",
         message: `Nothing answered at localhost:${port}.`,
       };
-      fallback(res, 502, status.title, status.message, Boolean(status.busy));
+      fallback(res, 502, status.title, status.message, Boolean(status.busy), status.action || "");
     });
     req.pipe(upstream);
   });

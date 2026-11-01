@@ -2063,6 +2063,22 @@
 
   post({ type: "ready", title: document.title, height: document.documentElement.scrollHeight });
 
+  // Liesel's own "the dev server stopped" page carries one button (Restart, Start or Open
+  // Settings); the board does it. Caught first, so a note never lands on it.
+  if (live) {
+    window.addEventListener(
+      "click",
+      (event) => {
+        const target = event.target instanceof Element ? event.target.closest("[data-liesel-dev]") : null;
+        if (!target || !target.closest("[data-liesel-placeholder]")) return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        post({ type: "dev-action", action: target.getAttribute("data-liesel-dev") || "" });
+      },
+      true,
+    );
+  }
+
   /* ------------------------------------------------------------ live pages */
 
   // The page as the frame shows it, for the board's history: no scripts (a saved round

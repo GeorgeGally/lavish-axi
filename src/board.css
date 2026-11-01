@@ -285,45 +285,16 @@ textarea:focus-visible {
   display: none;
 }
 
-.dev-state {
-  cursor: pointer;
+.add-page-toggle {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  height: 28px;
-  padding: 0 10px;
-  border-radius: 999px;
-  background: rgba(22, 24, 29, 0.05);
-  color: var(--ink-2);
-  font-size: 13px;
-  font-weight: 500;
-  white-space: nowrap;
+  gap: 6px;
+  padding: 0 12px 0 10px;
 }
 
-.dev-state:hover {
-  background: rgba(22, 24, 29, 0.09);
-  color: var(--ink);
-}
-
-.dev-state::before {
-  content: "";
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--ink-4);
-}
-
-.dev-state[data-state="running"]::before {
-  background: #16a34a;
-}
-
-.dev-state[data-state="starting"]::before {
-  background: #d97706;
-  animation: pulse 1.2s ease-in-out infinite;
-}
-
-.dev-state[data-state="failed"]::before {
-  background: var(--danger);
+.add-page-toggle[hidden],
+.add-page[hidden] {
+  display: none;
 }
 
 .add-page {
@@ -333,7 +304,7 @@ textarea:focus-visible {
 }
 
 .add-page-input {
-  width: 120px;
+  width: 180px;
   height: 34px;
   padding: 0 10px;
   border: 1px solid var(--line-strong);

@@ -2706,16 +2706,26 @@ export async function serve({
       return {
         title: "The dev server stopped",
         message: [view.error, view.last_line].filter(Boolean).join(" · ") || "See its output in Settings.",
+        action: /** @type {const} */ ("restart"),
       };
-    if (project.issue) return { title: "No dev server found", message: project.issue };
-    if (project.userStopped && !port)
-      return { title: "The dev server is stopped", message: "Start it again from Settings." };
+    if (project.issue)
+      return { title: "No dev server found", message: project.issue, action: /** @type {const} */ ("settings") };
+    // A Stop reads as stopped in every frame, even while the process is still winding down.
+    if (project.userStopped)
+      return { title: "The dev server is stopped", message: "", action: /** @type {const} */ ("start") };
+    if (view.status === "exited" && !port)
+      return {
+        title: "The dev server exited",
+        message: view.last_line || "",
+        action: /** @type {const} */ ("restart"),
+      };
     if (!port) return { title: "Starting the dev server", message: "", busy: true };
     if (view.status === "running")
       return { title: "Starting the dev server", message: `Waiting for localhost:${port}`, busy: true };
     return {
       title: "Dev server not answering",
-      message: `Nothing answered at localhost:${port}. Start it from Settings, or check the port.`,
+      message: `Nothing answered at localhost:${port}.`,
+      action: project.config?.command ? /** @type {const} */ ("restart") : /** @type {const} */ ("settings"),
     };
   }
 

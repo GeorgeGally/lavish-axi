@@ -5567,9 +5567,9 @@ function copyTune() {
 
 /* --------------------------------------------------------- project boards */
 
-// A project board starts its dev server as it opens (unless the user stopped it), shows
-// its state in the top bar and adds live pages there; Settings holds Start, Stop, Restart,
-// the command and the port.
+// A project board starts its dev server as it opens (unless the user stopped it). Its
+// state shows only in the frames, and only when something is wrong; Settings holds Start,
+// Stop, Restart, the command and the port. The top bar adds live pages.
 /** @type {Set<string>} items whose next settled render should be saved as a history round */
 const liveSnapshotWanted = new Set();
 /** @type {Map<string, number>} pending "did the page update?" checks, by artboard */
@@ -5716,13 +5716,6 @@ function renderProjectBar() {
   if (!project) return;
   const dev = project.dev || {};
   const words = devStatusWords();
-  const port = Number(dev.port || project.config?.port || 0);
-  const dot = document.getElementById("devState");
-  if (dot) {
-    dot.dataset.state = words.state;
-    dot.textContent = `${words.text}${port && (dev.status === "running" || dev.status === "starting") ? ` · :${port}` : ""}`;
-    dot.title = words.hint || "Dev server settings";
-  }
   const status = document.getElementById("devStatus");
   if (status) {
     status.dataset.state = words.state;
@@ -5825,15 +5818,31 @@ function devServerAction(action) {
     });
 }
 
+/** Add page is one small control that opens a path field in its place. */
+function setAddPageOpen(open) {
+  const toggle = document.getElementById("addPageToggle");
+  const form = document.getElementById("addPageForm");
+  const input = /** @type {HTMLInputElement | null} */ (document.getElementById("addPageInput"));
+  if (!toggle || !form) return;
+  toggle.hidden = open;
+  toggle.setAttribute("aria-expanded", String(open));
+  form.hidden = !open;
+  if (open) input?.focus();
+  else {
+    if (input) input.value = "";
+    if (document.activeElement === input || document.activeElement === document.body) toggle.focus();
+  }
+}
+
 /** @param {SubmitEvent} event */
 function addLivePage(event) {
   event.preventDefault();
   const input = /** @type {HTMLInputElement | null} */ (document.getElementById("addPageInput"));
   const page = input?.value.trim() || "";
-  if (!page) return;
+  if (!page) return setAddPageOpen(false);
   projectRequest("pages", { page, tab: state.activeTab })
     .then((payload) => {
-      if (input) input.value = "";
+      setAddPageOpen(false);
       if (payload?.item)
         showBoardToast(`Added ${payload.item.page}`, project?.dev?.running ? "" : "Start the dev server to see it");
       refreshBoard();
@@ -5843,7 +5852,17 @@ function addLivePage(event) {
 
 function setupProjectBoard() {
   if (!isProjectBoard()) return;
-  document.getElementById("devState")?.addEventListener("click", () => setSettingsOpen(true));
+  document.getElementById("addPageToggle")?.addEventListener("click", () => setAddPageOpen(true));
+  const pageInput = document.getElementById("addPageInput");
+  pageInput?.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape") return;
+    event.preventDefault();
+    event.stopPropagation();
+    setAddPageOpen(false);
+  });
+  pageInput?.addEventListener("blur", () => {
+    if (!(/** @type {HTMLInputElement} */ (pageInput).value.trim())) setAddPageOpen(false);
+  });
   for (const action of /** @type {const} */ (["start", "stop", "restart"])) {
     document
       .getElementById(`dev${action[0].toUpperCase()}${action.slice(1)}`)
@@ -6004,6 +6023,12 @@ function onArtboardMessage(event) {
   }
   if (data.type === "live-stale") {
     onLiveStale(itemId, deviceId);
+    return;
+  }
+  if (data.type === "dev-action" && itemById(itemId)?.page) {
+    const action = String(data.action || "");
+    if (action === "restart" || action === "start") devServerAction(action);
+    else if (action === "settings") setSettingsOpen(true);
     return;
   }
   if (data.type === "live-snapshot") {
