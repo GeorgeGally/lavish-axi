@@ -81,7 +81,9 @@
         if (sameTag.length > 1) part += `:nth-of-type(${sameTag.indexOf(node) + 1})`;
       }
       parts.unshift(part);
-      if (node.id) {
+      // An id anchors the path only when it names one element, or the path would land on
+      // whichever element carries that id first.
+      if (node.id && document.querySelectorAll(`#${CSS.escape(node.id)}`).length === 1) {
         parts[0] = `#${CSS.escape(node.id)}`;
         break;
       }
@@ -656,6 +658,318 @@
     return controls;
   }
 
+  /* ------------------------------------------------- inherited and page controls */
+
+  // What a picked element takes from the elements it sits in, the way DevTools'
+  // "Inherited from" does: typography and colour flow down until something sets them.
+  const INHERITED_PROPERTIES = [
+    "font-family",
+    "font-size",
+    "font-weight",
+    "font-style",
+    "line-height",
+    "letter-spacing",
+    "color",
+    "text-align",
+    "text-transform",
+  ];
+  // What each inherited property reads as when nothing on the page set it.
+  /** @type {Record<string, (value: string) => boolean>} */
+  const BROWSER_DEFAULT = {
+    "font-family": (value) => /^"?times( new roman)?"?(,\s*serif)?$|^serif$/i.test(value.trim()),
+    "font-size": (value) => value === "16px",
+    "font-weight": (value) => value === "400",
+    "font-style": (value) => value === "normal",
+    "line-height": (value) => value === "normal",
+    "letter-spacing": (value) => value === "normal" || value === "0px",
+    color: (value) => /^rgba?\(0,\s*0,\s*0(,\s*1)?\)$/.test(value.trim()),
+    "text-align": (value) => value === "start" || value === "left",
+    "text-transform": (value) => value === "none",
+  };
+  const FONT_STACKS = [
+    { value: "system-ui, -apple-system, sans-serif", label: "System sans" },
+    { value: '"Helvetica Neue", Helvetica, Arial, sans-serif', label: "Helvetica" },
+    { value: "Georgia, 'Times New Roman', serif", label: "Serif" },
+    { value: "ui-monospace, SFMono-Regular, Menlo, monospace", label: "Mono" },
+  ];
+
+  /** @param {string} family */
+  function fontName(family) {
+    return (
+      String(family || "")
+        .split(",")[0]
+        .replace(/["']/g, "")
+        .trim() || "Font"
+    );
+  }
+
+  /**
+   * One control for a property, read from a computed style. Shared by inherited groups
+   * and the page controls so a property looks the same wherever it shows.
+   * @param {string} css @param {CSSStyleDeclaration} style @param {string} [label]
+   */
+  function propertyControl(css, style, label) {
+    const value = style.getPropertyValue(css);
+    const round = (raw) => Math.round(pxOf(raw) * 100) / 100;
+    if (css === "color" || css === "background-color") {
+      return {
+        id: css,
+        css,
+        label: label || (css === "color" ? "Colour" : "Background"),
+        type: "color",
+        value: hexOf(value),
+      };
+    }
+    if (css === "font-family") {
+      const known = FONT_STACKS.some((stack) => stack.value === value);
+      return {
+        id: css,
+        css,
+        label: label || "Font",
+        type: "select",
+        value,
+        options: known ? FONT_STACKS : [{ value, label: fontName(value) }, ...FONT_STACKS],
+      };
+    }
+    if (css === "font-weight") {
+      const weights = ["300", "400", "500", "600", "700", "800", "900"];
+      return {
+        id: css,
+        css,
+        label: label || "Weight",
+        type: "select",
+        value,
+        options: (weights.includes(value) ? weights : [value, ...weights]).map((entry) => ({
+          value: entry,
+          label: entry,
+        })),
+      };
+    }
+    /** @type {Record<string, string[]>} */
+    const choices = {
+      "font-style": ["normal", "italic"],
+      "text-align": ["start", "left", "center", "right", "justify"],
+      "text-transform": ["none", "uppercase", "lowercase", "capitalize"],
+    };
+    /** @type {Record<string, string>} */
+    const names = { "font-style": "Style", "text-align": "Align", "text-transform": "Case" };
+    if (choices[css]) {
+      const options = choices[css].includes(value) ? choices[css] : [value, ...choices[css]];
+      return {
+        id: css,
+        css,
+        label: label || names[css],
+        type: "select",
+        value,
+        options: options.map((entry) => ({ value: entry, label: entry.charAt(0).toUpperCase() + entry.slice(1) })),
+      };
+    }
+    if (css === "font-size") {
+      const size = Math.max(8, Math.round(pxOf(value)));
+      return {
+        id: css,
+        css,
+        label: label || "Size",
+        type: "number",
+        unit: "px",
+        value: String(size),
+        min: 8,
+        max: Math.max(32, size * 3),
+        step: 1,
+      };
+    }
+    if (css === "line-height") {
+      const fontSize = pxOf(style.fontSize) || 16;
+      const height = round(value) || Math.round(fontSize * 1.5);
+      return {
+        id: css,
+        css,
+        label: label || "Line height",
+        type: "number",
+        unit: "px",
+        value: String(height),
+        min: 8,
+        max: Math.max(48, Math.round(height * 2)),
+        step: 1,
+      };
+    }
+    if (css === "letter-spacing") {
+      return {
+        id: css,
+        css,
+        label: label || "Tracking",
+        type: "number",
+        unit: "px",
+        value: String(round(value)),
+        min: -4,
+        max: 12,
+        step: 0.1,
+      };
+    }
+    return null;
+  }
+
+  /**
+   * The elements a picked one sits in, nearest first, up to and including body.
+   * @param {Element} element
+   */
+  function ancestorsOf(element) {
+    const chain = [];
+    let node = element === document.body ? null : element.parentElement;
+    while (node && node !== document.documentElement && chain.length < 24) {
+      chain.push(node);
+      if (node === document.body) break;
+      node = node.parentElement;
+    }
+    return chain;
+  }
+
+  /** A breadcrumb's name: Page for body, otherwise the tag and its id or first class. @param {Element} element */
+  function crumbLabel(element) {
+    if (element === document.body) return "Page";
+    const tag = element.tagName.toLowerCase();
+    if (element.id) return `${tag}#${element.id}`.slice(0, 40);
+    const first = String(element.getAttribute("class") || "")
+      .split(/\s+/)
+      .find((name) => name && !name.startsWith("easel"));
+    return first ? `${tag}.${first}`.slice(0, 40) : tag;
+  }
+
+  /**
+   * For each element the picked one sits in, the inherited properties that element
+   * itself sets and the picked one still takes from it. An element "sets" a property
+   * when its value differs from the one it would inherit; body also owns anything
+   * that reaches it with a value the browser would not have given.
+   * @param {Element} element
+   * @param {Element[]} chain
+   */
+  function inheritedGroups(element, chain) {
+    if (chain.length === 0) return [];
+    const styles = new Map();
+    const styleOf = (node) => {
+      if (!styles.has(node)) styles.set(node, getComputedStyle(node));
+      return styles.get(node);
+    };
+    /** @type {Map<Element, string[]>} */
+    const owned = new Map();
+    for (const css of INHERITED_PROPERTIES) {
+      const value = (node) => styleOf(node).getPropertyValue(css);
+      // The picked element sets it itself: that is one of its own controls, not inherited.
+      if (value(element) !== value(chain[0])) continue;
+      let setter = null;
+      for (const node of chain) {
+        if (node === document.body) {
+          const html = document.documentElement;
+          const reached = value(node) !== value(html) || !BROWSER_DEFAULT[css](value(html));
+          if (reached) setter = node;
+          break;
+        }
+        const above = node.parentElement;
+        if (above && value(node) !== value(above)) {
+          setter = node;
+          break;
+        }
+      }
+      if (!setter) continue;
+      owned.set(setter, [...(owned.get(setter) || []), css]);
+    }
+    return chain
+      .filter((node) => owned.has(node))
+      .map((node) => ({
+        selector: selectorFor(node),
+        label: crumbLabel(node),
+        controls: /** @type {string[]} */ (owned.get(node))
+          .map((css) => propertyControl(css, styleOf(node)))
+          .filter(Boolean)
+          .map((control) => ({ ...control, scope: "ancestor" })),
+      }))
+      .filter((group) => group.selector && group.controls.length > 0);
+  }
+
+  /** The whole page's controls, offered when Page (body) is picked. */
+  function pageControls() {
+    const body = document.body;
+    const style = getComputedStyle(body);
+    const html = getComputedStyle(document.documentElement);
+    const clear = (value) => /^rgba?\(0,\s*0,\s*0,\s*0\)$|^transparent$/.test(String(value).trim());
+    const background = clear(style.backgroundColor)
+      ? clear(html.backgroundColor)
+        ? "#ffffff"
+        : hexOf(html.backgroundColor)
+      : hexOf(style.backgroundColor);
+    const width = Math.round(body.getBoundingClientRect().width);
+    const maxWidth = style.maxWidth === "none" ? width : Math.round(pxOf(style.maxWidth));
+    const side = Math.max(0, Math.round(pxOf(style.paddingLeft)));
+    return [
+      { id: "background-color", css: "background-color", label: "Background", type: "color", value: background },
+      propertyControl("font-family", style, "Base font"),
+      propertyControl("font-size", style, "Base size"),
+      {
+        id: "max-width",
+        css: "max-width",
+        label: "Max width",
+        type: "number",
+        unit: "px",
+        value: String(maxWidth),
+        min: 240,
+        max: Math.max(1920, maxWidth),
+        step: 1,
+      },
+      {
+        id: "padding-inline",
+        css: "padding-inline",
+        label: "Side padding",
+        type: "number",
+        unit: "px",
+        value: String(side),
+        min: 0,
+        max: Math.max(160, side * 3),
+        step: 1,
+      },
+    ]
+      .filter(Boolean)
+      .map((control) => ({ ...control, scope: "element" }));
+  }
+
+  // Boxes that read as a section of the page: near their edge the selector prefers them
+  // to the child under the pointer, so a whole section is easy to pick.
+  const SECTION_TAGS = new Set(["SECTION", "HEADER", "FOOTER", "MAIN", "NAV", "ASIDE"]);
+  const SECTION_EDGE = 12;
+  // A child that runs to the section's edge keeps the pointer unless it is right on it.
+  const SECTION_EDGE_SHARED = 4;
+
+  /**
+   * What the controls selector picks at a point: the element under it, a section when
+   * the point is near that section's edge, then `depth` steps up toward the page.
+   * @param {number} x @param {number} y @param {number} [depth]
+   */
+  function tunePick(x, y, depth = 0) {
+    const leaf = document.elementFromPoint(x, y);
+    let element =
+      leaf instanceof Element && !leaf.closest("[data-easel-ui]") && leaf !== document.documentElement
+        ? leaf
+        : document.body;
+    const picked = element;
+    /** @param {DOMRect} rect */
+    const edgeDistance = (rect) => Math.min(x - rect.left, rect.right - x, y - rect.top, rect.bottom - y);
+    const leafEdge = edgeDistance(element.getBoundingClientRect());
+    for (let node = element.parentElement; node && node !== document.body; node = node.parentElement) {
+      if (!SECTION_TAGS.has(node.tagName)) continue;
+      const distance = edgeDistance(node.getBoundingClientRect());
+      const near = distance < SECTION_EDGE && (leafEdge >= SECTION_EDGE || distance < SECTION_EDGE_SHARED);
+      if (near) {
+        element = node;
+        break;
+      }
+    }
+    let steps = 0;
+    while (steps < depth && element !== document.body && element.parentElement) {
+      element = element.parentElement;
+      steps += 1;
+    }
+    return { element, depth: steps, leaf: picked };
+  }
+
   /**
    * The box that owns a gap for this element: the element itself when it lays its
    * children out in a row or grid, otherwise the section it sits in.
@@ -667,67 +981,305 @@
     return above && /flex|grid/.test(getComputedStyle(above).display) ? above : null;
   }
 
-  /** Inline overrides this SDK set, so Reset can take them all back off. */
+  /**
+   * Inline overrides this SDK set, so Reset can take them all back off. Each records
+   * whether it came from a selector naming several elements ("All like this"): an
+   * element's own override always wins over the one it shares with its siblings.
+   * @type {Map<Element, Map<string, { value: string, group: boolean }>>}
+   */
   const elementStyles = new Map();
+  /** Shared overrides by selector, so an element whose own one is taken off falls back to them. */
+  /** @type {Map<string, Map<string, string>>} */
+  const groupStyles = new Map();
+
+  /** @param {string} selector */
+  function elementsFor(selector) {
+    try {
+      return [...document.querySelectorAll(selector)].filter(
+        (node) => (node instanceof HTMLElement || node instanceof SVGElement) && !node.closest("[data-easel-ui]"),
+      );
+    } catch {
+      return [];
+    }
+  }
+
+  /** @param {Element} element @param {string} css */
+  function groupValueFor(element, css) {
+    let found = "";
+    for (const [selector, values] of groupStyles) {
+      const value = values.get(css);
+      if (!value) continue;
+      try {
+        if (element.matches(selector)) found = value;
+      } catch {
+        // A stored selector this browser cannot parse names nothing.
+      }
+    }
+    return found;
+  }
 
   /** @param {string} selector @param {string} css @param {string} value */
   function applyElementStyle(selector, css, value) {
     if (!selector || !css) return;
-    /** @type {Element | null} */
-    let element;
-    try {
-      element = document.querySelector(selector);
-    } catch {
-      return;
+    const elements = elementsFor(selector);
+    const group = elements.length > 1;
+    if (group) {
+      const values = groupStyles.get(selector) || new Map();
+      values.set(css, value);
+      groupStyles.set(selector, values);
     }
-    if (!(element instanceof HTMLElement || element instanceof SVGElement)) return;
+    for (const element of elements) setElementStyle(/** @type {HTMLElement} */ (element), css, value, group);
+  }
+
+  /** @param {HTMLElement} element @param {string} css @param {string} value @param {boolean} group */
+  function setElementStyle(element, css, value, group) {
     let applied = elementStyles.get(element);
     if (!applied) {
       applied = new Map();
       elementStyles.set(element, applied);
     }
-    applied.set(css, value);
-    element.style.setProperty(css, value);
+    const current = applied.get(css);
+    if (group && current && !current.group && current.value) return;
+    let next = { value, group };
+    // Its own override taken off: the element goes back to what its siblings share.
+    if (!value) {
+      const shared = groupValueFor(element, css);
+      if (shared) next = { value: shared, group: true };
+    }
+    applied.set(css, next);
+    element.style.setProperty(css, next.value);
+    // A narrower page stays centred, the way a max-width page is built.
+    if (element === document.body && css === "max-width") {
+      applied.set("margin-inline", { value: next.value ? "auto" : "", group: false });
+      element.style.setProperty("margin-inline", next.value ? "auto" : "");
+    }
   }
 
   function resetElementStyles() {
     for (const [element, applied] of elementStyles) {
-      for (const css of applied.keys()) element.style.removeProperty(css);
+      for (const css of applied.keys()) /** @type {HTMLElement} */ (element).style.removeProperty(css);
     }
     elementStyles.clear();
+    groupStyles.clear();
   }
+
+  /** @param {Element} node */
+  function classPart(node) {
+    return [...node.classList]
+      .filter((name) => /^[A-Za-z_-][\w-]*$/.test(name) && !name.startsWith("easel"))
+      .slice(0, 3)
+      .map((name) => `.${CSS.escape(name)}`)
+      .join("");
+  }
+
+  /** @param {Element} node how a node reads among its siblings: tag, classes and the tags it holds */
+  function signatureOf(node) {
+    return `${node.tagName}${classPart(node)}|${[...node.children].map((child) => child.tagName).join(",")}`;
+  }
+
+  /** @param {Element} node one step of a structural selector: its class when that names it among its siblings */
+  function stepPart(node) {
+    const parent = node.parentElement;
+    const tag = node.tagName.toLowerCase();
+    if (!parent) return tag;
+    const classes = classPart(node);
+    if (classes && [...parent.children].filter((child) => child.matches(`${tag}${classes}`)).length === 1)
+      return `${tag}${classes}`;
+    const sameTag = [...parent.children].filter((child) => child.tagName === node.tagName);
+    return sameTag.length > 1 ? `${tag}:nth-of-type(${sameTag.indexOf(node) + 1})` : tag;
+  }
+
+  /**
+   * The elements "like this one": the same spot inside each of a run of repeated
+   * siblings (every card's text block in a rail), or failing that every element with
+   * its tag and classes. Null when the element is one of a kind.
+   * @param {Element} element
+   */
+  function likeSelectorFor(element) {
+    if (!(element instanceof HTMLElement) || element === document.body) return null;
+    /** @param {string} selector */
+    const usable = (selector) => {
+      const matches = elementsFor(selector);
+      return matches.length > 1 && matches.length <= 300 && matches.includes(element) ? matches.length : 0;
+    };
+    const path = [];
+    for (let node = element; node && node !== document.body; node = node.parentElement) {
+      const parent = node.parentElement;
+      if (!parent) break;
+      const signature = signatureOf(node);
+      const repeats = [...parent.children].filter((child) => signatureOf(child) === signature).length > 1;
+      if (repeats) {
+        const base = parent === document.body ? "body" : selectorFor(parent);
+        const selector = [base, `${node.tagName.toLowerCase()}${classPart(node)}`, ...path].join(" > ");
+        const count = base ? usable(selector) : 0;
+        if (count) return { selector, count };
+      }
+      path.unshift(stepPart(node));
+      if (path.length > 6) break;
+    }
+    const classes = classPart(element);
+    if (classes) {
+      const selector = `${element.tagName.toLowerCase()}${classes}`;
+      const count = usable(selector);
+      if (count) return { selector, count };
+    }
+    return null;
+  }
+
+  /**
+   * Text inside a tuned box that sets this property itself, so changing the box will
+   * not reach it: the panel names them and offers a jump to the first.
+   * @param {Element} element @param {string} css
+   */
+  function overridesOf(element, css) {
+    const value = (node) => getComputedStyle(node).getPropertyValue(css);
+    const own = value(element);
+    /** @type {Map<string, { selector: string, label: string, count: number }>} */
+    const setters = new Map();
+    const seen = new Set();
+    let scanned = 0;
+    for (const node of element.querySelectorAll("*")) {
+      if (++scanned > 800) break;
+      if (node.closest("[data-easel-ui]")) continue;
+      const ownText = [...node.childNodes].some((child) => child.nodeType === 3 && String(child.textContent).trim());
+      if (!ownText || value(node) === own) continue;
+      // Name the element that sets it, not each line of text that inherits it from there.
+      let setter = node;
+      while (setter.parentElement && setter.parentElement !== element && value(setter.parentElement) === value(setter))
+        setter = setter.parentElement;
+      if (seen.has(setter)) continue;
+      seen.add(setter);
+      const label = crumbLabel(setter);
+      const entry = setters.get(label);
+      if (entry) entry.count += 1;
+      else setters.set(label, { selector: selectorFor(setter), label, count: 1 });
+    }
+    const items = [...setters.values()];
+    return items.length > 0
+      ? {
+          total: items.length,
+          items: items.slice(0, 3).map((entry) => ({
+            selector: entry.selector,
+            label: entry.count > 1 ? `${entry.label} (${entry.count})` : entry.label,
+          })),
+        }
+      : null;
+  }
+
+  /** Where the panel's "All like this" reaches, outlined lightly in the design. */
+  let groupOutline = "";
+  function drawGroupOutline(selector = groupOutline) {
+    groupOutline = selector;
+    let layer = document.getElementById("easel-group");
+    if (!selector) {
+      layer?.remove();
+      return;
+    }
+    if (!layer) {
+      layer = document.createElement("div");
+      layer.id = "easel-group";
+      layer.setAttribute("data-easel-ui", "group");
+      layer.style.cssText = "position:absolute;left:0;top:0;pointer-events:none;z-index:2147482890";
+      document.body.appendChild(layer);
+    }
+    layer.replaceChildren(
+      ...elementsFor(selector)
+        .slice(0, 120)
+        .map((node) => {
+          const rect = node.getBoundingClientRect();
+          const box = document.createElement("div");
+          box.style.cssText = [
+            "position:absolute",
+            "box-sizing:border-box",
+            "border:1px dashed rgba(37,99,235,.7)",
+            "border-radius:2px",
+            `left:${rect.left + window.scrollX}px`,
+            `top:${rect.top + window.scrollY}px`,
+            `width:${rect.width}px`,
+            `height:${rect.height}px`,
+          ].join(";");
+          return box;
+        }),
+    );
+  }
+  window.addEventListener("resize", () => {
+    if (groupOutline) drawGroupOutline();
+  });
 
   /** What the board tunes when a controls-selector click lands on a point in the page. */
-  function reportTuneTarget(x, y) {
-    const leaf = document.elementFromPoint(x, y);
-    const element = leaf instanceof Element && !leaf.closest("[data-easel-ui]") ? leaf : document.body;
+  function reportTuneTarget(x, y, depth = 0) {
+    const { element, leaf } = tunePick(x, y, depth);
     if (!(element instanceof Element)) return;
-    reportTuneFor(element);
+    // The breadcrumb runs down to what was under the pointer, so Down can get back to it.
+    reportTuneFor(element, leaf.contains(element) ? element : leaf);
   }
 
-  /** @param {Element} element */
-  function reportTuneFor(element) {
-    const owner = gapOwnerOf(element);
-    const parent = element.parentElement;
+  /**
+   * @param {Element} element what is tuned
+   * @param {Element} [trail] the deepest element of the breadcrumb, at or inside `element`
+   */
+  function reportTuneFor(element, trail = element) {
+    const page = element === document.body;
+    const owner = page ? null : gapOwnerOf(element);
+    const parent = page ? null : element.parentElement;
+    const chain = ancestorsOf(element);
     // Read the page's own values, not the ones this panel is currently previewing, so
     // Copy shows exactly what still differs from the file.
-    const held = [...new Set([element, owner, parent].filter(Boolean))].map((node) => [node, elementStyles.get(node)]);
+    /** @type {[HTMLElement, Map<string, { value: string, group: boolean }> | undefined][]} */
+    const held = [...new Set([element, owner, ...chain].filter(Boolean))].map((node) => [
+      /** @type {HTMLElement} */ (node),
+      elementStyles.get(/** @type {Element} */ (node)),
+    ]);
     for (const [node, applied] of held) {
       if (applied) for (const css of applied.keys()) node.style.removeProperty(css);
     }
-    const controls = elementTuneControls(element, owner);
+    /** @type {any[]} */
+    const controls = page ? pageControls() : elementTuneControls(element, owner);
+    // A box's text settings reach only the text that does not set its own.
+    if (!page && element.children.length > 0) {
+      for (const control of controls) {
+        if (
+          control.scope !== "element" ||
+          !["color", "line-height", "letter-spacing", "font-weight"].includes(control.css)
+        )
+          continue;
+        const overrides = overridesOf(element, control.css);
+        if (overrides) control.overrides = overrides;
+      }
+    }
+    const like = page ? null : likeSelectorFor(element);
+    const text = shortText(element.textContent).length > 0;
+    const inherited = text ? inheritedGroups(element, chain) : [];
+    const path = [];
+    for (let node = trail; node && node !== element; node = node.parentElement) path.push(node);
+    const crumbs = [...(element.contains(trail) ? path : []), element, ...chain]
+      .reverse()
+      .map((node) => ({ selector: selectorFor(node), label: crumbLabel(node) }))
+      .filter((crumb) => crumb.selector);
+    const selector = selectorFor(element);
+    let named;
+    try {
+      named = document.querySelector(selector) === element;
+    } catch {
+      named = false;
+    }
     const payload = {
-      selector: selectorFor(element),
+      // A selector that would land on another element is never saved: the panel says so.
+      ...(named ? {} : { error: "unnamed" }),
+      like,
+      crumbs,
+      inherited,
+      selector,
       // The gap belongs to this container, not to the clicked child.
       sectionSelector: owner ? selectorFor(owner) : "",
-      label: targetLabel(element),
+      label: page ? "Page" : targetLabel(element),
       sectionLabel: owner && owner !== element ? sectionLabel(owner) : "",
       // One click steps up: the panel offers the element this one sits in.
       parentSelector: parent ? selectorFor(parent) : "",
       parentLabel: parent ? targetLabel(parent) : "",
     };
     for (const [node, applied] of held) {
-      if (applied) for (const [css, value] of applied) node.style.setProperty(css, value);
+      if (applied) for (const [css, entry] of applied) node.style.setProperty(css, entry.value);
     }
     post({ type: "tune-target", ...payload, controls });
   }
@@ -807,7 +1359,23 @@
         return;
       }
       if (data.type === "tune-target") {
-        reportTuneTarget(Number(data.x), Number(data.y));
+        reportTuneTarget(Number(data.x), Number(data.y), Math.max(0, Number(data.depth) || 0));
+        return;
+      }
+      if (data.type === "outline-all") {
+        drawGroupOutline(String(data.selector || ""));
+        return;
+      }
+      if (data.type === "outline") {
+        // A breadcrumb or inherited group hovered in the panel shows which element it is.
+        /** @type {Element | null} */
+        let element;
+        try {
+          element = data.selector ? document.querySelector(String(data.selector)) : null;
+        } catch {
+          element = null;
+        }
+        drawHover(element instanceof Element && !element.closest("[data-easel-ui]") ? element : null);
         return;
       }
       if (data.type === "tune-element") {
@@ -838,6 +1406,14 @@
         // Empty page background still takes a note: it is about that part of the page.
         const usable =
           target instanceof Element && !target.closest("[data-easel-ui]") && target !== document.documentElement;
+        if (data.hover && data.tune) {
+          // The controls selector outlines what a click would pick, the whole page included,
+          // and says how far up it could go so the board's Up and Down keys stay in range.
+          const picked = tunePick(x, y, Math.max(0, Number(data.depth) || 0));
+          drawHover(picked.element);
+          post({ type: "tune-depth", depth: picked.depth });
+          return;
+        }
         if (data.hover) {
           drawHover(!onPin && usable && target !== document.body ? target : null);
           return;
@@ -918,7 +1494,8 @@
   // The board's own keys - 0, 1, +, - and Escape, and Cmd +/-/0 - reach it from here
   // too, so the camera answers whichever document has focus.
   // Cmd-Z and Cmd-Shift-Z step the tune changes, and Tab switches the sidebar's tabs.
-  const BOARD_KEYS = new Set(["0", "1", "+", "=", "-", "Escape", "z", "Z", "Tab"]);
+  // Up and Down (or [ and ]) widen and narrow the controls selection.
+  const BOARD_KEYS = new Set(["0", "1", "+", "=", "-", "Escape", "z", "Z", "Tab", "ArrowUp", "ArrowDown", "[", "]"]);
   const MODIFIER_KEYS = new Set(["Meta", "Alt", "Control", "Shift"]);
   function forwardKey(event) {
     if (MODIFIER_KEYS.has(event.key) || event.code === "Space") return;

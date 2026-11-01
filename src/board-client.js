@@ -1976,7 +1976,15 @@ function pointInFrame(record, clientX, clientY) {
 }
 
 function postHit(record, payload) {
-  postToArtboard(record.itemId, record.device.id, { type: "hit", ...payload });
+  const tune = payload.hover && tuneArmed() ? { tune: true, depth: tuneDepth } : {};
+  postToArtboard(record.itemId, record.device.id, { type: "hit", ...payload, ...tune });
+}
+
+/** Moving the pointer to something else starts the selector back at what is under it. */
+function notePointerForDepth(x, y) {
+  if (tuneDepthAt && Math.hypot(x - tuneDepthAt.x, y - tuneDepthAt.y) < 6) return;
+  tuneDepthAt = { x, y };
+  tuneDepth = 0;
 }
 
 function clearHover() {
@@ -3922,9 +3930,23 @@ let tuneItemId = "";
 let tuneDeviceId = "";
 /**
  * What a controls-selector click last landed on: its selectors, its own controls and their live values.
- * @type {null | { itemId: string, deviceId: string, selector?: string, sectionSelector?: string, label?: string, sectionLabel?: string, parentSelector?: string, parentLabel?: string, controls?: any[], values?: Record<string, string>, pending?: boolean }}
+ * Inherited groups are the elements it sits in that set something it inherits, nearest first.
+ * @typedef {{ selector: string, label: string, controls: any[], values: Record<string, string> }} InheritedGroup
+ * @type {null | { itemId: string, deviceId: string, selector?: string, sectionSelector?: string, label?: string, sectionLabel?: string, parentSelector?: string, parentLabel?: string, controls?: any[], values?: Record<string, string>, inherited?: InheritedGroup[], crumbs?: { selector: string, label: string }[], like?: null | { selector: string, count: number }, scope?: "one" | "all", sizes?: "all" | "one", error?: string, pending?: boolean }}
  */
 let tuneTarget = null;
+/**
+ * The breadcrumb of the element a selector click picked, kept while Up, Down or a
+ * crumb moves the selection along it, so Down can walk back to that element.
+ * @type {{ selector: string, label: string }[]}
+ */
+let tuneOrigin = [];
+/** Inherited groups the reviewer opened, by selector; every group starts collapsed. */
+const tuneOpenGroups = new Set();
+/** How many steps above the element under the pointer the controls selector picks. */
+let tuneDepth = 0;
+/** @type {null | { x: number, y: number }} */
+let tuneDepthAt = null;
 /** @type {ReturnType<typeof setTimeout> | undefined} */
 let tuneSaveTimer;
 let tuneCleanup = [];
@@ -3954,7 +3976,7 @@ function tuneSpecFor(itemId) {
 // closes when the pointer lets go, the control commits, or input goes quiet.
 let tuneUndo = [];
 let tuneRedo = [];
-/** @type {null | { itemId: string, before: Record<string, any> }} */
+/** @type {null | { itemId: string, before: Record<string, any>, element?: { deviceId: string, selector: string, css: string, before: string } }} */
 let tuneEdit = null;
 let tuneEditTimer;
 
@@ -3967,12 +3989,50 @@ function beginTuneEdit(item) {
   tuneEditTimer = setTimeout(endTuneEdit, 800);
 }
 
+/**
+ * An element change opens like a design one, but remembers one selector's one property:
+ * its saved override before, so undo can put that back (or take the override off).
+ * @param {string} itemId @param {string} deviceId @param {string} selector @param {string} css
+ */
+function beginElementEdit(itemId, deviceId, selector, css) {
+  const same =
+    tuneEdit &&
+    tuneEdit.element &&
+    tuneEdit.itemId === itemId &&
+    tuneEdit.element.selector === selector &&
+    tuneEdit.element.css === css;
+  if (!same) {
+    endTuneEdit();
+    tuneEdit = {
+      itemId,
+      before: {},
+      element: { deviceId, selector, css, before: savedElementValue(itemId, selector, css) },
+    };
+  }
+  clearTimeout(tuneEditTimer);
+  tuneEditTimer = setTimeout(endTuneEdit, 800);
+}
+
+/** @param {string} itemId @param {string} selector @param {string} css */
+function savedElementValue(itemId, selector, css) {
+  return String(itemById(itemId)?.elementTune?.[selector]?.[css] ?? "");
+}
+
 function endTuneEdit() {
   clearTimeout(tuneEditTimer);
   const edit = tuneEdit;
   tuneEdit = null;
   const item = edit && itemById(edit.itemId);
-  if (!edit || !item || JSON.stringify(edit.before) === JSON.stringify(item.tune)) return;
+  if (!edit || !item) return;
+  if (edit.element) {
+    const { deviceId, selector, css, before } = edit.element;
+    const after = savedElementValue(edit.itemId, selector, css);
+    if (after === before) return;
+    tuneUndo.push({ itemId: edit.itemId, deviceId, changes: [{ selector, css, before, after }] });
+    tuneRedo = [];
+    return;
+  }
+  if (JSON.stringify(edit.before) === JSON.stringify(item.tune)) return;
   tuneUndo.push({ itemId: edit.itemId, before: edit.before, after: { ...item.tune } });
   tuneRedo = [];
 }
@@ -3985,6 +4045,10 @@ function stepTune(direction) {
   (direction < 0 ? tuneRedo : tuneUndo).push(step);
   const item = itemById(step.itemId);
   if (!item) return;
+  if (step.changes) {
+    applyElementChanges(step.itemId, step.deviceId, step.changes, direction < 0 ? "before" : "after");
+    return;
+  }
   clearTimeout(tuneSaveTimer);
   item.tune = { ...(direction < 0 ? step.before : step.after) };
   postTuneAll(item.id);
@@ -4005,11 +4069,71 @@ function postTuneAll(itemId) {
   for (const device of DEVICES) postTune(itemId, device.id);
 }
 
+/*
+ * Element tunes apply at every size by default. One kept for a single size is saved
+ * under "@<device> <selector>" and reaches only that device's frame, over the shared one.
+ */
+/** @param {string} selector @param {string} deviceId */
+function sizeKey(selector, deviceId) {
+  return `@${deviceId} ${selector}`;
+}
+
+/** @param {string} key @returns {{ deviceId: string, selector: string }} */
+function parseTuneKey(key) {
+  const match = /^@([a-z0-9-]+) (.+)$/.exec(key);
+  return match ? { deviceId: match[1], selector: match[2] } : { deviceId: "", selector: key };
+}
+
+/** What one device frame shows of an item's element tunes: shared ones, then its own. */
+function elementTuneFor(itemId, deviceId) {
+  const saved = itemById(itemId)?.elementTune || {};
+  /** @type {Record<string, Record<string, string>>} */
+  const values = {};
+  for (const [key, css] of Object.entries(saved)) {
+    if (!parseTuneKey(key).deviceId) values[key] = { ...css };
+  }
+  for (const [key, css] of Object.entries(saved)) {
+    const parsed = parseTuneKey(key);
+    if (parsed.deviceId === deviceId) values[parsed.selector] = { ...(values[parsed.selector] || {}), ...css };
+  }
+  return values;
+}
+
 function postElementTune(itemId, deviceId) {
-  const item = itemById(itemId);
-  const values = item?.elementTune || {};
-  if (!values || Object.keys(values).length === 0) return;
+  const values = elementTuneFor(itemId, deviceId);
+  if (Object.keys(values).length === 0) return;
   postToArtboard(itemId, deviceId, { type: "element-tune", values });
+}
+
+/**
+ * Show one selector's property as saved in every device frame of the item at once:
+ * a frame with its own value for that size keeps it, the rest take the shared one.
+ * @param {string} itemId @param {string} selector @param {string} css
+ */
+function refreshElementStyle(itemId, selector, css) {
+  for (const device of DEVICES) {
+    const value = elementTuneFor(itemId, device.id)[selector]?.[css] || "";
+    postToArtboard(itemId, device.id, { type: "style", selector, css, value });
+  }
+}
+
+/** Devices with their own value for a selector's property. @param {string} itemId @param {string} selector @param {string} css */
+function sizesWithOwnValue(itemId, selector, css) {
+  const saved = itemById(itemId)?.elementTune || {};
+  return DEVICES.filter((device) => saved[sizeKey(selector, device.id)]?.[css]);
+}
+
+/** A width range for one device, as the media query an agent would write for it. @param {string} deviceId */
+function sizeMedia(deviceId) {
+  const sorted = [...DEVICES].sort((a, b) => a.width - b.width);
+  const index = sorted.findIndex((device) => device.id === deviceId);
+  if (index < 0) return "";
+  const low = index > 0 ? sorted[index - 1].width + 1 : 0;
+  const high = index < sorted.length - 1 ? sorted[index].width : 0;
+  const parts = [];
+  if (low) parts.push(`(min-width: ${low}px)`);
+  if (high) parts.push(`(max-width: ${high}px)`);
+  return `@media ${parts.join(" and ")}`;
 }
 
 function openTune(itemId, deviceId) {
@@ -4037,6 +4161,8 @@ function closeTune() {
   // Closing the panel keeps what was tuned on the item and drops the preview-only
   // changes: the frame returns to the file plus its saved element tunes.
   if (tuneTarget) {
+    outlineInFrame("");
+    outlineGroupInFrame("");
     postToArtboard(tuneTarget.itemId, tuneTarget.deviceId, { type: "style-reset" });
     postElementTune(tuneTarget.itemId, tuneTarget.deviceId);
   }
@@ -4059,6 +4185,7 @@ function showTuneLoaded(loaded) {
  */
 function openTargetTune(record, point) {
   tuneTarget = { itemId: record.itemId, deviceId: record.device.id, pending: true };
+  tuneOrigin = [];
   tuneItemId = record.itemId;
   tuneDeviceId = record.device.id;
   showTuneLoaded(true);
@@ -4069,105 +4196,356 @@ function openTargetTune(record, point) {
     type: "tune-target",
     x: point.x,
     y: point.y,
+    depth: tuneDepth,
   });
 }
 
-/** One click up the page: tune the element the current target sits in. */
-function stepUpTune() {
-  if (!tuneTarget || tuneTarget.pending || !tuneTarget.parentSelector) return;
-  const { itemId, deviceId, parentSelector } = tuneTarget;
+/** Tune another element of the same design: a breadcrumb, or a step up or down. @param {string} selector */
+function selectTuneElement(selector) {
+  if (!tuneTarget || tuneTarget.pending || !selector || selector === tuneTarget.selector) return;
+  const { itemId, deviceId } = tuneTarget;
+  endTuneEdit();
+  outlineInFrame("");
   tuneTarget = { itemId, deviceId, pending: true };
   renderTune();
-  postToArtboard(itemId, deviceId, { type: "tune-element", selector: parentSelector });
+  postToArtboard(itemId, deviceId, { type: "tune-element", selector });
+}
+
+/**
+ * Up (-1 toward the page) or down (1 back toward the clicked element). With the
+ * selector on it moves what a click would pick; otherwise it moves the tuned element.
+ * @param {number} direction
+ */
+function stepTuneSelection(direction) {
+  if (tuneArmed()) {
+    tuneDepth = Math.max(0, tuneDepth - direction);
+    hoverUnderPointer();
+    return true;
+  }
+  if (!tuneTarget || tuneTarget.pending || sideView !== "controls") return false;
+  const crumbs = tuneOrigin.length > 0 ? tuneOrigin : tuneTarget.crumbs || [];
+  const index = crumbs.findIndex((crumb) => crumb.selector === tuneTarget?.selector);
+  const next = crumbs[index + direction];
+  if (index < 0 || !next) return true;
+  selectTuneElement(next.selector);
+  return true;
+}
+
+/** Outline one element in the tuned frame, or clear the outline. @param {string} selector */
+function outlineInFrame(selector) {
+  if (!tuneTarget) return;
+  postToArtboard(tuneTarget.itemId, tuneTarget.deviceId, { type: "outline", selector });
 }
 
 /** @param {"element" | "section"} [scope] */
 function targetSelector(scope) {
   if (!tuneTarget) return "";
-  return scope === "section" ? tuneTarget.sectionSelector || "" : tuneTarget.selector || "";
+  if (scope === "section") return tuneTarget.sectionSelector || "";
+  // "All like this" tunes every element in the same spot, under one shared selector.
+  if (tuneTarget.scope === "all" && tuneTarget.like) return tuneTarget.like.selector;
+  return tuneTarget.selector || "";
 }
 
-function applyTargetValue(control, raw) {
+/** @type {ReturnType<typeof setTimeout> | undefined} */
+let groupOutlineTimer;
+/** Outline every element "All like this" reaches, for a moment or until cleared. @param {string} selector */
+function outlineGroupInFrame(selector, hold = 0) {
   if (!tuneTarget) return;
-  tuneTarget.values = tuneTarget.values || {};
-  tuneTarget.values[control.id] = String(raw);
-  const selector = targetSelector(control.scope);
-  const value = tuneValue(control, raw);
-  postToArtboard(tuneTarget.itemId, tuneTarget.deviceId, {
-    type: "style",
-    selector,
-    css: control.css,
-    value,
-  });
-  persistElementTune({ itemId: tuneTarget.itemId, selector, css: control.css, value });
+  clearTimeout(groupOutlineTimer);
+  const { itemId, deviceId } = tuneTarget;
+  postToArtboard(itemId, deviceId, { type: "outline-all", selector });
+  if (selector && hold > 0)
+    groupOutlineTimer = setTimeout(() => postToArtboard(itemId, deviceId, { type: "outline-all", selector: "" }), hold);
 }
 
-/** @type {null | { itemId: string, selector: string, css: Record<string, string> }} */
-let elementTunePending = null;
+/** Switch between tuning this element and every element like it. @param {"one" | "all"} scope */
+function setTuneScope(scope) {
+  if (!tuneTarget || !tuneTarget.like || tuneTarget.scope === scope) return;
+  endTuneEdit();
+  tuneTarget.scope = scope;
+  syncTargetValues(tuneTarget);
+  markTuneDirty();
+  renderTune();
+  outlineGroupInFrame(scope === "all" ? tuneTarget.like.selector : "", 1500);
+}
+
+/** "This one" or "All like this (N)", when the element has siblings like it. */
+function renderTuneScope() {
+  if (!tuneTarget || !tuneTarget.like) return null;
+  const like = tuneTarget.like;
+  const row = element("div", { class: "tune-scope", role: "radiogroup", "aria-label": "What to tune" });
+  for (const [scope, text] of /** @type {const} */ ([
+    ["one", "This one"],
+    ["all", `All like this (${like.count})`],
+  ])) {
+    const on = tuneTarget.scope === scope;
+    const button = element("button", { class: "tune-scope-option", type: "button", role: "radio", text });
+    button.setAttribute("aria-checked", String(on));
+    button.addEventListener("click", () => setTuneScope(scope));
+    if (scope === "all") {
+      button.addEventListener("pointerenter", () => outlineGroupInFrame(like.selector));
+      button.addEventListener("pointerleave", () => outlineGroupInFrame(""));
+    }
+    row.append(button);
+  }
+  // One element tuned on its own goes back to what its siblings share.
+  if (tuneTarget.scope === "one") {
+    const match = element("button", {
+      class: "tune-link tune-match",
+      type: "button",
+      text: "Match the others",
+      title: "Take this element's own changes off so it looks like the rest",
+    });
+    match.addEventListener("click", matchSiblings);
+    row.append(match);
+    syncMatchSiblings(match);
+  }
+  return row;
+}
+
+/** "Match the others" shows only while this element has changes of its own. */
+function syncMatchSiblings(match = document.querySelector(".tune-match")) {
+  if (!(match instanceof HTMLElement) || !tuneTarget) return;
+  match.hidden = !Object.keys(itemById(tuneTarget.itemId)?.elementTune || {}).some(
+    (key) => parseTuneKey(key).selector === tuneTarget?.selector,
+  );
+}
+
+/** "All sizes" or "<Device> only": where a change shows. */
+function renderSizeScope() {
+  if (!tuneTarget) return null;
+  const device = DEVICES.find((entry) => entry.id === tuneTarget?.deviceId);
+  if (!device) return null;
+  const row = element("div", { class: "tune-scope", role: "radiogroup", "aria-label": "Which sizes" });
+  for (const [sizes, text] of /** @type {const} */ ([
+    ["all", "All sizes"],
+    ["one", `${device.label} only`],
+  ])) {
+    const button = element("button", { class: "tune-scope-option", type: "button", role: "radio", text });
+    button.setAttribute("aria-checked", String((tuneTarget.sizes || "all") === sizes));
+    button.addEventListener("click", () => {
+      if (!tuneTarget || (tuneTarget.sizes || "all") === sizes) return;
+      endTuneEdit();
+      tuneTarget.sizes = sizes;
+      syncTargetValues(tuneTarget);
+      renderTune();
+    });
+    row.append(button);
+  }
+  return row;
+}
+
+/**
+ * Under a control whose value is kept separately for some sizes: which ones, so a
+ * shared change that does not show there is never a surprise.
+ * @param {string} selector @param {any} control
+ */
+function renderSizeNote(selector, control) {
+  if (!tuneTarget) return null;
+  const sizes = sizesWithOwnValue(tuneTarget.itemId, selector, control.css);
+  if (sizes.length === 0) return null;
+  return element("p", {
+    class: "tune-note",
+    text: `Own value on ${sizes.map((device) => device.label).join(", ")}`,
+  });
+}
+
+/** Take off the tuned element's own overrides, as one undoable step. */
+function matchSiblings() {
+  if (!tuneTarget || !tuneTarget.selector) return;
+  endTuneEdit();
+  const { itemId, deviceId, selector } = tuneTarget;
+  const saved = itemById(itemId)?.elementTune || {};
+  const changes = Object.entries(saved)
+    .filter(([key]) => parseTuneKey(key).selector === selector)
+    .flatMap(([key, css]) =>
+      Object.entries(css).map(([property, before]) => ({
+        selector: key,
+        css: property,
+        before: String(before),
+        after: "",
+      })),
+    );
+  if (changes.length === 0) return;
+  tuneUndo.push({ itemId, deviceId, changes });
+  tuneRedo = [];
+  applyElementChanges(itemId, deviceId, changes, "after");
+}
+
+/**
+ * Under a box's text control: the text inside that sets this property itself and so
+ * will not follow, with a jump to it.
+ * @param {any} control
+ */
+function renderOverrides(control) {
+  const overrides = control.overrides;
+  if (!overrides || !Array.isArray(overrides.items) || overrides.items.length === 0) return null;
+  const note = element("p", { class: "tune-note" });
+  note.append(document.createTextNode("Set separately on "));
+  overrides.items.forEach((entry, index) => {
+    if (index > 0) note.append(document.createTextNode(", "));
+    const jump = element("button", {
+      class: "tune-note-jump",
+      type: "button",
+      text: String(entry.label || entry.selector),
+      title: "Tune that element",
+    });
+    jump.addEventListener("click", () => selectTuneElement(String(entry.selector)));
+    jump.addEventListener("pointerenter", () => outlineInFrame(String(entry.selector)));
+    jump.addEventListener("pointerleave", () => outlineInFrame(""));
+    note.append(jump);
+  });
+  const more = Number(overrides.total) - overrides.items.length;
+  if (more > 0) note.append(document.createTextNode(` and ${more} more`));
+  return note;
+}
+
+/**
+ * One control changed in the panel: the element it belongs to (the tuned one, its
+ * section, or an element it inherits from) changes live, is saved, and can be undone.
+ * @param {any} control @param {string} raw @param {string} [selector] defaults to the control's own scope
+ * @param {Record<string, string>} [values] where the panel keeps this control's value
+ */
+function applyTargetValue(control, raw, selector = targetSelector(control.scope), values) {
+  if (!tuneTarget || !selector) return;
+  const into = values || (tuneTarget.values = tuneTarget.values || {});
+  into[control.id] = String(raw);
+  const value = tuneValue(control, raw);
+  const { itemId, deviceId } = tuneTarget;
+  // Every size by default; "This size only" keeps the value to the frame it was picked in.
+  const key = tuneTarget.sizes === "one" ? sizeKey(selector, deviceId) : selector;
+  beginElementEdit(itemId, deviceId, key, control.css);
+  persistElementTune({ itemId, selector: key, css: control.css, value });
+  refreshElementStyle(itemId, selector, control.css);
+}
+
+/**
+ * Put a set of element changes back (undo) or forward (redo, reset): live in every
+ * frame, saved, and shown in the panel. An empty value takes the override off. A
+ * change's selector is its saved key, so a size-only change stays size-only.
+ * @param {string} itemId @param {string} deviceId
+ * @param {{ selector: string, css: string, before: string, after: string }[]} changes
+ * @param {"before" | "after"} side
+ */
+function applyElementChanges(itemId, deviceId, changes, side) {
+  for (const change of changes) {
+    persistElementTune({ itemId, selector: change.selector, css: change.css, value: change[side] });
+    refreshElementStyle(itemId, parseTuneKey(change.selector).selector, change.css);
+  }
+  if (tuneTarget && tuneTarget.itemId === itemId && !tuneTarget.pending) {
+    syncTargetValues(tuneTarget);
+    markTuneDirty();
+    renderTune();
+  }
+}
+
+/** Element saves not yet sent, per item and selector, so tuning two elements at once loses neither. */
+/** @type {Map<string, { itemId: string, selector: string, css: Record<string, string> }>} */
+const elementTunePending = new Map();
 /** @type {ReturnType<typeof setTimeout> | undefined} */
 let elementTuneTimer;
 
 /**
  * What a controls-selector click tuned is saved on the item, per selector, so the panel can be
- * closed, the board reloaded and the design still looks the way it was tuned.
+ * closed, the board reloaded and the design still looks the way it was tuned. The item's
+ * copy changes at once, so undo and a re-picked element read it before the save lands.
+ * @param {{ itemId: string, selector: string, css: string, value: string }} change
  */
-/**
- * @param {{ itemId: string, selector: string, css?: string, value?: string, reset?: boolean }} change
- */
-function persistElementTune({ itemId, selector, css, value, reset = false }) {
-  if (!selector) return;
-  if (!elementTunePending || elementTunePending.itemId !== itemId || elementTunePending.selector !== selector) {
-    elementTunePending = { itemId, selector, css: {} };
+function persistElementTune({ itemId, selector, css, value }) {
+  if (!selector || !css) return;
+  const item = itemById(itemId);
+  if (item) {
+    const tunes = { ...(item.elementTune || {}) };
+    const props = { ...(tunes[selector] || {}) };
+    if (value) props[css] = String(value);
+    else delete props[css];
+    if (Object.keys(props).length > 0) tunes[selector] = props;
+    else delete tunes[selector];
+    item.elementTune = tunes;
   }
-  if (!reset && css) elementTunePending.css[css] = String(value);
+  const id = `${itemId}\n${selector}`;
+  const pending = elementTunePending.get(id) || { itemId, selector, css: {} };
+  pending.css[css] = String(value);
+  elementTunePending.set(id, pending);
   clearTimeout(elementTuneTimer);
   elementTuneTimer = setTimeout(() => {
-    const pending = elementTunePending;
-    elementTunePending = null;
-    if (!pending) return;
-    fetch(`/api/boards/${encodeURIComponent(key)}/tune`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        item: pending.itemId,
-        selector: pending.selector,
-        element: pending.css,
-        ...(reset ? { reset: true } : {}),
-      }),
-    })
-      .then((response) => (response.ok ? response.json() : null))
-      .then((payload) => {
-        const item = itemById(pending.itemId);
-        if (item && payload?.elementTune) item.elementTune = payload.elementTune;
-      })
-      .catch(() => {});
+    const batch = [...elementTunePending.values()];
+    elementTunePending.clear();
+    for (const entry of batch) {
+      fetch(`/api/boards/${encodeURIComponent(key)}/tune`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ item: entry.itemId, selector: entry.selector, element: entry.css }),
+      }).catch(() => {});
+    }
   }, 250);
 }
 
+/** A saved CSS value as the raw value its control holds: a number control drops its unit. */
+function rawOfCss(control, css) {
+  if ((control.type === "number" || control.type === "timeline") && control.unit) {
+    const number = Number.parseFloat(css);
+    return Number.isFinite(number) ? String(number) : String(control.value ?? "");
+  }
+  return css;
+}
+
+/**
+ * The panel's values are the element's saved overrides where it has them, otherwise
+ * what the file gives: a picked element shows the design as the reviewer left it.
+ * @param {NonNullable<typeof tuneTarget>} target
+ */
+function syncTargetValues(target) {
+  const saved = itemById(target.itemId)?.elementTune || {};
+  /** @param {any} control @param {string} selector */
+  const valueOf = (control, selector) => {
+    const own = target.sizes === "one" ? saved[sizeKey(selector, target.deviceId)]?.[control.css] : "";
+    const css = own || saved[selector]?.[control.css];
+    return css ? rawOfCss(control, css) : String(control.value ?? "");
+  };
+  target.values = {};
+  for (const control of target.controls || []) {
+    target.values[control.id] = valueOf(control, targetSelector(control.scope));
+  }
+  for (const group of target.inherited || []) {
+    group.values = {};
+    for (const control of group.controls) group.values[control.id] = valueOf(control, group.selector);
+  }
+}
+
+/** Every selector this panel tunes, the tuned element first. */
+function panelSelectors() {
+  if (!tuneTarget) return [];
+  const selectors = [tuneTarget.selector || "", tuneTarget.like?.selector || "", tuneTarget.sectionSelector || ""];
+  for (const group of tuneTarget.inherited || []) selectors.push(group.selector);
+  return [...new Set(selectors.filter(Boolean))];
+}
+
+/** Reset takes off every override the panel shows, as one step Cmd-Z can bring back. */
 function resetTargetTune() {
   if (!tuneTarget) return;
-  postToArtboard(tuneTarget.itemId, tuneTarget.deviceId, { type: "style-reset" });
-  persistElementTune({ itemId: tuneTarget.itemId, selector: tuneTarget.selector || "", reset: true });
-  for (const control of tuneTarget.controls || []) {
-    tuneTarget.values = tuneTarget.values || {};
-    tuneTarget.values[control.id] = String(control.value ?? "");
+  endTuneEdit();
+  const { itemId, deviceId } = tuneTarget;
+  const saved = itemById(itemId)?.elementTune || {};
+  const selectors = new Set(panelSelectors());
+  const changes = [];
+  for (const [key, css] of Object.entries(saved)) {
+    if (!selectors.has(parseTuneKey(key).selector)) continue;
+    for (const [property, before] of Object.entries(css)) {
+      changes.push({ selector: key, css: property, before: String(before), after: "" });
+    }
   }
-  renderTune();
+  if (changes.length === 0) return;
+  tuneUndo.push({ itemId, deviceId, changes });
+  tuneRedo = [];
+  applyElementChanges(itemId, deviceId, changes, "after");
 }
 
 /** Only what the reviewer changed, as CSS an agent can bake straight into the page. */
 function copyTargetTune() {
-  if (!tuneTarget) return "";
-  const lines = (tuneTarget.controls || [])
-    .filter((control) => {
-      const value = (tuneTarget?.values || {})[control.id];
-      return value !== undefined && String(value) !== String(control.value ?? "");
-    })
-    .map((control) => {
-      const raw = (tuneTarget?.values || {})[control.id];
-      return `${targetSelector(control.scope)} { ${control.css}: ${tuneValue(control, raw)}; }`;
-    });
-  return lines.join("\n");
+  return tuneChanges()
+    .map((change) => change.line)
+    .join("\n");
 }
 
 /** A control's value as CSS: a number control carries its unit. */
@@ -4180,15 +4558,28 @@ function tuneValue(control, raw) {
 /** The only properties that differ from what the file has, as CSS. */
 function tuneChanges() {
   if (tuneTarget) {
-    return (tuneTarget.controls || [])
-      .filter((control) => {
-        const value = (tuneTarget?.values || {})[control.id];
-        return value !== undefined && String(value) !== String(control.value ?? "");
-      })
-      .map((control) => ({
-        selector: targetSelector(control.scope),
-        line: `${targetSelector(control.scope)} { ${control.css}: ${tuneValue(control, (tuneTarget?.values || {})[control.id])}; }`,
-      }));
+    // What is saved for the selectors this panel shows, each in the rule it needs: a
+    // base rule for every size, a media query for a size of its own.
+    const saved = itemById(tuneTarget.itemId)?.elementTune || {};
+    const selectors = new Set(panelSelectors());
+    /** @type {Map<string, string>} the file's own value per selector and property, where the panel read it */
+    const file = new Map();
+    for (const control of tuneTarget.controls || [])
+      file.set(`${targetSelector(control.scope)}\n${control.css}`, tuneValue(control, control.value ?? ""));
+    for (const group of tuneTarget.inherited || [])
+      for (const control of group.controls)
+        file.set(`${group.selector}\n${control.css}`, tuneValue(control, control.value ?? ""));
+    const changes = [];
+    for (const [key, css] of Object.entries(saved)) {
+      const { deviceId, selector } = parseTuneKey(key);
+      if (!selectors.has(selector)) continue;
+      for (const [property, value] of Object.entries(css)) {
+        if (!deviceId && file.get(`${selector}\n${property}`) === String(value)) continue;
+        const rule = `${selector} { ${property}: ${value}; }`;
+        changes.push({ selector, line: deviceId ? `${sizeMedia(deviceId)} { ${rule} }` : rule });
+      }
+    }
+    return changes;
   }
   const item = itemById(tuneItemId);
   if (!item) return [];
@@ -4224,6 +4615,7 @@ function syncTuneSend() {
 }
 
 function markTuneDirty() {
+  syncMatchSiblings();
   const send = /** @type {any} */ (document.getElementById("tuneSend"));
   if (send?.dataset?.sent === "true") markTuneSent(false);
   syncTuneSend();
@@ -4282,37 +4674,40 @@ function renderTargetTune() {
   if (sub) sub.textContent = "";
   const title = document.getElementById("tuneTitle");
   if (title) title.textContent = tuneTitleText(tuneTarget.label || "Tune");
-  const parent = tuneTarget.parentSelector
-    ? element("button", {
-        class: "tune-parent",
-        type: "button",
-        text: `↑ ${tuneTarget.parentLabel || "Parent"}`,
-        title: "Tune the element this one sits in",
-      })
-    : null;
-  parent?.addEventListener("click", stepUpTune);
+  const crumbs = renderTuneCrumbs();
+  const scope = tuneTarget.pending ? null : renderTuneScope();
+  const sizes = tuneTarget.pending ? null : renderSizeScope();
   if (tuneTarget.pending) {
     body.replaceChildren(
-      ...[parent, element("p", { class: "tune-empty", text: "Reading the element…" })].filter(Boolean),
+      ...[crumbs, element("p", { class: "tune-empty", text: "Reading the element…" })].filter(Boolean),
     );
   } else {
     const controls = tuneTarget.controls || [];
-    if (controls.length === 0) {
-      body.replaceChildren(
-        ...[parent, element("p", { class: "tune-empty", text: "Nothing here to tune." })].filter(Boolean),
-      );
-    } else {
+    const groups = (tuneTarget.inherited || []).map(renderInheritedGroup);
+    const own =
+      controls.length === 0
+        ? groups.length === 0
+          ? [element("p", { class: "tune-empty", text: "Nothing here to tune." })]
+          : []
+        : controls.map((control) => {
+            const node = createTuneControl({ id: "target", tune: tuneTarget?.values || {} }, control, (raw) =>
+              applyTargetValue(control, raw),
+            );
+            for (const note of [renderOverrides(control), renderSizeNote(targetSelector(control.scope), control)])
+              if (note) node.append(note);
+            return node;
+          });
+    if (tuneTarget.error) {
       body.replaceChildren(
         ...[
-          parent,
-          ...controls.map((control) =>
-            createTuneControl({ id: "target", tune: tuneTarget?.values || {} }, control, (raw) =>
-              applyTargetValue(control, raw),
-            ),
-          ),
+          crumbs,
+          element("p", {
+            class: "tune-empty",
+            text: "This element has no selector that names only it, so nothing was tuned. Pick the element around it.",
+          }),
         ].filter(Boolean),
       );
-    }
+    } else body.replaceChildren(...[crumbs, scope, sizes, ...own, ...groups].filter(Boolean));
   }
   const save = /** @type {any} */ (document.getElementById("tuneSave"));
   if (save) save.hidden = true;
@@ -4320,9 +4715,67 @@ function renderTargetTune() {
   if (versions) versions.replaceChildren();
   for (const id of ["tuneSave", "tuneCopy", "tuneReset"]) {
     const button = /** @type {any} */ (document.getElementById(id));
-    if (button) button.disabled = tuneTarget.pending || (tuneTarget.controls || []).length === 0;
+    if (button)
+      button.disabled =
+        tuneTarget.pending || ((tuneTarget.controls || []).length === 0 && (tuneTarget.inherited || []).length === 0);
   }
   syncTuneSend();
+}
+
+/**
+ * The path from the page down to the clicked element, like DevTools' breadcrumb: any
+ * crumb tunes that element, and hovering one outlines it in the design.
+ */
+function renderTuneCrumbs() {
+  if (!tuneTarget) return null;
+  const crumbs = tuneOrigin.length > 0 ? tuneOrigin : tuneTarget.crumbs || [];
+  if (crumbs.length === 0) return null;
+  const nav = element("nav", { class: "tune-crumbs", "aria-label": "Pick an element this one sits in" });
+  crumbs.forEach((crumb, index) => {
+    if (index > 0) nav.append(element("span", { class: "tune-crumb-gap", "aria-hidden": "true", text: "›" }));
+    const current = crumb.selector === tuneTarget?.selector;
+    const button = element("button", {
+      class: "tune-crumb",
+      type: "button",
+      text: crumb.label,
+      title: current ? "Tuning this element" : `Tune ${crumb.label}`,
+    });
+    if (current) button.setAttribute("aria-current", "true");
+    button.addEventListener("click", () => selectTuneElement(crumb.selector));
+    button.addEventListener("pointerenter", () => outlineInFrame(crumb.selector));
+    button.addEventListener("pointerleave", () => outlineInFrame(""));
+    nav.append(button);
+  });
+  return nav;
+}
+
+/** A collapsed "Inherited from" group: only what that element sets and the tuned one takes. @param {InheritedGroup} group */
+function renderInheritedGroup(group) {
+  const details = element("details", { class: "tune-inherited" });
+  details.open = tuneOpenGroups.has(group.selector);
+  const summary = element("summary", { class: "tune-inherited-name" });
+  summary.append(
+    element("span", { text: "Inherited from " }),
+    element("span", { class: "tune-inherited-from", text: group.label }),
+  );
+  summary.addEventListener("pointerenter", () => outlineInFrame(group.selector));
+  summary.addEventListener("pointerleave", () => outlineInFrame(""));
+  details.addEventListener("toggle", () => {
+    if (details.open) tuneOpenGroups.add(group.selector);
+    else tuneOpenGroups.delete(group.selector);
+  });
+  details.append(
+    summary,
+    ...group.controls.map((control) => {
+      const node = createTuneControl({ id: "target", tune: group.values }, control, (raw) =>
+        applyTargetValue(control, raw, group.selector, group.values),
+      );
+      const note = renderSizeNote(group.selector, control);
+      if (note) node.append(note);
+      return node;
+    }),
+  );
+  return details;
 }
 
 /** Controls names what it tunes in one plain line: `H1 · The everyday collection`. */
@@ -4381,14 +4834,17 @@ function createTuneControl(item, control, onChange) {
   if (control.type === "color") valueLabel.hidden = true;
   if (control.type !== "spring" && control.type !== "pad") wrapper.append(label);
   const apply = (raw) => {
-    beginTuneEdit(item);
+    // An element control opens its own undo step in applyTargetValue.
+    if (!onChange) beginTuneEdit(item);
     item.tune[control.id] = raw;
     valueLabel.textContent = String(raw);
-    markTuneDirty();
     if (onChange) {
+      // After the change is saved, so Send sees it.
       onChange(raw);
+      markTuneDirty();
       return;
     }
+    markTuneDirty();
     postTuneAll(item.id);
     clearTimeout(tuneSaveTimer);
     tuneSaveTimer = setTimeout(() => flushTune(item), 350);
@@ -4930,6 +5386,7 @@ function onArtboardMessage(event) {
     const rect = record.iframe.getBoundingClientRect();
     const scale = rect.width / record.device.width || 1;
     lastPointer = { x: rect.left + (Number(data.x) || 0) * scale, y: rect.top + (Number(data.y) || 0) * scale };
+    notePointerForDepth(lastPointer.x, lastPointer.y);
     return;
   }
   if (data.type === "parked") {
@@ -4976,23 +5433,52 @@ function onArtboardMessage(event) {
   if (data.type === "tune-target") {
     if (tuneTarget && tuneTarget.pending) {
       const controls = Array.isArray(data.controls) ? data.controls : [];
-      /** @type {Record<string, string>} */
-      const values = {};
-      for (const control of controls) values[control.id] = String(control.value ?? "");
+      const inherited = (Array.isArray(data.inherited) ? data.inherited : [])
+        .filter((group) => group && typeof group.selector === "string" && Array.isArray(group.controls))
+        .map((group) => ({
+          selector: String(group.selector),
+          label: String(group.label || group.selector),
+          controls: group.controls,
+          values: {},
+        }));
+      const crumbs = (Array.isArray(data.crumbs) ? data.crumbs : [])
+        .filter((crumb) => crumb && crumb.selector)
+        .map((crumb) => ({ selector: String(crumb.selector), label: String(crumb.label || crumb.selector) }));
+      const like =
+        data.like && typeof data.like.selector === "string" && Number(data.like.count) > 1
+          ? { selector: String(data.like.selector), count: Number(data.like.count) }
+          : null;
+      // A step along the clicked element's path keeps that path; anything else starts a new one.
+      const selector = String(data.selector || "");
+      if (!tuneOrigin.some((crumb) => crumb.selector === selector)) tuneOrigin = crumbs;
       tuneTarget = {
         itemId,
         deviceId,
-        selector: String(data.selector || ""),
+        selector,
         sectionSelector: String(data.sectionSelector || ""),
         label: String(data.label || ""),
         sectionLabel: String(data.sectionLabel || ""),
         parentSelector: String(data.parentSelector || ""),
         parentLabel: String(data.parentLabel || ""),
         controls,
-        values,
+        values: {},
+        inherited,
+        crumbs,
+        like,
+        // Elements that come in a run are tuned together unless the reviewer narrows it.
+        scope: like ? "all" : "one",
+        sizes: "all",
+        error: data.error ? String(data.error) : "",
       };
+      syncTargetValues(tuneTarget);
       renderTune();
+      if (like) outlineGroupInFrame(like.selector, 1500);
     }
+    return;
+  }
+  if (data.type === "tune-depth") {
+    // The selector cannot climb past the page: keep Up and Down in step with what it shows.
+    tuneDepth = Math.min(tuneDepth, Math.max(0, Number(data.depth) || 0));
     return;
   }
   if (data.type === "tune-spec") {
@@ -5045,6 +5531,13 @@ function boardKey(event, preventDefault) {
   if (event.key === "Tab") {
     preventDefault();
     toggleSideView();
+    return;
+  }
+  // Up or [ widens the controls selection to the element it sits in; Down or ] narrows
+  // it back toward the clicked element.
+  if (["ArrowUp", "ArrowDown", "[", "]"].includes(event.key)) {
+    const up = event.key === "ArrowUp" || event.key === "[";
+    if (stepTuneSelection(up ? -1 : 1)) preventDefault();
     return;
   }
   if (event.key === "0") {
@@ -5124,6 +5617,7 @@ document.addEventListener(
   "pointermove",
   (event) => {
     lastPointer = { x: event.clientX, y: event.clientY };
+    notePointerForDepth(event.clientX, event.clientY);
   },
   { capture: true, passive: true },
 );

@@ -1855,23 +1855,153 @@ body[data-dragging="true"] .shield {
   grid-template-columns: minmax(0, 1fr);
 }
 
-/* The way back up the page: one click tunes the element this one sits in. */
-.tune-parent {
-  justify-self: start;
-  max-width: 100%;
+/* The path from the page down to the picked element: any crumb tunes that element. */
+.tune-crumbs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 4px;
+  min-width: 0;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.tune-crumb {
+  max-width: 14em;
   padding: 0;
   border: 0;
   background: transparent;
   color: var(--ink-3);
   font: inherit;
-  font-size: 13px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   cursor: pointer;
 }
 
-.tune-parent:hover {
+.tune-crumb:hover,
+.tune-crumb:focus-visible {
+  color: var(--ink);
+}
+
+.tune-crumb[aria-current="true"] {
+  color: var(--ink);
+  font-weight: 600;
+  cursor: default;
+}
+
+.tune-crumb-gap {
+  color: var(--ink-4);
+}
+
+/* What a change reaches: this element or all like it, every size or one. */
+.tune-scope {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 16px;
+  min-width: 0;
+  font-size: 13px;
+}
+
+.tune-scope-option {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink-3);
+  font: inherit;
+  cursor: pointer;
+}
+
+.tune-scope-option:hover {
+  color: var(--ink);
+}
+
+.tune-scope-option[aria-checked="true"] {
+  color: var(--ink);
+  font-weight: 600;
+  cursor: default;
+}
+
+.tune-match {
+  margin-left: auto;
+}
+
+.tune-match[hidden] {
+  display: none;
+}
+
+/* A quiet line under a control: text inside that sets its own value, or a size that does. */
+.tune-note {
+  margin: 0;
+  color: var(--ink-3);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.tune-note-jump {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink-2);
+  font: inherit;
+  text-decoration: underline;
+  text-decoration-color: var(--ink-4);
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.tune-note-jump:hover {
+  color: var(--ink);
+}
+
+/* What the picked element takes from the elements it sits in: collapsed until opened. */
+.tune-inherited {
+  display: grid;
+  gap: 22px;
+  min-width: 0;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.tune-inherited:not([open]) {
+  gap: 0;
+}
+
+.tune-inherited-name {
+  display: flex;
+  gap: 4px;
+  min-width: 0;
+  color: var(--ink-2);
+  font-size: 13px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.tune-inherited-name::-webkit-details-marker {
+  display: none;
+}
+
+.tune-inherited-name::before {
+  content: "›";
+  flex: none;
+  width: 10px;
+  color: var(--ink-4);
+  transition: transform 0.15s ease;
+}
+
+.tune-inherited[open] > .tune-inherited-name::before {
+  transform: rotate(90deg);
+}
+
+.tune-inherited-name:hover {
+  color: var(--ink);
+}
+
+.tune-inherited-from {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   color: var(--ink);
 }
 
