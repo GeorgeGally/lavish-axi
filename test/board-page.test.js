@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import { createBoardHtml } from "../src/board-page.js";
@@ -48,4 +49,50 @@ test("Settings in the top bar holds the agent picker and the ultrawide toggle; t
   }
   // No ultrawide button in the bar any more.
   assert.doesNotMatch(bar, /ultrawide/i);
+});
+
+test("Settings is a full page with a way back to the board, in the home page's calm type", async () => {
+  const html = createBoardHtml({ key: "k", file: "/tmp/board.json" }, /** @type {any} */ ({ ...board, name: "Shop" }));
+  const settings = html.slice(html.indexOf('id="settings"'), html.indexOf("<!-- /settings -->"));
+  assert.match(html, /id="settings"[^>]*aria-modal="true"/);
+  assert.match(settings, /<button class="settings-back" id="settingsClose"[^>]*>[\s\S]*Back to board\s*<\/button>/);
+  assert.match(settings, /<h1 class="settings-title" id="settingsTitle">Settings<\/h1>/);
+  assert.match(settings, /<p class="settings-board">Shop<\/p>/);
+  const css = await readFile(new URL("../src/board.css", import.meta.url), "utf8");
+  const rule = (selector) => {
+    const at = css.indexOf(`\n${selector} {`);
+    assert.ok(at >= 0, selector);
+    return css.slice(at, css.indexOf("}", at));
+  };
+  // It covers the whole window, board and bar included.
+  assert.match(rule(".settings"), /position: fixed;\s*inset: 0;/);
+  for (const match of css.matchAll(/letter-spacing:\s*([-\d.]+)em/g)) {
+    assert.ok(Number(match[1]) <= 0.04, `letter-spacing ${match[1]}em`);
+  }
+  assert.doesNotMatch(css, /text-transform:\s*uppercase/);
+});
+
+test("from a board, the brand goes home and the plus menu starts a new board or opens a project there", () => {
+  const html = createBoardHtml({ key: "k", file: "/tmp/board.json" }, /** @type {any} */ (board));
+  const bar = html.slice(html.indexOf('<header class="bar"'), html.indexOf("</header>"));
+  assert.match(bar, /<a class="brand" href="\/"/);
+  assert.match(bar, /id="newToggle"[^>]*popovertarget="newMenu"/);
+  const menu = html.slice(html.indexOf('id="newMenu"'), html.indexOf("</nav>", html.indexOf('id="newMenu"')));
+  assert.match(html, /<nav class="new-menu" id="newMenu" popover/);
+  // The home page's own dialogs do the work: the menu only links to them.
+  assert.match(menu, /href="\/#new-board">New board/);
+  assert.match(menu, /href="\/#open-project">Open project/);
+  assert.doesNotMatch(menu, /fetch|<form/);
+});
+
+test("Duplicate on a design's label shows at rest; only a copy's Rename and Delete wait for hover", async () => {
+  const css = await readFile(new URL("../src/board.css", import.meta.url), "utf8");
+  const at = css.indexOf("\n.artboard-label .item-actions {");
+  const block = css.slice(at, css.indexOf("}", at));
+  assert.doesNotMatch(block, /opacity/);
+  assert.match(css, /\.artboard-label \.item-action\[data-reveal\] \{\s*opacity: 0;/);
+  const client = await readFile(new URL("../src/board-client.js", import.meta.url), "utf8");
+  assert.match(client, /button\("Duplicate", "Duplicate this design \(⌘D\)", \(\) => duplicateDesign\(item\.id\)\)/);
+  assert.match(client, /button\("Rename", "Rename this copy", \(\) => startRename\(item\.id\), true\)/);
+  assert.match(client, /button\("Delete", "Delete this copy", \(\) => deleteCopy\(item\.id\), true\)/);
 });

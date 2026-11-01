@@ -429,6 +429,20 @@ const SCRIPT = `(() => {
       submit.disabled = false;
     }
   });
+
+  // A board's New menu links here with #new-board or #open-project: the same dialog opens,
+  // and closing it without going anywhere returns to that board.
+  const intent = { "#new-board": [dialog, "[data-open-new-board]"], "#open-project": [projectDialog, "[data-open-project]"] }[location.hash];
+  if (intent) {
+    history.replaceState(history.state, "", location.pathname + location.search);
+    let fromBoard = false;
+    try {
+      const from = new URL(document.referrer);
+      fromBoard = from.origin === location.origin && from.pathname.startsWith("/board/") && history.length > 1;
+    } catch {}
+    document.querySelector(intent[1])?.click();
+    if (fromBoard) intent[0].addEventListener("close", () => history.back(), { once: true });
+  }
 })();`;
 
 /** The folder browser under a folder field; `prefix` names its ids. @param {string} prefix */

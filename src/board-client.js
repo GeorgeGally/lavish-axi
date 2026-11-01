@@ -1030,8 +1030,9 @@ function joinLockedScroll(itemId, deviceId) {
 /** The quiet buttons on a design's label: Duplicate, and Rename and Delete on a copy. */
 function itemActions(item) {
   const actions = element("span", { class: "item-actions" });
-  const button = (text, title, run) => {
+  const button = (text, title, run, reveal = false) => {
     const node = element("button", { class: "item-action", type: "button", text, title });
+    if (reveal) node.dataset.reveal = "";
     node.addEventListener("click", (event) => {
       event.stopPropagation();
       run();
@@ -1042,8 +1043,8 @@ function itemActions(item) {
   if (!item.page) actions.append(button("Duplicate", "Duplicate this design (⌘D)", () => duplicateDesign(item.id)));
   if (item.copyOf) {
     actions.append(
-      button("Rename", "Rename this copy", () => startRename(item.id)),
-      button("Delete", "Delete this copy", () => deleteCopy(item.id)),
+      button("Rename", "Rename this copy", () => startRename(item.id), true),
+      button("Delete", "Delete this copy", () => deleteCopy(item.id), true),
     );
   }
   return actions;
@@ -4053,10 +4054,15 @@ function toggleSideView() {
 
 /* ---------------------------------------------------------------- settings */
 
-// Settings opens from the gear in the top bar: the ultrawide toggle and the agent picker.
-// It closes on Escape, its close button, the gear, or a press outside it.
+// Settings opens from the gear in the top bar as a full page over the board: the ultrawide
+// toggle, the project's dev server and the agent picker. Its address is the board's with
+// #settings, so a reload keeps it open and the browser's Back returns to the board. It closes
+// on Escape, Back to board, or the gear.
 const settingsPanel = document.getElementById("settings");
 const settingsToggle = document.getElementById("settingsToggle");
+const SETTINGS_HASH = "#settings";
+/** Did opening Settings add a history entry, so closing it should step back over it? */
+let settingsPushed = false;
 
 function settingsOpen() {
   return Boolean(settingsPanel && !settingsPanel.hidden);
@@ -4068,14 +4074,31 @@ function setSettingsOpen(open) {
   settingsPanel.hidden = !open;
   settingsToggle?.setAttribute("aria-expanded", String(open));
   if (open) {
+    if (location.hash !== SETTINGS_HASH) {
+      window.history.pushState(window.history.state, "", SETTINGS_HASH);
+      settingsPushed = true;
+    }
+    settingsPanel.scrollTop = 0;
     renderUltrawideToggle();
     loadRunner();
     loadProject();
     document.getElementById("settingsClose")?.focus({ preventScroll: true });
-  } else if (settingsPanel.contains(document.activeElement)) {
+  } else {
+    if (location.hash === SETTINGS_HASH) {
+      if (settingsPushed) window.history.back();
+      else window.history.replaceState(window.history.state, "", location.pathname + location.search);
+    }
+    settingsPushed = false;
     settingsToggle?.focus({ preventScroll: true });
   }
 }
+
+window.addEventListener("popstate", () => {
+  const wanted = location.hash === SETTINGS_HASH;
+  if (wanted === settingsOpen()) return;
+  settingsPushed = false;
+  setSettingsOpen(wanted);
+});
 
 /* ---------------------------------------------------------------- agent runner */
 
@@ -6191,6 +6214,8 @@ function releaseHeldKeys() {
 
 window.addEventListener("keydown", (event) => {
   if (event.key === "Meta" || event.key === "Alt") {
+    // A tap of Cmd or Option on Settings never arms notes or controls on the board under it.
+    if (settingsOpen()) return;
     modifierPressed(event.key, otherModifierHeld(event), event.timeStamp);
     return;
   }
@@ -6203,16 +6228,17 @@ window.addEventListener("keydown", (event) => {
     }
     return;
   }
+  // The New menu is ordinary links: its keys are the browser's, and it closes itself on Escape.
+  if (event.target instanceof Element && event.target.closest("#newMenu")) return;
   // Escape closes Settings first, even from one of its fields.
   if (event.key === "Escape" && settingsOpen()) {
     event.preventDefault();
     setSettingsOpen(false);
     return;
   }
-  // Settings is an ordinary form: Tab moves between its fields and keys type.
-  if (event.target instanceof Element && event.target.closest("#settings") && !event.metaKey && !event.ctrlKey) {
-    return;
-  }
+  // Settings is an ordinary page over the board: Tab moves between its fields, keys type,
+  // and no board shortcut acts on the board hidden under it.
+  if (settingsOpen()) return;
   // Tab switches the sidebar between Chat and Controls; in a text field it keeps its meaning.
   if (event.key === "Tab" && !event.metaKey && !event.ctrlKey && !event.altKey && !isTypingTarget(event.target)) {
     boardKey(event, () => event.preventDefault());
@@ -6264,15 +6290,10 @@ document.getElementById("sideTabChat")?.addEventListener("click", () => showSide
 document.getElementById("sideTabControls")?.addEventListener("click", () => showSideView("controls"));
 settingsToggle?.addEventListener("click", () => setSettingsOpen(!settingsOpen()));
 document.getElementById("settingsClose")?.addEventListener("click", () => setSettingsOpen(false));
-document.addEventListener(
-  "pointerdown",
-  (event) => {
-    if (!settingsOpen() || !(event.target instanceof window.Node)) return;
-    if (settingsPanel?.contains(event.target) || settingsToggle?.contains(event.target)) return;
-    setSettingsOpen(false);
-  },
-  true,
-);
+document.getElementById("newMenu")?.addEventListener("toggle", (event) => {
+  const open = /** @type {ToggleEvent} */ (event).newState === "open";
+  document.getElementById("newToggle")?.setAttribute("aria-expanded", String(open));
+});
 document.getElementById("ultrawideSetting")?.addEventListener("change", (event) => {
   setUltrawideInAll(/** @type {HTMLInputElement} */ (event.currentTarget).checked);
 });
@@ -6343,5 +6364,6 @@ if (state.ended) markEnded();
 connectLiveEvents();
 loadRunner();
 setupProjectBoard();
+if (location.hash === SETTINGS_HASH) setSettingsOpen(true);
 setInterval(refreshBoard, 2000);
 setInterval(checkViewed, 500);

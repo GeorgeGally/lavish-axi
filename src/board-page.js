@@ -73,7 +73,10 @@ export function createBoardHtml(
 </head>
 <body>
 <header class="bar">
-  <div class="brand">${PRODUCT_NAME}</div>
+  <a class="brand" href="/" title="All boards">${PRODUCT_NAME}</a>
+  <button class="icon-button new-toggle" id="newToggle" type="button" popovertarget="newMenu" aria-label="New board or project" title="New board or project">
+    <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+  </button>
   <div class="board-name" id="boardName">${escapeHtml(board.name)}</div>
   <div class="project-bar" id="projectBar" hidden>
     <span class="dev-state" id="devState" data-state="stopped" role="status" aria-live="polite"></span>
@@ -148,22 +151,39 @@ export function createBoardHtml(
     </div>
   </section>
 </aside>
-<div class="settings" id="settings" role="dialog" aria-labelledby="settingsTitle" hidden>
-  <div class="settings-head">
-    <h2 class="settings-title" id="settingsTitle">Settings</h2>
-    <button class="icon-button" id="settingsClose" type="button" aria-label="Close settings" title="Close (Esc)">&times;</button>
+<nav class="new-menu" id="newMenu" popover aria-label="New">
+  <a class="new-menu-item" href="/#new-board">New board<span>From a folder of HTML designs</span></a>
+  <a class="new-menu-item" href="/#open-project">Open project<span>A repository folder or GitHub URL</span></a>
+</nav>
+<div class="settings" id="settings" role="dialog" aria-modal="true" aria-labelledby="settingsTitle" hidden>
+  <div class="settings-top">
+    <button class="settings-back" id="settingsClose" type="button" title="Back to the board (Esc)">
+      <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 18l-6-6 6-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      Back to board
+    </button>
   </div>
   <div class="settings-body">
+    <header class="settings-intro">
+      <h1 class="settings-title" id="settingsTitle">Settings</h1>
+      <p class="settings-board">${escapeHtml(board.name)}</p>
+    </header>
     <section class="settings-section" aria-labelledby="viewHeading">
-      <h3 class="settings-heading" id="viewHeading">View</h3>
-      <label class="settings-check">
-        <input type="checkbox" id="ultrawideSetting">
-        <span class="settings-check-text">Show ultrawide<span class="agent-hint">Adds the 3440 ultrawide to the All view.</span></span>
-      </label>
+      <div class="settings-about">
+        <h2 class="settings-heading" id="viewHeading">View</h2>
+      </div>
+      <div class="settings-fields">
+        <label class="settings-check">
+          <input type="checkbox" id="ultrawideSetting">
+          <span class="settings-check-text">Show ultrawide<span class="agent-hint">Adds the 3440 ultrawide to the All view.</span></span>
+        </label>
+      </div>
     </section>
     <section class="settings-section agent-pane" id="projectPane" aria-labelledby="projectHeading" hidden>
-      <h3 class="settings-heading" id="projectHeading">Project</h3>
-      <p class="agent-lede"><code id="projectRoot"></code></p>
+      <div class="settings-about">
+        <h2 class="settings-heading" id="projectHeading">Project</h2>
+        <p class="agent-lede"><code id="projectRoot"></code></p>
+      </div>
+      <div class="settings-fields">
       <form class="agent-form" id="projectForm">
         <label class="agent-field">
           <span class="agent-label">Dev server command</span>
@@ -181,10 +201,14 @@ export function createBoardHtml(
         </div>
       </form>
       <pre class="agent-output" id="devOutput" tabindex="0" aria-label="Dev server output"></pre>
+      </div>
     </section>
     <section class="settings-section agent-pane" id="agentPane" aria-labelledby="agentHeading">
-      <h3 class="settings-heading" id="agentHeading">Agent</h3>
-      <p class="agent-lede">Pick the agent that answers notes on this board. When you send notes, ${PRODUCT_NAME} starts it in the folder below, hands it the notes, and posts its answer in Chat.</p>
+      <div class="settings-about">
+        <h2 class="settings-heading" id="agentHeading">Agent</h2>
+        <p class="agent-lede">Pick the agent that answers notes on this board. When you send notes, ${PRODUCT_NAME} starts it in the working folder, hands it the notes, and posts its answer in Chat.</p>
+      </div>
+      <div class="settings-fields">
       <form class="agent-form" id="agentForm">
         <label class="agent-field">
           <span class="agent-label">Answered by</span>
@@ -213,6 +237,7 @@ export function createBoardHtml(
         </div>
         <p class="agent-run-error" id="agentRunError" hidden></p>
         <pre class="agent-output" id="agentOutput" tabindex="0" aria-label="Agent output"></pre>
+      </div>
       </div>
     </section>
   </div>

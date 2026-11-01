@@ -138,3 +138,11 @@ test("the home page leads with Open project, and marks project boards", () => {
   const hints = [...html.matchAll(/<p class="hint"[^>]*>([^<]*)<\/p>/g)].map((match) => match[1]);
   for (const hint of hints) assert.ok(hint.length <= 80, `hint stays one short line: ${hint}`);
 });
+
+test("a board's New menu opens the home page's own dialog, and closing it returns to the board", () => {
+  const html = createHomeHtml([], { now: Date.now() });
+  assert.match(html, /"#new-board": \[dialog, "\[data-open-new-board\]"\]/);
+  assert.match(html, /"#open-project": \[projectDialog, "\[data-open-project\]"\]/);
+  assert.match(html, /from\.pathname\.startsWith\("\/board\/"\)/);
+  assert.match(html, /addEventListener\("close", \(\) => history\.back\(\), \{ once: true \}\)/);
+});

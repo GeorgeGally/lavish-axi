@@ -94,6 +94,12 @@ test(
       assert.equal(await evaluate(`!!document.getElementById("sideTabAgent")`), false);
       await evaluate(`document.getElementById("settingsToggle").click()`);
       assert.equal(await evaluate(`document.getElementById("settings").hidden`), false);
+      // A full page with its own address: the browser's Back returns to the board.
+      assert.equal(await evaluate(`location.hash`), "#settings");
+      await evaluate(`history.back()`);
+      await until(`document.getElementById("settings").hidden && location.hash === ""`, "back closes settings");
+      await evaluate(`history.forward()`);
+      await until(`!document.getElementById("settings").hidden`, "forward reopens settings");
       await until(`document.getElementById("agentSelect").options.length > 1`, "agents listed");
       const view = await fetch(`${base}/api/boards/${opened.key}/runner`).then((response) => response.json());
       const offered = await evaluate(`[...document.getElementById("agentSelect").options].map((o) => o.value)`);
@@ -120,6 +126,7 @@ test(
         `document.getElementById("agentCwd").dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))`,
       );
       assert.equal(await evaluate(`document.getElementById("settings").hidden`), true);
+      await until(`location.hash === ""`, "settings address cleared");
       await evaluate(`document.getElementById("sideTabChat").click()`);
       await evaluate(`(() => {
         const input = document.getElementById("composerInput");
