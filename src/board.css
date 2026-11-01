@@ -245,7 +245,7 @@ textarea:focus-visible {
   font-size: 16px;
 }
 
-/* Quiet bar toggles: Duplicate, History, Old notes. */
+/* Quiet bar toggles: Duplicate, History. */
 .bar-toggle {
   height: 34px;
   padding: 0 12px;
@@ -286,6 +286,7 @@ textarea:focus-visible {
 }
 
 .dev-state {
+  cursor: pointer;
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -297,6 +298,11 @@ textarea:focus-visible {
   font-size: 13px;
   font-weight: 500;
   white-space: nowrap;
+}
+
+.dev-state:hover {
+  background: rgba(22, 24, 29, 0.09);
+  color: var(--ink);
 }
 
 .dev-state::before {
@@ -2485,8 +2491,9 @@ body[data-dragging="true"] .shield {
   margin: 0 0 0.5em;
 }
 
-/* Settings: a full page over the board, in the home page's calm style. Each section puts
-   its name and explanation beside its fields, and stacks them on a phone. */
+/* Settings: a full page over the board. A sticky top with the way back, then one calm
+   column of sections: a heading, a line about it, and a card of rows that save as they
+   change. Every row has the same padding, and hairlines between rows, never around them. */
 .settings-toggle {
   position: relative;
   flex: none;
@@ -2513,8 +2520,9 @@ body[data-dragging="true"] .shield {
   overflow-y: auto;
   overscroll-behavior: contain;
   background: var(--bg);
+  color: var(--ink);
   font-size: 15px;
-  line-height: 1.45;
+  line-height: 1.5;
   animation: settings-in 200ms cubic-bezier(0.2, 0, 0, 1);
 }
 
@@ -2532,147 +2540,313 @@ body[data-dragging="true"] .shield {
 .settings-top {
   position: sticky;
   top: 0;
-  z-index: 1;
+  z-index: 2;
+  background: color-mix(in srgb, var(--bg) 90%, transparent);
+  backdrop-filter: saturate(1.4) blur(14px);
+  -webkit-backdrop-filter: saturate(1.4) blur(14px);
+  box-shadow: 0 1px 0 var(--line);
+}
+
+/* The way back lines up with the column below it. */
+.settings-top-inner {
   display: flex;
   align-items: center;
-  height: var(--bar-height);
-  padding: 0 16px;
-  background: color-mix(in srgb, var(--bg) 88%, transparent);
-  backdrop-filter: blur(8px);
+  justify-content: space-between;
+  gap: 16px;
+  width: min(720px, 100%);
+  height: 68px;
+  margin: 0 auto;
+  padding: 0 24px;
 }
 
 .settings-back {
   display: inline-flex;
+  flex: none;
   align-items: center;
   gap: 6px;
-  height: 36px;
-  padding: 0 12px 0 8px;
-  border-radius: 10px;
-  color: var(--ink-2);
+  height: 40px;
+  margin-left: -4px;
+  padding: 0 16px 0 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: var(--surface-strong);
+  color: var(--ink);
   font-size: 14px;
-  font-weight: 500;
+  font-weight: 550;
+  box-shadow: 0 1px 2px rgba(22, 24, 29, 0.05);
   transition:
-    background-color 100ms ease,
-    color 100ms ease;
+    border-color 100ms ease,
+    transform 80ms ease;
 }
 
 .settings-back:hover {
-  background: rgba(22, 24, 29, 0.06);
-  color: var(--ink);
+  border-color: var(--ink-4);
+}
+
+.settings-back:active {
+  transform: translateY(1px);
+}
+
+.settings-saved {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink-3);
+  font-size: 14px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  opacity: 0;
+  transition: opacity 200ms ease;
+}
+
+.settings-saved[data-shown="true"] {
+  opacity: 1;
 }
 
 .settings-body {
-  width: min(920px, 100%);
+  width: min(720px, 100%);
   margin: 0 auto;
-  padding: 24px 40px 120px;
+  padding: 56px 24px 160px;
 }
 
 .settings-intro {
-  padding-bottom: 40px;
+  margin-bottom: 56px;
 }
 
 .settings-title {
   margin: 0;
   color: var(--ink);
-  font-size: 28px;
-  line-height: 1.15;
+  font-size: 40px;
+  line-height: 1.1;
   font-weight: 650;
-  letter-spacing: -0.01em;
+  letter-spacing: -0.02em;
 }
 
 .settings-board {
-  margin: 8px 0 0;
+  margin: 12px 0 0;
   color: var(--ink-3);
-  font-size: 15px;
+  font-size: 17px;
   overflow-wrap: anywhere;
 }
 
 .settings-section {
-  display: grid;
-  grid-template-columns: minmax(0, 260px) minmax(0, 1fr);
-  gap: 48px;
-  padding: 40px 0;
-  border-top: 1px solid var(--line);
+  margin-top: 56px;
 }
 
 .settings-section[hidden] {
   display: none;
 }
 
-.settings-heading {
-  margin: 0;
-  color: var(--ink);
-  font-size: 16px;
-  line-height: 1.35;
-  font-weight: 600;
-  letter-spacing: 0;
-}
-
-.settings-about .agent-lede {
-  margin: 8px 0 0;
-  font-size: 14px;
-}
-
-.settings-fields {
+.settings-section-head {
+  display: grid;
+  gap: 6px;
+  margin: 0 0 16px;
   min-width: 0;
 }
 
-.settings-check {
+.settings-heading {
+  margin: 0;
+  color: var(--ink);
+  font-size: 20px;
+  line-height: 1.3;
+  font-weight: 620;
+  letter-spacing: -0.01em;
+}
+
+.settings-lede {
+  margin: 0;
+  color: var(--ink-3);
+  font-size: 15px;
+  line-height: 1.5;
+  max-width: 60ch;
+}
+
+/* A long path keeps its start and its last folder: the middle gives way. */
+.settings-path {
   display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  cursor: pointer;
+  min-width: 0;
+  margin: 0;
+  color: var(--ink-3);
+  font-size: 15px;
+  white-space: nowrap;
 }
 
-.settings-check input {
+.settings-path-head {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.settings-path-tail {
   flex: none;
-  width: 18px;
-  height: 18px;
-  margin: 2px 0 0;
-  accent-color: var(--ink);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--ink-2);
 }
 
-.settings-check input:focus-visible {
-  outline: 2px solid var(--select);
-  outline-offset: 2px;
+.settings-card {
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--surface-strong);
+  box-shadow: 0 1px 2px rgba(22, 24, 29, 0.04);
 }
 
-.settings-check-text {
+.settings-form {
+  display: contents;
+}
+
+.settings-row {
+  display: block;
+  padding: 20px 24px;
+  border-top: 1px solid var(--line);
+}
+
+.settings-card > .settings-row:first-child,
+.settings-card > .settings-form:first-child > .settings-row:first-child {
+  border-top: 0;
+}
+
+.settings-row[hidden] {
+  display: none;
+}
+
+.settings-row-text {
   display: grid;
   gap: 4px;
+  min-width: 0;
+}
+
+.settings-row-title {
   color: var(--ink);
   font-size: 15px;
   font-weight: 500;
 }
 
-.settings .agent-form {
+.settings-hint {
+  color: var(--ink-3);
+  font-size: 14px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.settings-hint:empty {
+  display: none;
+}
+
+.settings-hint code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+}
+
+/* A switch row: words on the left, the switch on the right, the whole row clickable. */
+.settings-switch {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   gap: 24px;
+  cursor: pointer;
 }
 
-.settings .agent-field {
-  gap: 8px;
+.settings-switch input {
+  appearance: none;
+  position: relative;
+  flex: none;
+  width: 44px;
+  height: 26px;
+  margin: 0;
+  border-radius: 999px;
+  background: var(--line-strong);
+  cursor: pointer;
+  transition: background-color 160ms ease;
 }
 
-.settings .agent-label {
+.settings-switch input::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow: 0 1px 3px rgba(22, 24, 29, 0.25);
+  transition: transform 160ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+.settings-switch input:checked {
+  background: var(--ink);
+}
+
+.settings-switch input:checked::after {
+  transform: translateX(18px);
+}
+
+.settings-switch input:focus-visible {
+  outline: 2px solid var(--select);
+  outline-offset: 2px;
+}
+
+/* A field row: its name, the input, then a line of help. */
+.settings-field {
+  display: grid;
+  gap: 10px;
+}
+
+.settings-input {
+  display: block;
+  width: 100%;
+  height: 44px;
+  padding: 0 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  background: var(--surface-strong);
+  color: var(--ink);
+  font: inherit;
+  font-size: 15px;
+  outline: none;
+  transition: border-color 100ms ease;
+}
+
+.settings-input::placeholder {
+  color: var(--ink-4);
+}
+
+.settings-input:hover {
+  border-color: var(--ink-4);
+}
+
+.settings-input:focus {
+  border-color: var(--ink-3);
+}
+
+.settings-input:focus-visible {
+  outline: 2px solid var(--select);
+  outline-offset: 1px;
+}
+
+.settings-input-short {
+  max-width: 160px;
+}
+
+select.settings-input {
+  appearance: none;
+  padding-right: 40px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24'%3E%3Cpath d='M6 9l6 6 6-6' fill='none' stroke='%236b717c' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 14px center;
+  cursor: pointer;
+}
+
+.settings-error {
+  margin: 0;
+  padding: 0 24px 20px;
+  color: var(--danger);
   font-size: 14px;
 }
 
-.settings .agent-input {
-  height: 42px;
-  font-size: 15px;
-}
-
-.settings input.agent-input {
-  font-size: 13px;
-}
-
-.settings .agent-hint {
-  font-size: 13px;
-}
-
-.settings .agent-actions {
-  margin-top: 8px;
-  padding-top: 24px;
+.settings-error:empty {
+  display: none;
 }
 
 .settings .button {
@@ -2682,41 +2856,163 @@ body[data-dragging="true"] .shield {
   font-size: 14px;
 }
 
-.settings .agent-output {
-  font-size: 12px;
+/* Stop reads as the opposite of Start: same shape, the danger colour in its words. */
+.button-stop {
+  color: var(--danger);
 }
 
-@media (max-width: 820px) {
-  .settings-body {
-    padding: 16px 24px 96px;
-  }
+.button-stop:hover:not(:disabled) {
+  border-color: var(--danger);
+}
 
-  .settings-section {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 20px;
-    padding: 32px 0;
-  }
+/* The dev server's state and its controls, at the top of the Project card. */
+.dev-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding-top: 24px;
+  padding-bottom: 24px;
+}
+
+.dev-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--ink);
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.dev-status::before {
+  content: "";
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--ink-4);
+}
+
+.dev-status[data-state="running"]::before {
+  background: #16a34a;
+}
+
+.dev-status[data-state="starting"]::before {
+  background: #d97706;
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+.dev-status[data-state="failed"]::before {
+  background: var(--danger);
+}
+
+.dev-row .settings-hint {
+  padding-left: 18px;
+}
+
+.settings-row-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 10px;
+}
+
+/* Output folds away until it is wanted. */
+.settings-output summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink-2);
+  font-size: 15px;
+  font-weight: 500;
+  cursor: pointer;
+  list-style: none;
+}
+
+.settings-output summary::-webkit-details-marker {
+  display: none;
+}
+
+.settings-output summary::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  margin: 0 4px 0 2px;
+  border-right: 1.6px solid currentColor;
+  border-bottom: 1.6px solid currentColor;
+  transform: rotate(-45deg);
+  transition: transform 140ms ease;
+}
+
+.settings-output[open] summary::before {
+  transform: rotate(45deg);
+}
+
+.settings-output[open] .agent-output {
+  margin-top: 16px;
+}
+
+.settings .agent-output {
+  max-height: 40vh;
+  font-size: 12px;
+  background: var(--surface);
+}
+
+.settings .agent-run {
+  display: grid;
+  gap: 16px;
+}
+
+.settings .agent-run[hidden] {
+  display: none;
+}
+
+.settings .agent-run-head {
+  gap: 10px;
+}
+
+.settings .run-state {
+  font-size: 15px;
 }
 
 @media (max-width: 520px) {
-  .settings-top {
-    padding: 0 8px;
+  .settings-top-inner {
+    height: 60px;
+    padding: 0 16px;
   }
 
   .settings-body {
-    padding: 8px 16px 80px;
-  }
-
-  .settings-title {
-    font-size: 24px;
+    padding: 32px 16px 120px;
   }
 
   .settings-intro {
-    padding-bottom: 28px;
+    margin-bottom: 40px;
+  }
+
+  .settings-title {
+    font-size: 32px;
   }
 
   .settings-section {
-    padding: 28px 0;
+    margin-top: 44px;
+  }
+
+  .settings-row {
+    padding: 18px 18px;
+  }
+
+  .settings-error {
+    padding: 0 18px 18px;
+  }
+
+  .dev-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 20px;
+  }
+
+  .settings-row-actions .button {
+    flex: 1;
   }
 }
 

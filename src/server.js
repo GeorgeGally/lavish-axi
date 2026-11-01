@@ -101,6 +101,7 @@ import {
   ProjectError,
   cloneGithubRepo,
   createDevServer,
+  devServerDetectIssue,
   createLiveProxy,
   createProjectConfigStore,
   detectDevServer,
@@ -2619,7 +2620,8 @@ export async function serve({
   // Project boards (src/project.js): a board kept in a repository's `.liesel/` folder. Its
   // agent works in the repo root, and its live items show the project's own dev server
   // through a loopback proxy on a port of its own, so the app keeps its absolute URLs and
-  // its own origin. Nothing from the repo runs until the user presses Start.
+  // its own origin. Opening the board starts the dev server (`/project/start` with `auto`);
+  // a Stop the user pressed holds until they start it again or Liesel restarts.
   const projectConfigs = createProjectConfigStore(attachmentStateRoot);
   /**
    * @typedef {{
@@ -2628,7 +2630,7 @@ export async function serve({
    *   dev: ReturnType<typeof createDevServer>, proxy: ReturnType<typeof createLiveProxy>,
    *   origin: string, watcher: import("chokidar").FSWatcher | null,
    *   sourceTimer: ReturnType<typeof setTimeout> | null, broadcastTimer: ReturnType<typeof setTimeout> | null,
-   *   lastStatus: string,
+   *   lastStatus: string, userStopped: boolean, issue: string,
    * }} LiveProject
    */
   /** @type {Map<string, Promise<LiveProject>>} */
@@ -2645,7 +2647,7 @@ export async function serve({
 
   /**
    * The live project behind a project board, created on first use: its proxy listens from
-   * then on, but its dev server only runs once the user presses Start.
+   * then on, and its dev server runs once the board opens or the user presses Start.
    * @param {string} key
    * @param {any} session
    * @returns {Promise<LiveProject | null>}
@@ -2670,6 +2672,8 @@ export async function serve({
         sourceTimer: null,
         broadcastTimer: null,
         lastStatus: "stopped",
+        userStopped: false,
+        issue: "",
       };
       project.dev = createDevServer({ cwd: root, env, onChange: () => scheduleProjectBroadcast(project) });
       const sdkSrc = `http://${LOOPBACK_HOST}:${publicPort}/board-sdk.js?key=${encodeURIComponent(key)}&live=1&v=${encodeURIComponent(version)}`;
@@ -2696,15 +2700,22 @@ export async function serve({
   /** @param {LiveProject} project */
   function liveStatusMessage(project) {
     const view = project.dev.view();
-    if (view.status === "starting") return { title: "Starting the dev server…", message: view.command };
+    if (view.status === "starting") return { title: "Starting the dev server", message: view.command, busy: true };
     const port = project.dev.port() || project.config?.port || 0;
     if (view.status === "failed")
-      return { title: "The dev server stopped", message: view.error || "See its output on the board." };
-    if (!port)
-      return { title: "No dev server yet", message: "Press Start on the board to run the project's dev server." };
+      return {
+        title: "The dev server stopped",
+        message: [view.error, view.last_line].filter(Boolean).join(" · ") || "See its output in Settings.",
+      };
+    if (project.issue) return { title: "No dev server found", message: project.issue };
+    if (project.userStopped && !port)
+      return { title: "The dev server is stopped", message: "Start it again from Settings." };
+    if (!port) return { title: "Starting the dev server", message: "", busy: true };
+    if (view.status === "running")
+      return { title: "Starting the dev server", message: `Waiting for localhost:${port}`, busy: true };
     return {
       title: "Dev server not answering",
-      message: `Nothing answered at localhost:${port}. Press Start on the board, or check the port.`,
+      message: `Nothing answered at localhost:${port}. Start it from Settings, or check the port.`,
     };
   }
 
@@ -2742,13 +2753,15 @@ export async function serve({
       proxy: project.origin,
       config: project.config ? { command: project.config.command, port: project.config.port } : null,
       dev: project.dev.view(),
+      issue: project.issue,
+      user_stopped: project.userStopped,
     };
   }
 
-  /** @param {LiveProject} project */
-  function scheduleProjectBroadcast(project) {
+  /** @param {LiveProject} project @param {boolean} [urgent] */
+  function scheduleProjectBroadcast(project, urgent = false) {
     const status = project.dev.view().status;
-    const now = status !== project.lastStatus;
+    const now = urgent || status !== project.lastStatus;
     project.lastStatus = status;
     if (project.broadcastTimer && !now) return;
     if (project.broadcastTimer) clearTimeout(project.broadcastTimer);
@@ -2868,6 +2881,7 @@ export async function serve({
       }
       await projectConfigs.update(found.project.boardFile, checked.config);
       found.project.config = await projectConfigs.get(found.project.boardFile);
+      found.project.issue = "";
       scheduleProjectBroadcast(found.project);
       res.json({ ...projectView(found.project), detected: await detectDevServer(found.project.root) });
     } catch (error) {
@@ -2875,18 +2889,74 @@ export async function serve({
     }
   });
 
+  /**
+   * The command to run, accepting the detected one when the user has set none. Detection
+   * failing leaves the reason on the project, which its frames show.
+   * @param {LiveProject} project
+   */
+  async function ensureDevCommand(project) {
+    if (project.config?.command) return project.config;
+    if (project.config?.port) return null;
+    const detected = await detectDevServer(project.root);
+    if (!detected) {
+      project.issue = await devServerDetectIssue(project.root);
+      scheduleProjectBroadcast(project, true);
+      return null;
+    }
+    await projectConfigs.update(project.boardFile, { command: detected.command, port: 0 });
+    project.config = await projectConfigs.get(project.boardFile);
+    return project.config;
+  }
+
+  // Start runs the dev server. `auto` is the board asking as it opens: it starts a server
+  // that is not running unless the user stopped it, and never errors for want of a command.
   app.post("/api/boards/:key/project/start", async (req, res, next) => {
     try {
       if (!boardWriteGuard(req, res)) return;
       const found = await projectForRequest(req, res);
       if (!found) return;
       const { project } = found;
-      if (!project.config?.command) {
+      const auto = req.body?.auto === true;
+      if (auto && (project.userStopped || project.dev.running())) {
+        res.json(projectView(project));
+        return;
+      }
+      const config = await ensureDevCommand(project);
+      if (!config?.command) {
+        if (auto) res.json(projectView(project));
+        else res.status(400).json({ status: "error", error: "Set the dev server command first" });
+        return;
+      }
+      project.userStopped = false;
+      project.issue = "";
+      writeLog(
+        `[liesel] dev server start${auto ? " (on open)" : ""} key=${project.key} cwd=${project.root} command=${config.command}`,
+      );
+      // A server still winding down from a Stop starts again once it has gone.
+      if (project.dev.running() && project.dev.view().status === "stopped")
+        await project.dev.restart({ command: config.command, port: config.port });
+      else project.dev.start({ command: config.command, port: config.port });
+      res.json(projectView(project));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post("/api/boards/:key/project/restart", async (req, res, next) => {
+    try {
+      if (!boardWriteGuard(req, res)) return;
+      const found = await projectForRequest(req, res);
+      if (!found) return;
+      const { project } = found;
+      const config = await ensureDevCommand(project);
+      if (!config?.command) {
         res.status(400).json({ status: "error", error: "Set the dev server command first" });
         return;
       }
-      writeLog(`[liesel] dev server start key=${project.key} cwd=${project.root} command=${project.config.command}`);
-      project.dev.start({ command: project.config.command, port: project.config.port });
+      project.userStopped = false;
+      project.issue = "";
+      writeLog(`[liesel] dev server restart key=${project.key} cwd=${project.root} command=${config.command}`);
+      await project.dev.restart({ command: config.command, port: config.port });
       res.json(projectView(project));
     } catch (error) {
       next(error);
@@ -2898,6 +2968,7 @@ export async function serve({
       if (!boardWriteGuard(req, res)) return;
       const found = await projectForRequest(req, res);
       if (!found) return;
+      found.project.userStopped = true;
       found.project.dev.stop();
       res.json(projectView(found.project));
     } catch (error) {

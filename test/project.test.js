@@ -12,9 +12,11 @@ import {
   createLiveProxy,
   createProjectConfigStore,
   detectDevServer,
+  devServerDetectIssue,
   devServerPortFromOutput,
   ensureGitExclude,
   injectLiveSdk,
+  liveFallbackHtml,
   normalizeLivePage,
   parseGithubRepoUrl,
   projectRootForBoardDir,
@@ -365,4 +367,30 @@ test("the live proxy keeps its port across restarts when it is free", async (t) 
   t.after(() => second.close());
   await second.listen(port);
   assert.equal(second.port(), port);
+});
+
+test("devServerDetectIssue says plainly why nothing could start", async (t) => {
+  const dir = await realpath(await mkdtemp(path.join(tmpdir(), "liesel-detect-issue-")));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  assert.match(await devServerDetectIssue(dir), /no package\.json/);
+  await writeFile(path.join(dir, "package.json"), "{ nope");
+  assert.match(await devServerDetectIssue(dir), /could not be read/);
+  await writeFile(path.join(dir, "package.json"), JSON.stringify({ scripts: { build: "vite build" } }));
+  assert.match(await devServerDetectIssue(dir), /no dev, start or serve script/);
+});
+
+test("a starting frame shows a calm busy page that looks again; a reason page does not", () => {
+  const busy = liveFallbackHtml({
+    title: "Starting the dev server",
+    message: "npm run dev",
+    sdkSrc: "/sdk.js",
+    busy: true,
+  });
+  assert.match(busy, /<meta http-equiv="refresh" content="2">/);
+  assert.match(busy, /data-busy="true"/);
+  assert.match(busy, /<h1>Starting the dev server<\/h1><p>npm run dev<\/p>/);
+  const reason = liveFallbackHtml({ title: "No dev server found", message: "<no package.json>", sdkSrc: "/sdk.js" });
+  assert.doesNotMatch(reason, /http-equiv/);
+  assert.match(reason, /&lt;no package\.json&gt;/);
+  for (const match of busy.matchAll(/letter-spacing:\s*([-\d.]+)em/g)) assert.ok(Number(match[1]) <= 0.04);
 });

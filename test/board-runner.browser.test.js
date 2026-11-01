@@ -117,8 +117,19 @@ test(
       })()`);
       assert.equal(await evaluate(`document.getElementById("agentCommandField").hidden`), false);
       await shoot("02-custom-command");
-      await evaluate(`document.getElementById("agentSave").click()`);
-      await until(`/^Saved/.test(document.getElementById("agentSaveStatus").textContent)`, "saved");
+      // Settings save as they change: the command saves once it is entered.
+      await evaluate(`document.getElementById("agentCommand").dispatchEvent(new Event("change", { bubbles: true }))`);
+      await until(`/^Saved/.test(document.getElementById("settingsSaved").textContent)`, "saved");
+      const saved = await fetch(`${base}/api/boards/${opened.key}/runner`).then((response) => response.json());
+      assert.equal(saved.config?.agent, "custom");
+
+      // Show old notes is a switch here now, kept per board.
+      assert.equal(await evaluate(`document.getElementById("oldNotesSetting").checked`), true);
+      await evaluate(`document.getElementById("oldNotesSetting").click()`);
+      assert.equal(await evaluate(`document.body.classList.contains("old-notes-hidden")`), true);
+      assert.equal(await evaluate(`localStorage.getItem("liesel:old-notes:${opened.key}")`), "off");
+      await evaluate(`document.getElementById("oldNotesSetting").click()`);
+      assert.equal(await evaluate(`document.body.classList.contains("old-notes-hidden")`), false);
       assert.doesNotMatch(await readFile(path.join(boardDir, "board.json"), "utf8"), /fake-agent/);
 
       // Send a note from Chat; the agent starts at once. Escape closes Settings.

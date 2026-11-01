@@ -85,7 +85,7 @@ async function waitFor(check, { tries = 200, ms = 50 } = {}) {
   throw new Error("timed out waiting");
 }
 
-test("Open project keeps the board in the repo, out of git, and runs nothing until Start", async (t) => {
+test("Open project keeps the board in the repo, out of git, and runs nothing until its board opens", async (t) => {
   const { base, repo, marker } = await setup(t);
 
   const foreign = await post(
@@ -124,14 +124,109 @@ test("Open project keeps the board in the repo, out of git, and runs nothing unt
 
   const idle = await fetch(`${project.proxy}/`);
   assert.equal(idle.status, 503);
-  assert.match(await idle.text(), /No dev server yet/);
+  const idleText = await idle.text();
+  assert.match(idleText, /Starting the dev server/);
+  assert.match(idleText, /<meta http-equiv="refresh" content="2">/, "a starting frame looks again by itself");
 
   const home = await fetch(`${base}/`).then((response) => response.text());
   assert.match(home, />shop<\/a>/);
   assert.match(home, /<span class="kind">Project<\/span>/);
 
   await new Promise((resolve) => setTimeout(resolve, 200));
-  await assert.rejects(stat(marker), "nothing from the repo ran before Start");
+  await assert.rejects(stat(marker), "nothing from the repo ran before its board opened");
+});
+
+test("the board opening starts the detected dev server; Stop holds until Start, and Restart runs it again", async (t) => {
+  const { base, repo, marker } = await setup(t);
+  const { body: opened } = await post(base, "/api/projects", { path: repo });
+  const key = opened.key;
+
+  const foreign = await post(
+    base,
+    `/api/boards/${key}/project/start`,
+    { auto: true },
+    { "content-type": "application/json", origin: "http://evil.example" },
+  );
+  assert.equal(foreign.status, 403);
+
+  const auto = await post(base, `/api/boards/${key}/project/start`, { auto: true });
+  assert.equal(auto.status, 200, JSON.stringify(auto.body));
+  assert.equal(auto.body.config.command, "npm run dev", "the detected command is accepted and kept on this machine");
+  assert.doesNotMatch(await readFile(path.join(repo, ".liesel", "board.json"), "utf8"), /npm run dev/);
+  assert.equal(auto.body.dev.status, "starting");
+  const running = await waitFor(async () => {
+    const view = await fetch(`${base}/api/boards/${key}/project`).then((response) => response.json());
+    return view.dev.status === "running" ? view : null;
+  });
+  const firstPid = Number(await readFile(marker, "utf8"));
+  assert.ok(firstPid > 0);
+  const page = await waitFor(async () => {
+    const text = await fetch(`${running.proxy}/`).then((response) => response.text());
+    return /Shop \//.test(text) ? text : null;
+  });
+  assert.match(page, /<h1 id=title>Shop \/<\/h1>/);
+
+  const again = await post(base, `/api/boards/${key}/project/start`, { auto: true });
+  assert.equal(again.body.dev.running, true, "a second board tab leaves the running server alone");
+
+  const restarted = await post(base, `/api/boards/${key}/project/restart`, {});
+  assert.equal(restarted.status, 200, JSON.stringify(restarted.body));
+  await waitFor(async () => {
+    const pid = Number(await readFile(marker, "utf8").catch(() => "0"));
+    return pid && pid !== firstPid;
+  });
+
+  const stopped = await post(base, `/api/boards/${key}/project/stop`, {});
+  assert.equal(stopped.body.user_stopped, true);
+  await waitFor(async () => {
+    const view = await fetch(`${base}/api/boards/${key}/project`).then((response) => response.json());
+    return view.dev.running === false;
+  });
+  const reopened = await post(base, `/api/boards/${key}/project/start`, { auto: true });
+  assert.equal(reopened.body.dev.running, false, "reopening the board does not undo a Stop");
+  const held = await fetch(`${running.proxy}/`).then((response) => response.text());
+  assert.match(held, /The dev server is stopped/);
+
+  const started = await post(base, `/api/boards/${key}/project/start`, {});
+  assert.equal(started.body.dev.running, true);
+  assert.equal(started.body.user_stopped, false);
+  await post(base, `/api/boards/${key}/project/stop`, {});
+});
+
+test("a project with nothing to run says why in its frames, and a failed start shows its last words", async (t) => {
+  const { base, dir } = await setup(t);
+  const bare = path.join(dir, "bare");
+  await mkdir(path.join(bare, ".git", "info"), { recursive: true });
+  const { body: opened } = await post(base, "/api/projects", { path: bare });
+  const auto = await post(base, `/api/boards/${opened.key}/project/start`, { auto: true });
+  assert.equal(auto.status, 200, "the board asking on open never errors for want of a command");
+  assert.equal(auto.body.dev.running, false);
+  assert.match(auto.body.issue, /no package\.json/);
+  const frame = await fetch(`${auto.body.proxy}/`).then((response) => response.text());
+  assert.match(frame, /No dev server found/);
+  assert.match(frame, /no package\.json/);
+  assert.doesNotMatch(frame, /http-equiv="refresh"/);
+  const manual = await post(base, `/api/boards/${opened.key}/project/start`, {});
+  assert.equal(manual.status, 400);
+
+  await writeFile(
+    path.join(bare, "package.json"),
+    JSON.stringify({ scripts: { dev: "echo 'vite: not found' >&2; exit 127" } }),
+  );
+  const saved = await post(base, `/api/boards/${opened.key}/project/dev`, {
+    command: "echo 'vite: not found' >&2; exit 127",
+    port: "",
+  });
+  assert.equal(saved.body.issue, "", "saving a command clears the reason");
+  await post(base, `/api/boards/${opened.key}/project/start`, {});
+  const failed = await waitFor(async () => {
+    const view = await fetch(`${base}/api/boards/${opened.key}/project`).then((response) => response.json());
+    return view.dev.status === "failed" ? view : null;
+  });
+  assert.equal(failed.dev.last_line, "vite: not found");
+  const reason = await fetch(`${failed.proxy}/`).then((response) => response.text());
+  assert.match(reason, /The dev server stopped/);
+  assert.match(reason, /Exited with 127 · vite: not found/);
 });
 
 test("a live page runs on the project's dev server with the SDK, and a note reaches the agent with its path and selector", async (t) => {
@@ -149,9 +244,6 @@ test("a live page runs on the project's dev server with the SDK, and a note reac
     },
   );
   assert.equal(foreign.status, 403);
-  const startedEarly = await post(base, `/api/boards/${key}/project/start`, {});
-  assert.equal(startedEarly.status, 400, "Start needs a command first");
-
   const saved = await post(base, `/api/boards/${key}/project/dev`, { command: "node fake-dev.mjs", port: "" });
   assert.equal(saved.status, 200, JSON.stringify(saved.body));
   assert.equal(saved.body.config.command, "node fake-dev.mjs");

@@ -42,13 +42,18 @@ test("Settings in the top bar holds the agent picker and the ultrawide toggle; t
     "agentSelect",
     "agentCwd",
     "agentCommand",
-    "agentSave",
     "agentOutput",
+    "oldNotesSetting",
   ]) {
     assert.match(settings, new RegExp(`id="${id}"`), id);
   }
-  // No ultrawide button in the bar any more.
+  // No ultrawide or old-notes button in the bar any more: both are switches in Settings.
   assert.doesNotMatch(bar, /ultrawide/i);
+  assert.doesNotMatch(bar, /oldNotes|old notes/i);
+  assert.match(settings, /<input type="checkbox" role="switch" id="oldNotesSetting" checked>/);
+  // Settings save as they change: no Save buttons anywhere on the page.
+  assert.doesNotMatch(settings, />Save</);
+  assert.doesNotMatch(settings, /type="submit"/);
 });
 
 test("Settings is a full page with a way back to the board, in the home page's calm type", async () => {
@@ -56,6 +61,8 @@ test("Settings is a full page with a way back to the board, in the home page's c
   const settings = html.slice(html.indexOf('id="settings"'), html.indexOf("<!-- /settings -->"));
   assert.match(html, /id="settings"[^>]*aria-modal="true"/);
   assert.match(settings, /<button class="settings-back" id="settingsClose"[^>]*>[\s\S]*Back to board\s*<\/button>/);
+  // The way back carries no tooltip that would cover it.
+  assert.doesNotMatch(settings.match(/<button class="settings-back"[^>]*>/)?.[0] || "", /title=/);
   assert.match(settings, /<h1 class="settings-title" id="settingsTitle">Settings<\/h1>/);
   assert.match(settings, /<p class="settings-board">Shop<\/p>/);
   const css = await readFile(new URL("../src/board.css", import.meta.url), "utf8");
@@ -95,4 +102,19 @@ test("Duplicate on a design's label shows at rest; only a copy's Rename and Dele
   assert.match(client, /button\("Duplicate", "Duplicate this design \(⌘D\)", \(\) => duplicateDesign\(item\.id\)\)/);
   assert.match(client, /button\("Rename", "Rename this copy", \(\) => startRename\(item\.id\), true\)/);
   assert.match(client, /button\("Delete", "Delete this copy", \(\) => deleteCopy\(item\.id\), true\)/);
+});
+
+test("a project board's top bar shows the dev server's state and opens Settings, which holds Start, Stop and Restart", () => {
+  const html = createBoardHtml({ key: "k", file: "/repo/.liesel/board.json" }, /** @type {any} */ (board), {
+    project: { root: "/repo" },
+  });
+  const bar = html.slice(html.indexOf('<header class="bar"'), html.indexOf("</header>"));
+  const settings = html.slice(html.indexOf('id="settings"'), html.indexOf("<!-- /settings -->"));
+  assert.match(bar, /<button class="dev-state" id="devState" type="button"/);
+  assert.doesNotMatch(bar, /devToggle|>Start</);
+  for (const id of ["devStart", "devStop", "devRestart", "devCommand", "devPort", "devOutput", "projectRoot"]) {
+    assert.match(settings, new RegExp(`id="${id}"`), id);
+  }
+  // The project path is cut in the middle, keeping its last folder.
+  assert.match(settings, /class="settings-path-head"><\/span><span class="settings-path-tail">/);
 });

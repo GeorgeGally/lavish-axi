@@ -690,7 +690,7 @@ function scheduleLayout() {
 // A project board's live items show the project's running dev server through Liesel's
 // loopback proxy, on an origin of its own (never this page's). The frame's name tells
 // the SDK the proxy added which item and device it is.
-/** @type {{ root: string, name: string, proxy: string, config: { command: string, port: number } | null, dev: any } | null} */
+/** @type {{ root: string, name: string, proxy: string, config: { command: string, port: number } | null, dev: any, issue?: string, user_stopped?: boolean } | null} */
 let project = bootstrap.project && typeof bootstrap.project === "object" ? bootstrap.project : null;
 
 /** The URL path a live frame shows now; it can navigate away from the item's own page. */
@@ -1327,19 +1327,18 @@ document.getElementById("historyToggle")?.addEventListener("click", () => {
 const oldNotesStorageKey = `liesel:old-notes:${key}`;
 let showOldNotes = readStorage(oldNotesStorageKey) !== "off";
 
+// The switch lives in Settings, beside Show ultrawide.
 function renderOldNotesToggle() {
-  const toggle = document.getElementById("oldNotesToggle");
   document.body.classList.toggle("old-notes-hidden", !showOldNotes);
-  if (!toggle) return;
-  toggle.setAttribute("aria-pressed", String(showOldNotes));
-  toggle.textContent = showOldNotes ? "Old notes shown" : "Show old notes";
-  toggle.title = showOldNotes ? "Hide answered notes" : "Show answered notes";
+  const toggle = /** @type {HTMLInputElement | null} */ (document.getElementById("oldNotesSetting"));
+  if (toggle) toggle.checked = showOldNotes;
 }
 
-document.getElementById("oldNotesToggle")?.addEventListener("click", () => {
-  showOldNotes = !showOldNotes;
+document.getElementById("oldNotesSetting")?.addEventListener("change", (event) => {
+  showOldNotes = /** @type {HTMLInputElement} */ (event.currentTarget).checked;
   writeStorage(oldNotesStorageKey, showOldNotes ? "on" : "off");
   renderOldNotesToggle();
+  flashSettingsSaved();
 });
 renderOldNotesToggle();
 
@@ -2504,6 +2503,7 @@ function renderUltrawideToggle() {
 /** @param {boolean} on */
 function setUltrawideInAll(on) {
   if (on === state.ultrawideInAll) return;
+  flashSettingsSaved();
   state.ultrawideInAll = on;
   writeStorage(ultrawideStorageKey, on ? "on" : "off");
   renderUltrawideToggle();
@@ -4055,7 +4055,7 @@ function toggleSideView() {
 /* ---------------------------------------------------------------- settings */
 
 // Settings opens from the gear in the top bar as a full page over the board: the ultrawide
-// toggle, the project's dev server and the agent picker. Its address is the board's with
+// and old-notes switches, the project's dev server and the agent picker, all saved as they change. Its address is the board's with
 // #settings, so a reload keeps it open and the browser's Back returns to the board. It closes
 // on Escape, Back to board, or the gear.
 const settingsPanel = document.getElementById("settings");
@@ -4093,6 +4093,19 @@ function setSettingsOpen(open) {
   }
 }
 
+// Settings save as they change; a quiet "Saved" in the top bar says each one landed.
+let settingsSavedTimer = 0;
+function flashSettingsSaved(text = "Saved") {
+  const status = document.getElementById("settingsSaved");
+  if (!status) return;
+  status.textContent = text;
+  status.dataset.shown = "true";
+  window.clearTimeout(settingsSavedTimer);
+  settingsSavedTimer = window.setTimeout(() => {
+    status.dataset.shown = "false";
+  }, 1800);
+}
+
 window.addEventListener("popstate", () => {
   const wanted = location.hash === SETTINGS_HASH;
   if (wanted === settingsOpen()) return;
@@ -4120,7 +4133,6 @@ function runnerElements() {
     commandField: document.getElementById("agentCommandField"),
     cwd: /** @type {HTMLInputElement | null} */ (document.getElementById("agentCwd")),
     cwdField: document.getElementById("agentCwdField"),
-    save: /** @type {HTMLButtonElement | null} */ (document.getElementById("agentSave")),
     saveStatus: document.getElementById("agentSaveStatus"),
     run: document.getElementById("agentRun"),
     runState: document.getElementById("agentRunState"),
@@ -4232,13 +4244,16 @@ function renderRunner() {
   }
 }
 
+/** Saves the agent choice as it changes; a custom agent waits until it has a command. */
 function saveRunner(event) {
   event?.preventDefault();
   const els = runnerElements();
-  if (!els.select || !els.save) return;
+  if (!els.select) return;
   const agent = els.select.value;
-  els.save.disabled = true;
-  if (els.saveStatus) els.saveStatus.textContent = "";
+  if (agent === "custom" && !els.command?.value.trim()) {
+    if (els.saveStatus) els.saveStatus.textContent = "";
+    return;
+  }
   fetch(`/api/boards/${encodeURIComponent(key)}/runner`, {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -4249,18 +4264,16 @@ function saveRunner(event) {
       if (!response.ok) throw new Error(body?.error || "Could not save");
       runnerState.view = body;
       if (els.cwd && body.config?.cwd) els.cwd.value = body.config.cwd;
-      if (els.saveStatus) {
-        els.saveStatus.textContent = body.config
-          ? `Saved. Notes you send go to ${els.select?.selectedOptions[0]?.textContent || "the agent"}.`
-          : "Saved. Notes wait for an agent that polls this board.";
-      }
+      if (els.saveStatus) els.saveStatus.textContent = "";
+      flashSettingsSaved(
+        body.config
+          ? `Saved. Notes go to ${els.select?.selectedOptions[0]?.textContent || "the agent"}`
+          : "Saved. Notes wait for an agent that polls",
+      );
       renderRunner();
     })
     .catch((error) => {
       if (els.saveStatus) els.saveStatus.textContent = error instanceof Error ? error.message : String(error);
-    })
-    .finally(() => {
-      if (els.save) els.save.disabled = false;
     });
 }
 
@@ -5554,8 +5567,9 @@ function copyTune() {
 
 /* --------------------------------------------------------- project boards */
 
-// A project board's top bar runs its dev server and adds live pages; Settings holds the
-// command and port. The dev server never starts on its own: only Start runs it.
+// A project board starts its dev server as it opens (unless the user stopped it), shows
+// its state in the top bar and adds live pages there; Settings holds Start, Stop, Restart,
+// the command and the port.
 /** @type {Set<string>} items whose next settled render should be saved as a history round */
 const liveSnapshotWanted = new Set();
 /** @type {Map<string, number>} pending "did the page update?" checks, by artboard */
@@ -5577,11 +5591,13 @@ function onProjectEvent(view) {
   if (!view || typeof view !== "object") return;
   const before = project;
   project = view;
-  const wasUp = before?.dev?.status === "running";
-  const isUp = project.dev?.status === "running";
-  // A frame that loaded the "no dev server" page comes back to the real one, and a frame
-  // whose server went away shows why.
-  if ((isUp && !wasUp) || before?.proxy !== project.proxy || (wasUp && !isUp)) reloadLiveFrames();
+  // A frame showing "starting" or "no dev server" comes back to the real page, and a frame
+  // whose server went away, or never could start, shows why.
+  const changed =
+    before?.dev?.status !== project.dev?.status ||
+    (before?.issue || "") !== (project.issue || "") ||
+    before?.proxy !== project.proxy;
+  if (before && changed) reloadLiveFrames();
   renderProjectBar();
 }
 
@@ -5643,10 +5659,20 @@ function projectRequest(route, body) {
 
 let detectedDev = null;
 function loadProject() {
-  if (!isProjectBoard()) return;
-  projectRequest("project")
+  if (!isProjectBoard()) return Promise.resolve();
+  return projectRequest("project")
     .then((payload) => {
       detectedDev = payload.detected || null;
+      onProjectEvent(payload);
+      fillProjectSettings();
+    })
+    .catch(() => {});
+}
+
+/** Opening the board starts its dev server, the same way Start does. */
+function autoStartDevServer() {
+  projectRequest("project/start", { auto: true })
+    .then((payload) => {
       onProjectEvent(payload);
       fillProjectSettings();
     })
@@ -5661,34 +5687,82 @@ const DEV_STATUS_TEXT = {
   failed: "Dev server failed",
 };
 
+/** The dev server's state in words, for the top bar and the Project section. */
+function devStatusWords() {
+  const dev = project?.dev || {};
+  const status = String(dev.status || "stopped");
+  const port = Number(dev.port || project?.config?.port || 0);
+  if (status === "stopped" && project?.issue)
+    return { state: "failed", text: "No dev server found", hint: project.issue };
+  if (status === "stopped" && !project?.user_stopped && !project?.config?.port)
+    return { state: "starting", text: "Starting…", hint: "" };
+  const hint =
+    status === "failed"
+      ? [dev.error, dev.last_line].filter(Boolean).join(" · ")
+      : status === "running" || status === "starting"
+        ? `${dev.command || ""}${port ? `${dev.command ? " · " : ""}localhost:${port}` : ""}`
+        : status === "exited"
+          ? dev.last_line || ""
+          : project?.config?.port && !project?.config?.command
+            ? `Showing localhost:${project.config.port}`
+            : "";
+  return { state: status, text: DEV_STATUS_TEXT[status] || status, hint };
+}
+
 function renderProjectBar() {
   const bar = document.getElementById("projectBar");
   if (!bar) return;
   bar.hidden = !isProjectBoard();
   if (!project) return;
   const dev = project.dev || {};
-  const status = String(dev.status || "stopped");
+  const words = devStatusWords();
+  const port = Number(dev.port || project.config?.port || 0);
   const dot = document.getElementById("devState");
   if (dot) {
-    dot.dataset.state = status;
-    const port = Number(dev.port || project.config?.port || 0);
-    dot.textContent = `${DEV_STATUS_TEXT[status] || status}${port && (status === "running" || status === "starting") ? ` · :${port}` : ""}`;
-    dot.title = dev.error || dev.command || "";
+    dot.dataset.state = words.state;
+    dot.textContent = `${words.text}${port && (dev.status === "running" || dev.status === "starting") ? ` · :${port}` : ""}`;
+    dot.title = words.hint || "Dev server settings";
   }
-  const toggle = document.getElementById("devToggle");
-  if (toggle) {
-    const running = Boolean(dev.running);
-    toggle.textContent = running ? "Stop" : "Start";
-    toggle.dataset.action = running ? "stop" : "start";
+  const status = document.getElementById("devStatus");
+  if (status) {
+    status.dataset.state = words.state;
+    status.textContent = words.text;
   }
+  const hint = document.getElementById("devStatusHint");
+  if (hint) hint.textContent = words.hint;
+  // A server told to stop reads as stopped at once, while its process winds down.
+  const running = Boolean(dev.running) && dev.status !== "stopped";
+  const canStart = Boolean(project.config?.command || detectedDev);
+  const show = (id, visible) => {
+    const button = document.getElementById(id);
+    if (button) button.hidden = !visible;
+  };
+  show("devRestart", running);
+  show("devStop", running);
+  show("devStart", !running && canStart);
   const output = document.getElementById("devOutput");
   if (output) output.textContent = String(dev.output || "");
+  const box = document.getElementById("devOutputBox");
+  if (box) box.hidden = !dev.output;
+}
+
+/** A long path keeps its start and its last folder, cut in the middle. */
+function fillPath(target, value) {
+  if (!target) return;
+  const text = String(value || "");
+  const cut = text.lastIndexOf("/", text.length - 2);
+  const head = target.querySelector(".settings-path-head");
+  const tail = target.querySelector(".settings-path-tail");
+  if (head && tail) {
+    head.textContent = cut > 0 ? text.slice(0, cut) : "";
+    tail.textContent = cut > 0 ? text.slice(cut) : text;
+  } else target.textContent = text;
+  target.setAttribute("title", text);
 }
 
 function fillProjectSettings() {
   if (!project) return;
-  const root = document.getElementById("projectRoot");
-  if (root) root.textContent = project.root || "";
+  fillPath(document.getElementById("projectRoot"), project.root || "");
   const command = /** @type {HTMLInputElement | null} */ (document.getElementById("devCommand"));
   const port = /** @type {HTMLInputElement | null} */ (document.getElementById("devPort"));
   if (command && document.activeElement !== command) {
@@ -5702,9 +5776,10 @@ function fillProjectSettings() {
   const hint = document.getElementById("devDetected");
   if (hint) {
     hint.textContent = detectedDev
-      ? `Found ${detectedDev.framework ? `${detectedDev.framework}, ` : ""}script "${detectedDev.script}". Nothing runs until you press Start.`
-      : "No dev script found in package.json. Type the command that serves the project, or just the port of a server you run yourself.";
+      ? `Found ${detectedDev.framework ? `${detectedDev.framework}, ` : ""}the "${detectedDev.script}" script in package.json. It runs when the board opens.`
+      : "No dev script in package.json. Type the command that serves the project, or give only the port of a server you run yourself.";
   }
+  renderProjectBar();
 }
 
 function setProjectStatus(text) {
@@ -5712,23 +5787,21 @@ function setProjectStatus(text) {
   if (status) status.textContent = text;
 }
 
-/** @param {SubmitEvent | null} [event] */
+/** Saves the command and port as they change; a running server picks them up on Restart. */
 function saveDevConfig(event) {
   event?.preventDefault();
   const command = /** @type {HTMLInputElement | null} */ (document.getElementById("devCommand"));
   const port = /** @type {HTMLInputElement | null} */ (document.getElementById("devPort"));
-  const body = {
-    command: command?.value.trim() || (!project?.config && detectedDev ? detectedDev.command : ""),
-    port:
-      port?.value.trim() || (!project?.config && detectedDev && !command?.value.trim() ? String(detectedDev.port) : ""),
-  };
-  setProjectStatus("Saving…");
+  const body = { command: command?.value.trim() || "", port: port?.value.trim() || "" };
+  if (body.command === (project?.config?.command || "") && body.port === String(project?.config?.port || ""))
+    return Promise.resolve(true);
   return projectRequest("project/dev", body)
     .then((payload) => {
       detectedDev = payload.detected || detectedDev;
       onProjectEvent(payload);
       fillProjectSettings();
-      setProjectStatus("Saved");
+      setProjectStatus("");
+      flashSettingsSaved(payload.dev?.running ? "Saved. Restart to use it" : "Saved");
       return true;
     })
     .catch((failure) => {
@@ -5737,31 +5810,19 @@ function saveDevConfig(event) {
     });
 }
 
-async function toggleDevServer() {
-  const toggle = document.getElementById("devToggle");
-  const action = toggle?.dataset.action === "stop" ? "stop" : "start";
-  if (action === "start" && !project?.config?.command) {
-    // The first Start accepts the detected command, shown in Settings beforehand.
-    if (!detectedDev) {
-      setSettingsOpen(true);
-      setProjectStatus("Type the dev server command first.");
-      return;
-    }
-    const saved = await projectRequest("project/dev", { command: detectedDev.command, port: "" })
-      .then((payload) => {
-        onProjectEvent(payload);
-        fillProjectSettings();
-        return true;
-      })
-      .catch((failure) => {
-        showBoardToast("Could not start the dev server", failure.message);
-        return false;
-      });
-    if (!saved) return;
-  }
+/** @param {"start" | "stop" | "restart"} action */
+function devServerAction(action) {
+  const button = document.getElementById(`dev${action[0].toUpperCase()}${action.slice(1)}`);
+  if (button) /** @type {HTMLButtonElement} */ (button).disabled = true;
   projectRequest(`project/${action}`, {})
-    .then(onProjectEvent)
-    .catch((failure) => showBoardToast(`Could not ${action} the dev server`, failure.message));
+    .then((payload) => {
+      onProjectEvent(payload);
+      setProjectStatus("");
+    })
+    .catch((failure) => setProjectStatus(failure.message))
+    .finally(() => {
+      if (button) /** @type {HTMLButtonElement} */ (button).disabled = false;
+    });
 }
 
 /** @param {SubmitEvent} event */
@@ -5774,7 +5835,7 @@ function addLivePage(event) {
     .then((payload) => {
       if (input) input.value = "";
       if (payload?.item)
-        showBoardToast(`Added ${payload.item.page}`, project?.proxy ? "" : "Start the dev server to see it");
+        showBoardToast(`Added ${payload.item.page}`, project?.dev?.running ? "" : "Start the dev server to see it");
       refreshBoard();
     })
     .catch((failure) => showBoardToast("Could not add that page", failure.message));
@@ -5782,13 +5843,20 @@ function addLivePage(event) {
 
 function setupProjectBoard() {
   if (!isProjectBoard()) return;
-  document.getElementById("devToggle")?.addEventListener("click", () => void toggleDevServer());
+  document.getElementById("devState")?.addEventListener("click", () => setSettingsOpen(true));
+  for (const action of /** @type {const} */ (["start", "stop", "restart"])) {
+    document
+      .getElementById(`dev${action[0].toUpperCase()}${action.slice(1)}`)
+      ?.addEventListener("click", () => devServerAction(action));
+  }
   document.getElementById("addPageForm")?.addEventListener("submit", addLivePage);
   document.getElementById("projectForm")?.addEventListener("submit", (event) => void saveDevConfig(event));
+  document.getElementById("devCommand")?.addEventListener("change", () => void saveDevConfig());
+  document.getElementById("devPort")?.addEventListener("change", () => void saveDevConfig());
   const section = document.getElementById("projectPane");
   if (section) section.hidden = false;
   renderProjectBar();
-  loadProject();
+  void loadProject().then(autoStartDevServer);
 }
 
 /* ------------------------------------------------------------ server sync */
@@ -6298,7 +6366,12 @@ document.getElementById("ultrawideSetting")?.addEventListener("change", (event) 
   setUltrawideInAll(/** @type {HTMLInputElement} */ (event.currentTarget).checked);
 });
 document.getElementById("agentForm")?.addEventListener("submit", saveRunner);
-document.getElementById("agentSelect")?.addEventListener("change", syncRunnerFields);
+document.getElementById("agentSelect")?.addEventListener("change", (event) => {
+  syncRunnerFields();
+  saveRunner(event);
+});
+document.getElementById("agentCommand")?.addEventListener("change", saveRunner);
+document.getElementById("agentCwd")?.addEventListener("change", saveRunner);
 document.getElementById("agentStop")?.addEventListener("click", () => runnerAction("stop"));
 document.getElementById("agentRetry")?.addEventListener("click", () => runnerAction("run"));
 document.getElementById("runnerLine")?.addEventListener("click", () => setSettingsOpen(true));

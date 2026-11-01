@@ -79,8 +79,7 @@ export function createBoardHtml(
   </button>
   <div class="board-name" id="boardName">${escapeHtml(board.name)}</div>
   <div class="project-bar" id="projectBar" hidden>
-    <span class="dev-state" id="devState" data-state="stopped" role="status" aria-live="polite"></span>
-    <button class="bar-toggle" id="devToggle" type="button" data-action="start">Start</button>
+    <button class="dev-state" id="devState" type="button" data-state="stopped" aria-live="polite" title="Dev server settings"></button>
     <form class="add-page" id="addPageForm" autocomplete="off">
       <input class="add-page-input" id="addPageInput" type="text" placeholder="/path" spellcheck="false" aria-label="Page path on the dev server">
       <button class="bar-toggle" type="submit">Add page</button>
@@ -91,7 +90,6 @@ export function createBoardHtml(
   <span class="mode-state" id="modeState" role="status" aria-live="polite" hidden></span>
   <button class="bar-toggle" id="duplicateToggle" type="button" hidden>Duplicate</button>
   <button class="bar-toggle" id="historyToggle" type="button" hidden>History</button>
-  <button class="bar-toggle" id="oldNotesToggle" type="button">Old notes shown</button>
   <div class="segmented" id="devices" role="group" aria-label="Device"></div>
   <div class="zoom" role="group" aria-label="Zoom">
     <button id="zoomOut" type="button" title="Zoom out" aria-label="Zoom out">&minus;</button>
@@ -157,10 +155,13 @@ export function createBoardHtml(
 </nav>
 <div class="settings" id="settings" role="dialog" aria-modal="true" aria-labelledby="settingsTitle" hidden>
   <div class="settings-top">
-    <button class="settings-back" id="settingsClose" type="button" title="Back to the board (Esc)">
-      <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 18l-6-6 6-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    <div class="settings-top-inner">
+    <button class="settings-back" id="settingsClose" type="button" aria-keyshortcuts="Escape">
+      <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 18l-6-6 6-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
       Back to board
     </button>
+    <span class="settings-saved" id="settingsSaved" role="status" aria-live="polite"></span>
+    </div>
   </div>
   <div class="settings-body">
     <header class="settings-intro">
@@ -168,76 +169,94 @@ export function createBoardHtml(
       <p class="settings-board">${escapeHtml(board.name)}</p>
     </header>
     <section class="settings-section" aria-labelledby="viewHeading">
-      <div class="settings-about">
+      <div class="settings-section-head">
         <h2 class="settings-heading" id="viewHeading">View</h2>
       </div>
-      <div class="settings-fields">
-        <label class="settings-check">
-          <input type="checkbox" id="ultrawideSetting">
-          <span class="settings-check-text">Show ultrawide<span class="agent-hint">Adds the 3440 ultrawide to the All view.</span></span>
+      <div class="settings-card">
+        <label class="settings-row settings-switch">
+          <span class="settings-row-text">
+            <span class="settings-row-title">Show ultrawide</span>
+            <span class="settings-hint">Adds the 3440 ultrawide to the All view.</span>
+          </span>
+          <input type="checkbox" role="switch" id="ultrawideSetting">
+        </label>
+        <label class="settings-row settings-switch">
+          <span class="settings-row-text">
+            <span class="settings-row-title">Show old notes</span>
+            <span class="settings-hint">Answered notes wait in the gutter beside the design. Open notes always show.</span>
+          </span>
+          <input type="checkbox" role="switch" id="oldNotesSetting" checked>
         </label>
       </div>
     </section>
-    <section class="settings-section agent-pane" id="projectPane" aria-labelledby="projectHeading" hidden>
-      <div class="settings-about">
+    <section class="settings-section" id="projectPane" aria-labelledby="projectHeading" hidden>
+      <div class="settings-section-head">
         <h2 class="settings-heading" id="projectHeading">Project</h2>
-        <p class="agent-lede"><code id="projectRoot"></code></p>
+        <p class="settings-path" id="projectRoot"><span class="settings-path-head"></span><span class="settings-path-tail"></span></p>
       </div>
-      <div class="settings-fields">
-      <form class="agent-form" id="projectForm">
-        <label class="agent-field">
-          <span class="agent-label">Dev server command</span>
-          <input class="agent-input" id="devCommand" type="text" spellcheck="false" autocomplete="off">
-          <span class="agent-hint" id="devDetected"></span>
-        </label>
-        <label class="agent-field">
-          <span class="agent-label">Port</span>
-          <input class="agent-input" id="devPort" type="text" inputmode="numeric" spellcheck="false" autocomplete="off">
-          <span class="agent-hint">Empty uses the port the server prints. For a server you run yourself, give only its port.</span>
-        </label>
-        <div class="agent-actions">
-          <button class="button button-primary" type="submit">Save</button>
-          <span class="chat-status" id="projectStatus" role="status"></span>
+      <div class="settings-card">
+        <div class="settings-row dev-row">
+          <span class="settings-row-text">
+            <span class="dev-status" id="devStatus" data-state="stopped">Dev server off</span>
+            <span class="settings-hint" id="devStatusHint"></span>
+          </span>
+          <span class="settings-row-actions">
+            <button class="button" id="devRestart" type="button" hidden>Restart</button>
+            <button class="button button-stop" id="devStop" type="button" hidden>Stop</button>
+            <button class="button button-primary" id="devStart" type="button" hidden>Start</button>
+          </span>
         </div>
-      </form>
-      <pre class="agent-output" id="devOutput" tabindex="0" aria-label="Dev server output"></pre>
+        <form class="settings-form" id="projectForm" autocomplete="off">
+          <label class="settings-row settings-field">
+            <span class="settings-row-title">Command</span>
+            <input class="settings-input" id="devCommand" type="text" spellcheck="false" autocomplete="off">
+            <span class="settings-hint" id="devDetected"></span>
+          </label>
+          <label class="settings-row settings-field">
+            <span class="settings-row-title">Port</span>
+            <input class="settings-input settings-input-short" id="devPort" type="text" inputmode="numeric" spellcheck="false" autocomplete="off">
+            <span class="settings-hint">Leave empty to use the port the server prints. For a server you run yourself, give only its port.</span>
+          </label>
+          <p class="settings-error" id="projectStatus" role="status"></p>
+        </form>
+        <details class="settings-row settings-output" id="devOutputBox" hidden>
+          <summary>Output</summary>
+          <pre class="agent-output" id="devOutput" tabindex="0" aria-label="Dev server output"></pre>
+        </details>
       </div>
     </section>
     <section class="settings-section agent-pane" id="agentPane" aria-labelledby="agentHeading">
-      <div class="settings-about">
+      <div class="settings-section-head">
         <h2 class="settings-heading" id="agentHeading">Agent</h2>
-        <p class="agent-lede">Pick the agent that answers notes on this board. When you send notes, ${PRODUCT_NAME} starts it in the working folder, hands it the notes, and posts its answer in Chat.</p>
+        <p class="settings-lede">The agent that answers notes on this board. When you send notes, ${PRODUCT_NAME} starts it in the working folder, hands it the notes and posts its answer in Chat.</p>
       </div>
-      <div class="settings-fields">
-      <form class="agent-form" id="agentForm">
-        <label class="agent-field">
-          <span class="agent-label">Answered by</span>
-          <select class="agent-input" id="agentSelect"></select>
-        </label>
-        <label class="agent-field" id="agentCommandField" hidden>
-          <span class="agent-label">Command</span>
-          <input class="agent-input" id="agentCommand" type="text" spellcheck="false" autocomplete="off" placeholder="my-agent --headless">
-          <span class="agent-hint">Runs in the folder below. The notes arrive on stdin and in <code>$LIESEL_PROMPT_FILE</code>; what it prints becomes the reply.</span>
-        </label>
-        <label class="agent-field" id="agentCwdField">
-          <span class="agent-label">Working folder</span>
-          <input class="agent-input" id="agentCwd" type="text" spellcheck="false" autocomplete="off">
-          <span class="agent-hint">The agent can edit files here. The board's own folder is the default.</span>
-        </label>
-        <div class="agent-actions">
-          <button class="button button-primary" id="agentSave" type="submit">Save</button>
-          <span class="chat-status" id="agentSaveStatus" role="status"></span>
+      <div class="settings-card">
+        <form class="settings-form" id="agentForm" autocomplete="off">
+          <label class="settings-row settings-field">
+            <span class="settings-row-title">Answered by</span>
+            <select class="settings-input" id="agentSelect"></select>
+          </label>
+          <label class="settings-row settings-field" id="agentCommandField" hidden>
+            <span class="settings-row-title">Command</span>
+            <input class="settings-input" id="agentCommand" type="text" spellcheck="false" autocomplete="off" placeholder="my-agent --headless">
+            <span class="settings-hint">Runs in the working folder. The notes arrive on stdin and in <code>$LIESEL_PROMPT_FILE</code>; what it prints becomes the reply.</span>
+          </label>
+          <label class="settings-row settings-field" id="agentCwdField">
+            <span class="settings-row-title">Working folder</span>
+            <input class="settings-input" id="agentCwd" type="text" spellcheck="false" autocomplete="off">
+            <span class="settings-hint">The agent can edit files here. The board's own folder is the default.</span>
+          </label>
+          <p class="settings-error" id="agentSaveStatus" role="status"></p>
+        </form>
+        <div class="settings-row agent-run" id="agentRun" hidden>
+          <div class="agent-run-head">
+            <span class="run-state" id="agentRunState" data-state="running"></span>
+            <button class="button" id="agentRetry" type="button" hidden>Run again</button>
+            <button class="button button-stop" id="agentStop" type="button" hidden>Stop</button>
+          </div>
+          <p class="agent-run-error" id="agentRunError" hidden></p>
+          <pre class="agent-output" id="agentOutput" tabindex="0" aria-label="Agent output"></pre>
         </div>
-      </form>
-      <div class="agent-run" id="agentRun" hidden>
-        <div class="agent-run-head">
-          <span class="run-state" id="agentRunState" data-state="running"></span>
-          <button class="tune-link" id="agentStop" type="button" hidden>Stop</button>
-          <button class="tune-link" id="agentRetry" type="button" hidden>Run again</button>
-        </div>
-        <p class="agent-run-error" id="agentRunError" hidden></p>
-        <pre class="agent-output" id="agentOutput" tabindex="0" aria-label="Agent output"></pre>
-      </div>
       </div>
     </section>
   </div>
