@@ -51,7 +51,12 @@ body { margin: 0; font: 16px sans-serif; }
 // CDP modifier bits.
 const ALT = 1;
 const META = 4;
-const MODIFIER = { Meta: { code: "MetaLeft", bit: META }, Alt: { code: "AltLeft", bit: ALT } };
+const SHIFT = 8;
+const MODIFIER = {
+  Meta: { code: "MetaLeft", bit: META },
+  Alt: { code: "AltLeft", bit: ALT },
+  Shift: { code: "ShiftLeft", bit: SHIFT },
+};
 
 // Cmd toggles notes and Option toggles the controls selector, one at a time. Every key,
 // click, scroll and drag here is trusted input, on the board and inside a focused design.
@@ -84,7 +89,7 @@ test(
       browser = await launchChrome(findChrome(), profile);
       const { send, evaluate, list } = browser;
       let held = 0;
-      /** @param {"Meta" | "Alt"} name */
+      /** @param {"Meta" | "Alt" | "Shift"} name */
       const down = async (name) => {
         held |= MODIFIER[name].bit;
         await send("Input.dispatchKeyEvent", {
@@ -94,16 +99,45 @@ test(
           modifiers: held,
         });
       };
-      /** @param {"Meta" | "Alt"} name */
+      /** @param {"Meta" | "Alt" | "Shift"} name */
       const up = async (name) => {
         held &= ~MODIFIER[name].bit;
         await send("Input.dispatchKeyEvent", { type: "keyUp", key: name, code: MODIFIER[name].code, modifiers: held });
         await sleep(120);
       };
-      /** @param {"Meta" | "Alt"} name */
+      /** @param {"Meta" | "Alt" | "Shift"} name */
       const tap = async (name) => {
         await down(name);
         await up(name);
+      };
+      // Only Cmd, Option or another modifier: a system shortcut such as Cmd-Shift-3 or
+      // Cmd-Shift-4 whose last key macOS takes before the page sees it, then a long hold
+      // and Cmd-Tab. None of them may toggle anything.
+      /** @param {string} where */
+      const rejectsNonTaps = async (where) => {
+        await down("Shift");
+        await down("Meta");
+        await up("Meta");
+        await up("Shift");
+        assert.equal(await status(), off, `${where}: Shift then Cmd, third key swallowed, leaves notes off`);
+        await down("Meta");
+        await down("Shift");
+        await up("Shift");
+        await up("Meta");
+        assert.equal(await status(), off, `${where}: Cmd then Shift, third key swallowed, leaves notes off`);
+        await down("Shift");
+        await down("Alt");
+        await up("Shift");
+        await up("Alt");
+        assert.equal(await status(), off, `${where}: Shift with Option leaves the selector off`);
+        await down("Meta");
+        await sleep(600);
+        await up("Meta");
+        assert.equal(await status(), off, `${where}: a long Cmd hold leaves notes off`);
+        await tap("Meta");
+        assert.equal(await status(), notesOn, `${where}: a clean Cmd tap still turns notes on`);
+        await tap("Meta");
+        assert.equal(await status(), off);
       };
       /** @param {string} key @param {string} code */
       const press = async (key, code, text = "") => {
@@ -225,6 +259,12 @@ test(
       await evaluate(`window.dispatchEvent(new Event("blur"))`);
       await up("Meta");
       assert.equal(await status(), off, "a Cmd release lost to another app leaves notes off");
+      await down("Meta");
+      await send("Input.dispatchKeyEvent", { type: "rawKeyDown", key: "Tab", code: "Tab", modifiers: held });
+      await evaluate(`window.dispatchEvent(new Event("blur"))`);
+      await up("Meta");
+      assert.equal(await status(), off, "Cmd-Tab leaves notes off");
+      await rejectsNonTaps("board");
 
       // With both modes off a click belongs to the page: it focuses the design's field.
       const field = await pointInDesign("#field");
@@ -250,6 +290,8 @@ test(
       await evaluate(`window.dispatchEvent(new Event("blur"))`);
       await up("Meta");
       assert.equal(await status(), off, "a lost release from a focused design flips nothing");
+      await evaluate(`document.getElementById("field").focus()`, field.sessionId);
+      await rejectsNonTaps("focused design");
 
       // The selector picks an element into Controls and stays on for the next one.
       await tap("Alt");

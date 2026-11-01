@@ -886,10 +886,11 @@
   // Keys go to whichever document holds focus, and one click into a page moves focus
   // into this frame. So the board is told what is held here too: without that, Space,
   // Cmd and Option stop arming as soon as the reviewer touches the design itself.
-  const held = { space: false, alt: false, meta: false };
+  // `other` is Shift or Ctrl: with either held, a Cmd or Option press is never a tap.
+  const held = { space: false, alt: false, meta: false, other: false };
   /** @param {boolean} [blur] focus left the frame: what was held was let go somewhere else */
   function reportHeld(blur = false) {
-    post({ type: "held", space: held.space, alt: held.alt, meta: held.meta, blur });
+    post({ type: "held", space: held.space, alt: held.alt, meta: held.meta, other: held.other, blur });
   }
   function readHeld(event, down) {
     // A space typed into a field is a space, never the hand.
@@ -897,9 +898,11 @@
     const next = {
       alt: Boolean(event.altKey),
       meta: Boolean(event.metaKey),
+      other: Boolean(event.shiftKey || event.ctrlKey),
       space: space ? down : held.space,
     };
-    if (next.alt === held.alt && next.meta === held.meta && next.space === held.space) return;
+    if (next.alt === held.alt && next.meta === held.meta && next.space === held.space && next.other === held.other)
+      return;
     Object.assign(held, next);
     reportHeld();
   }
@@ -946,10 +949,11 @@
   );
   document.addEventListener("keyup", (event) => readHeld(event, false), true);
   window.addEventListener("blur", () => {
-    if (!held.space && !held.alt && !held.meta) return;
+    if (!held.space && !held.alt && !held.meta && !held.other) return;
     held.space = false;
     held.alt = false;
     held.meta = false;
+    held.other = false;
     reportHeld(true);
   });
   // Cmd or Option held through a click, a drag or a scroll was a chord, never a toggle.

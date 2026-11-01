@@ -1790,11 +1790,14 @@ function toggleActual(clientX, clientY) {
 let spaceHeld = false;
 // Cmd toggles notes and Option toggles the controls selector: a lone press and release
 // turns its mode on, the next one off, and the two never run together. A modifier used
-// in a chord (Cmd+C, Cmd+scroll, Option+drag) or let go in another app flips nothing.
+// in a chord (Cmd+C, Cmd+scroll, Option+drag), joined by any other modifier at any point
+// (Cmd-Shift-3, whose 3 macOS swallows), held too long, or let go in another app or a
+// hidden tab flips nothing.
 /** @type {"" | "annotate" | "tune"} */
 let armedMode = "";
-/** @type {Record<"Meta" | "Alt", { down: boolean, chord: boolean }>} */
-const modifierTaps = { Meta: { down: false, chord: false }, Alt: { down: false, chord: false } };
+const TAP_MAX_MS = 350;
+/** @type {Record<"Meta" | "Alt", { down: boolean, chord: boolean, at: number }>} */
+const modifierTaps = { Meta: { down: false, chord: false, at: 0 }, Alt: { down: false, chord: false, at: 0 } };
 let lastHoverKey = "";
 let hoverFrame = 0;
 let panWheelAt = 0;
@@ -1865,24 +1868,29 @@ function noteChord() {
   for (const tap of Object.values(modifierTaps)) if (tap.down) tap.chord = true;
 }
 
-/** @param {"Meta" | "Alt"} name */
-function modifierPressed(name) {
+/**
+ * @param {"Meta" | "Alt"} name
+ * @param {boolean} [joined] another modifier (Shift, Ctrl, Cmd or Option) was already held
+ */
+function modifierPressed(name, joined = false) {
   const tap = modifierTaps[name];
   if (tap.down) return;
   // Cmd and Option pressed together, or either with Space held, is a chord for both.
-  const others = spaceHeld || Object.values(modifierTaps).some((other) => other.down);
+  const others = joined || spaceHeld || Object.values(modifierTaps).some((other) => other.down);
   noteChord();
   tap.down = true;
   tap.chord = others;
+  tap.at = performance.now();
 }
 
 /**
  * @param {"Meta" | "Alt"} name
  * @param {boolean} [lost] the release happened somewhere else, so it toggles nothing
+ * @param {boolean} [joined] another modifier was still held at the release
  */
-function modifierReleased(name, lost = false) {
+function modifierReleased(name, lost = false, joined = false) {
   const tap = modifierTaps[name];
-  const lone = tap.down && !tap.chord && !lost;
+  const lone = tap.down && !tap.chord && !lost && !joined && performance.now() - tap.at <= TAP_MAX_MS;
   tap.down = false;
   tap.chord = false;
   if (!lone) return;
@@ -4651,13 +4659,14 @@ function onArtboardMessage(event) {
       return;
     }
     const space = Boolean(data.space);
-    if (space && !spaceHeld) noteChord();
+    const joined = data.other === true;
+    if ((space && !spaceHeld) || joined) noteChord();
     for (const [name, down] of /** @type {const} */ ([
       ["Meta", data.meta === true],
       ["Alt", data.alt === true],
     ])) {
-      if (down && !modifierTaps[name].down) modifierPressed(name);
-      else if (!down && modifierTaps[name].down) modifierReleased(name);
+      if (down && !modifierTaps[name].down) modifierPressed(name, joined);
+      else if (!down && modifierTaps[name].down) modifierReleased(name, false, joined);
     }
     if (space === spaceHeld) return;
     spaceHeld = space;
@@ -4819,6 +4828,11 @@ function boardKey(event, preventDefault) {
   }
 }
 
+/** @param {KeyboardEvent} event is a modifier besides the Cmd or Option this event is about held? */
+function otherModifierHeld(event) {
+  return event.shiftKey || event.ctrlKey || (event.key === "Meta" ? event.altKey : event.metaKey);
+}
+
 /** Keys let go where the board could not hear them: another app took focus. */
 function releaseHeldKeys() {
   modifierReleased("Meta", true);
@@ -4830,7 +4844,7 @@ function releaseHeldKeys() {
 
 window.addEventListener("keydown", (event) => {
   if (event.key === "Meta" || event.key === "Alt") {
-    modifierPressed(event.key);
+    modifierPressed(event.key, otherModifierHeld(event));
     return;
   }
   noteChord();
@@ -4854,7 +4868,7 @@ window.addEventListener("keydown", (event) => {
 });
 
 window.addEventListener("keyup", (event) => {
-  if (event.key === "Meta" || event.key === "Alt") modifierReleased(event.key);
+  if (event.key === "Meta" || event.key === "Alt") modifierReleased(event.key, false, otherModifierHeld(event));
   if (event.code === "Space" && spaceHeld) {
     spaceHeld = false;
     updateGestureMode();
@@ -4862,6 +4876,9 @@ window.addEventListener("keyup", (event) => {
 });
 
 window.addEventListener("blur", releaseHeldKeys);
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) releaseHeldKeys();
+});
 
 document.addEventListener(
   "pointermove",
