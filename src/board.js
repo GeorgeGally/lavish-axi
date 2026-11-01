@@ -195,7 +195,7 @@ function normalizeItems(value, tabIds, fallbackTab) {
       status: text(entry.status, 40) || "open",
       notes: normalizeNotes(entry.notes),
       tune: normalizeTuneValues(entry.tune),
-      // What an Option click tuned on one element: kept per selector so a reload shows
+      // What a controls-selector click tuned on one element: kept per selector so a reload shows
       // the design the reviewer tuned, not the one the file still holds.
       elementTune: normalizeElementTune(entry.elementTune),
       // An image dropped onto the design: which selector, what it replaced, and the

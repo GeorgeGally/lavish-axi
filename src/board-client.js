@@ -1788,9 +1788,13 @@ function toggleActual(clientX, clientY) {
 /* ------------------------------------------------------------- navigation */
 
 let spaceHeld = false;
-let altHeld = false;
-// Notes are on only while Cmd is held, and off the moment it is let go.
-let annotateOn = false;
+// Cmd toggles notes and Option toggles the controls selector: a lone press and release
+// turns its mode on, the next one off, and the two never run together. A modifier used
+// in a chord (Cmd+C, Cmd+scroll, Option+drag) or let go in another app flips nothing.
+/** @type {"" | "annotate" | "tune"} */
+let armedMode = "";
+/** @type {Record<"Meta" | "Alt", { down: boolean, chord: boolean }>} */
+const modifierTaps = { Meta: { down: false, chord: false }, Alt: { down: false, chord: false } };
 let lastHoverKey = "";
 let hoverFrame = 0;
 let panWheelAt = 0;
@@ -1798,15 +1802,13 @@ let panWheelAt = 0;
 /** @type {null | { x: number, y: number }} */
 let lastPointer = null;
 
-// Four gestures own the pointer over a design, one at a time: Space pans, Option
-// tunes, Cmd held annotates, and with none of them the click belongs to
-// the page. The shield is the only surface the board has over a frame, so every one of
-// the three armed gestures raises it, and none of them can leak into another.
+// Four gestures own the pointer over a design, one at a time: Space held pans, the
+// controls selector (Option) tunes, notes (Cmd) annotate, and with none of them the
+// click belongs to the page. The shield is the only surface the board has over a frame,
+// so every one of the three armed gestures raises it, and none can leak into another.
 function gestureMode() {
   if (spaceHeld) return "hand";
-  if (altHeld) return "tune";
-  if (annotateOn) return "annotate";
-  return "";
+  return armedMode;
 }
 
 function panModeActive() {
@@ -1825,33 +1827,70 @@ function updateGestureMode() {
   const mode = gestureMode();
   document.body.dataset.gesture = mode;
   document.body.dataset.pan = String(mode === "hand");
-  document.body.dataset.notes = String(annotateOn);
-  if (mode === "annotate") hoverUnderPointer();
+  document.body.dataset.notes = String(armedMode === "annotate");
+  document.body.dataset.controls = String(armedMode === "tune");
+  if (mode === "annotate" || mode === "tune") hoverUnderPointer();
   else clearHover();
 }
 
-/** @type {HTMLElement | null} */
-let notesState = null;
+const MODE_STATE = {
+  annotate: { label: "Notes", key: "⌘", title: "Click a design to leave a note · ⌘ or Esc turns notes off" },
+  tune: { label: "Controls", key: "⌥", title: "Click an element to load it into Controls · ⌥ or Esc turns this off" },
+};
 
-/** Notes on while Cmd is held, said where the hint sits; let go, the line fades. */
-function setAnnotate(on) {
-  if (annotateOn === on) return;
-  annotateOn = on;
-  updateGestureMode();
-  document.querySelector(".annotate-hint:not(.notes-state)")?.remove();
-  if (!notesState) {
-    notesState = element("div", { class: "annotate-hint notes-state", role: "status" });
-    document.body.append(notesState);
-  }
-  if (on) {
-    notesState.textContent = "Notes on · click to leave a note · let go of ⌘ to stop";
-    window.requestAnimationFrame(() => {
-      if (notesState && annotateOn) notesState.dataset.shown = "true";
-    });
-  } else delete notesState.dataset.shown;
+/** The mode that is on, said quietly in the top bar; nothing shows while both are off. */
+function renderModeState() {
+  const badge = document.getElementById("modeState");
+  if (!badge) return;
+  const state = armedMode ? MODE_STATE[armedMode] : null;
+  badge.hidden = !state;
+  badge.dataset.mode = armedMode;
+  badge.title = state ? state.title : "";
+  badge.replaceChildren(
+    ...(state ? [element("span", { text: state.label }), element("kbd", { text: state.key })] : []),
+  );
 }
 
-/** Outline what sits under a resting pointer the moment notes turn on, with no move needed. */
+/** @param {"" | "annotate" | "tune"} mode turning one mode on turns the other off */
+function setArmedMode(mode) {
+  if (armedMode === mode) return;
+  armedMode = mode;
+  updateGestureMode();
+  renderModeState();
+  if (mode) document.querySelector(".annotate-hint")?.remove();
+}
+
+/** A modifier held through a click, a scroll or another key was a chord, not a tap. */
+function noteChord() {
+  for (const tap of Object.values(modifierTaps)) if (tap.down) tap.chord = true;
+}
+
+/** @param {"Meta" | "Alt"} name */
+function modifierPressed(name) {
+  const tap = modifierTaps[name];
+  if (tap.down) return;
+  // Cmd and Option pressed together, or either with Space held, is a chord for both.
+  const others = spaceHeld || Object.values(modifierTaps).some((other) => other.down);
+  noteChord();
+  tap.down = true;
+  tap.chord = others;
+}
+
+/**
+ * @param {"Meta" | "Alt"} name
+ * @param {boolean} [lost] the release happened somewhere else, so it toggles nothing
+ */
+function modifierReleased(name, lost = false) {
+  const tap = modifierTaps[name];
+  const lone = tap.down && !tap.chord && !lost;
+  tap.down = false;
+  tap.chord = false;
+  if (!lone) return;
+  const mode = name === "Meta" ? "annotate" : "tune";
+  setArmedMode(armedMode === mode ? "" : mode);
+}
+
+/** Outline what sits under a resting pointer the moment a mode turns on, with no move needed. */
 function hoverUnderPointer() {
   if (!lastPointer) return;
   const record = recordForShield(document.elementFromPoint(lastPointer.x, lastPointer.y));
@@ -1901,11 +1940,11 @@ function recordForTarget(target) {
  */
 function hintAnnotateOnce(target) {
   if (readStorage(annotateHintStorageKey)) return;
-  if (annotateOn || !recordForTarget(target)) return;
+  if (armedMode || !recordForTarget(target)) return;
   writeStorage(annotateHintStorageKey, "seen");
   const hint = element("div", {
     class: "annotate-hint",
-    text: "Hold ⌘ and click to leave a note · ⌥ click to tune · hold Space to pan",
+    text: "Tap ⌘ for notes · tap ⌥ to pick an element for Controls · hold Space to pan",
   });
   document.body.append(hint);
   window.requestAnimationFrame(() => {
@@ -1943,6 +1982,7 @@ function bindNavigation() {
   let suppressClick = false;
 
   plane.addEventListener("pointerdown", (event) => {
+    if (event.metaKey || event.altKey) noteChord();
     if (event.target instanceof Element && event.target.closest("button")) return;
     const record = recordForShield(event.target);
     // Tune owns the press: the panel opens on the point under the pointer, and the
@@ -2081,6 +2121,7 @@ function bindNavigation() {
   window.addEventListener(
     "wheel",
     (event) => {
+      if (event.metaKey || event.altKey) noteChord();
       if (!event.ctrlKey && !event.metaKey) return;
       event.preventDefault();
       event.stopPropagation();
@@ -3140,7 +3181,7 @@ function renderChatPanel() {
   const ordered = [...threads.values()].sort((left, right) => left.last.localeCompare(right.last));
   const rows = ordered.map((thread) => renderThread(thread, previousReply));
   if (rows.length === 0) {
-    rows.push(element("p", { class: "chat-empty", text: "⌘ click to note · ⌥ click to tune" }));
+    rows.push(element("p", { class: "chat-empty", text: "Tap ⌘ for notes · tap ⌥ to pick an element for Controls" }));
   }
   const focused = threadComposer && document.activeElement === threadComposer.field;
   const selection =
@@ -3603,7 +3644,7 @@ let sideView = "chat";
 
 /**
  * The sidebar shows one of its two tabs, Chat or Controls. Showing one opens a
- * closed sidebar, so an Option click or a send is never answered out of sight.
+ * closed sidebar, so a controls-selector click or a send is never answered out of sight.
  * @param {"chat" | "controls"} view
  */
 function showSideView(view) {
@@ -3647,7 +3688,7 @@ function setChatCollapsed(collapsed) {
 let tuneItemId = "";
 let tuneDeviceId = "";
 /**
- * What an Option click last landed on: its selectors, its own controls and their live values.
+ * What a controls-selector click last landed on: its selectors, its own controls and their live values.
  * @type {null | { itemId: string, deviceId: string, selector?: string, sectionSelector?: string, label?: string, sectionLabel?: string, parentSelector?: string, parentLabel?: string, controls?: any[], values?: Record<string, string>, pending?: boolean }}
  */
 let tuneTarget = null;
@@ -3834,7 +3875,7 @@ let elementTunePending = null;
 let elementTuneTimer;
 
 /**
- * What an Option click tuned is saved on the item, per selector, so the panel can be
+ * What a controls-selector click tuned is saved on the item, per selector, so the panel can be
  * closed, the board reloaded and the design still looks the way it was tuned.
  */
 /**
@@ -4609,15 +4650,30 @@ function onArtboardMessage(event) {
       }, 0);
       return;
     }
-    setAnnotate(data.meta === true);
-    const next = { space: Boolean(data.space), alt: Boolean(data.alt) };
-    if (next.space === spaceHeld && next.alt === altHeld) return;
-    spaceHeld = next.space;
-    altHeld = next.alt;
+    const space = Boolean(data.space);
+    if (space && !spaceHeld) noteChord();
+    for (const [name, down] of /** @type {const} */ ([
+      ["Meta", data.meta === true],
+      ["Alt", data.alt === true],
+    ])) {
+      if (down && !modifierTaps[name].down) modifierPressed(name);
+      else if (!down && modifierTaps[name].down) modifierReleased(name);
+    }
+    if (space === spaceHeld) return;
+    spaceHeld = space;
     updateGestureMode();
     return;
   }
+  if (data.type === "chord") {
+    noteChord();
+    return;
+  }
+  if (data.type === "mode-off") {
+    setArmedMode("");
+    return;
+  }
   if (data.type === "key") {
+    noteChord();
     boardKey(
       {
         key: String(data.key || ""),
@@ -4754,34 +4810,30 @@ function boardKey(event, preventDefault) {
   else if (event.key === "+" || event.key === "=") zoomBy(1.25);
   else if (event.key === "-") zoomBy(1 / 1.25);
   else if (event.key === "Escape") {
-    // Escape closes what is open.
-    closeNoteWindow();
-    closeBuildPreview();
-    closeTune();
+    // Escape closes an open note or history first, then turns notes or the controls
+    // selector off, and with neither on it closes the tuned element.
+    if (noteWindow) closeNoteWindow();
+    else if (historyItem || compare) closeBuildPreview();
+    else if (armedMode) setArmedMode("");
+    else closeTune();
   }
 }
 
 /** Keys let go where the board could not hear them: another app took focus. */
 function releaseHeldKeys() {
-  setAnnotate(false);
-  if (!spaceHeld && !altHeld) return;
+  modifierReleased("Meta", true);
+  modifierReleased("Alt", true);
+  if (!spaceHeld) return;
   spaceHeld = false;
-  altHeld = false;
   updateGestureMode();
 }
 
 window.addEventListener("keydown", (event) => {
-  if (event.key === "Meta") {
-    setAnnotate(true);
+  if (event.key === "Meta" || event.key === "Alt") {
+    modifierPressed(event.key);
     return;
   }
-  if (event.key === "Alt") {
-    if (!altHeld) {
-      altHeld = true;
-      updateGestureMode();
-    }
-    return;
-  }
+  noteChord();
   if (event.code === "Space" && !isTextTarget(event.target)) {
     event.preventDefault();
     if (!spaceHeld) {
@@ -4802,11 +4854,7 @@ window.addEventListener("keydown", (event) => {
 });
 
 window.addEventListener("keyup", (event) => {
-  if (event.key === "Meta") setAnnotate(false);
-  if (event.key === "Alt" && altHeld) {
-    altHeld = false;
-    updateGestureMode();
-  }
+  if (event.key === "Meta" || event.key === "Alt") modifierReleased(event.key);
   if (event.code === "Space" && spaceHeld) {
     spaceHeld = false;
     updateGestureMode();

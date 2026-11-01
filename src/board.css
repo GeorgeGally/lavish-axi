@@ -273,6 +273,39 @@ textarea:focus-visible {
   display: none;
 }
 
+/* Which tapped mode is on, notes or the controls selector, and the key that turns it
+   off. Quiet by design: a dot, a word and the key, nothing while both are off. */
+.mode-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: rgba(22, 24, 29, 0.05);
+  color: var(--ink-2);
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.mode-state::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--select);
+}
+
+.mode-state kbd {
+  color: var(--ink-4);
+  font: inherit;
+}
+
+.mode-state[hidden] {
+  display: none;
+}
+
 .zoom .zoom-text {
   padding: 0 10px;
   font-size: 13px;
@@ -518,8 +551,8 @@ body[data-pan="true"] .shield {
   background: #ffffff;
 }
 
-/* The shield only hears the pointer while Alt arms annotation; the rest of the time it
-   stays out of the way so the page inside the frame takes its own clicks and scrolling. */
+/* The shield only hears the pointer while a gesture is armed (notes, the controls
+   selector or the hand); the rest of the time it stays out of the way so the page inside the frame takes its own clicks and scrolling. */
 .shield {
   position: absolute;
   inset: 0;

@@ -75,6 +75,7 @@ export function createBoardHtml(
   <div class="board-name" id="boardName">${escapeHtml(board.name)}</div>
   <nav class="tabs" id="tabs" role="tablist" aria-label="Board tabs"></nav>
   <div class="bar-spacer"></div>
+  <span class="mode-state" id="modeState" role="status" aria-live="polite" hidden></span>
   <button class="bar-toggle" id="historyToggle" type="button" hidden>History</button>
   <button class="bar-toggle" id="oldNotesToggle" type="button">Old notes shown</button>
   <div class="segmented" id="devices" role="group" aria-label="Device"></div>
@@ -114,7 +115,7 @@ export function createBoardHtml(
     </div>
   </section>
   <section class="side-pane tune" id="tune" role="tabpanel" aria-labelledby="sideTabControls" hidden>
-    <p class="tune-empty tune-idle" id="tuneIdle">Option-click an element to tune it, or press Tune on a design.</p>
+    <p class="tune-empty tune-idle" id="tuneIdle">Tap ⌥ Option, then click an element to tune it, or press Tune on a design.</p>
     <div class="tune-loaded" id="tuneLoaded" hidden>
       <div class="tune-head">
         <span class="tune-title" id="tuneTitle">Tune</span>

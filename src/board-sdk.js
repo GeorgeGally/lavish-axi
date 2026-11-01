@@ -697,7 +697,7 @@
     elementStyles.clear();
   }
 
-  /** What the board tunes when an Option click lands on a point in the page. */
+  /** What the board tunes when a controls-selector click lands on a point in the page. */
   function reportTuneTarget(x, y) {
     const leaf = document.elementFromPoint(x, y);
     const element = leaf instanceof Element && !leaf.closest("[data-easel-ui]") ? leaf : document.body;
@@ -782,7 +782,7 @@
         return;
       }
       if (data.type === "element-tune") {
-        // What an Option click tuned and the board saved: applied again on every load,
+        // What a controls-selector click tuned and the board saved: applied again on every load,
         // so the design reads the way the reviewer left it rather than as the file is.
         const values = data.values && typeof data.values === "object" ? data.values : {};
         for (const [selector, css] of Object.entries(values)) {
@@ -915,6 +915,11 @@
   const MODIFIER_KEYS = new Set(["Meta", "Alt", "Control", "Shift"]);
   function forwardKey(event) {
     if (MODIFIER_KEYS.has(event.key) || event.code === "Space") return;
+    // Escape typed in a field stays the field's too, but still turns a board mode off.
+    if (event.key === "Escape" && editable(event.target)) {
+      post({ type: "mode-off" });
+      return;
+    }
     const ours = BOARD_KEYS.has(event.key) && !event.altKey && !editable(event.target);
     if (!ours) return;
     // Tab would move focus inside the design; Cmd +/-/0 would zoom the browser window.
@@ -932,6 +937,9 @@
       // Space is the board's hand, so the page never scrolls or presses a button under it.
       if (event.code === "Space" && !editable(event.target)) event.preventDefault();
       readHeld(event, true);
+      // Any other key pressed with Cmd or Option held is a shortcut, which the board must
+      // hear so a lone Cmd or Option tap stays a toggle.
+      if ((event.metaKey || event.altKey) && event.key !== "Meta" && event.key !== "Alt") post({ type: "chord" });
       forwardKey(event);
     },
     true,
@@ -944,6 +952,16 @@
     held.meta = false;
     reportHeld(true);
   });
+  // Cmd or Option held through a click, a drag or a scroll was a chord, never a toggle.
+  for (const type of ["pointerdown", "wheel"])
+    window.addEventListener(
+      type,
+      (event) => {
+        const mouse = /** @type {MouseEvent} */ (event);
+        if (mouse.metaKey || mouse.altKey) post({ type: "chord" });
+      },
+      { capture: true, passive: true },
+    );
 
   // Where the pointer rests, so a gesture armed by a key outlines its target at once
   // instead of waiting for the next move. At most one report a frame.
@@ -963,9 +981,9 @@
     { capture: true, passive: true },
   );
 
-  // Option is the tune gesture: inside a frame the browser would otherwise start a text
-  // selection, follow a link clicked with Option, or download it. None of that belongs
-  // to the board, so an Option press never reaches the page's own defaults.
+  // Option is the controls selector's key: inside a frame the browser would otherwise
+  // start a text selection, follow a link clicked with Option, or download it. None of
+  // that belongs to the board, so an Option press never reaches the page's own defaults.
   function swallowOption(event) {
     if (!event.altKey && !held.alt) return;
     event.preventDefault();

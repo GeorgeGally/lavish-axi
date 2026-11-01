@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
-import { spawn, spawnSync } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import net from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -8,6 +8,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { findChrome } from "../src/board-crop.js";
+import { launchChrome } from "./board-cdp-browser.js";
 
 const runBrowserE2e = process.env.LAVISH_AXI_BROWSER_E2E === "1";
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -66,77 +67,8 @@ rail.addEventListener("pointerup", () => { start = null; });
 </script></body></html>
 `;
 
-/** A trusted-input browser over raw CDP: synthetic DOM events would never prove the frame gets the drag. */
-async function launchChrome(chrome, profile) {
-  const child = spawn(
-    chrome,
-    [
-      "--headless=new",
-      "--use-mock-keychain",
-      "--password-store=basic",
-      "--no-first-run",
-      "--no-default-browser-check",
-      "--disable-extensions",
-      "--mute-audio",
-      "--remote-debugging-port=0",
-      `--user-data-dir=${profile}`,
-      "--window-size=1600,1000",
-      "about:blank",
-    ],
-    { stdio: "ignore" },
-  );
-  let port = 0;
-  for (let i = 0; i < 150 && !port; i++) {
-    await sleep(200);
-    try {
-      port = Number((await readFile(path.join(profile, "DevToolsActivePort"), "utf8")).split("\n")[0]);
-    } catch {
-      // Chrome has not written it yet.
-    }
-  }
-  if (!port) {
-    child.kill("SIGKILL");
-    throw new Error("Chrome did not open a DevTools port");
-  }
-  const list = async () => (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
-  const pageTarget = (await list()).find((target) => target.type === "page");
-  const ws = new WebSocket(pageTarget.webSocketDebuggerUrl);
-  await new Promise((resolve, reject) => {
-    ws.addEventListener("open", resolve, { once: true });
-    ws.addEventListener("error", reject, { once: true });
-  });
-  let nextId = 1;
-  /** @type {Map<number, (value: any) => void>} */
-  const pending = new Map();
-  ws.addEventListener("message", (message) => {
-    const data = JSON.parse(String(message.data));
-    if (data.id && pending.has(data.id)) {
-      pending.get(data.id)?.(data);
-      pending.delete(data.id);
-    }
-  });
-  /** @param {string} method @param {Record<string, unknown>} [params] @param {string} [sessionId] */
-  const send = (method, params = {}, sessionId = undefined) =>
-    new Promise((resolve, reject) => {
-      const id = nextId++;
-      pending.set(id, (data) => (data.error ? reject(new Error(JSON.stringify(data.error))) : resolve(data.result)));
-      ws.send(JSON.stringify(sessionId ? { id, method, params, sessionId } : { id, method, params }));
-    });
-  /** @param {string} expression @param {string} [sessionId] */
-  const evaluate = async (expression, sessionId = undefined) => {
-    const result = await send("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true }, sessionId);
-    if (result.exceptionDetails) throw new Error(JSON.stringify(result.exceptionDetails));
-    return result.result.value;
-  };
-  const close = () => {
-    ws.close();
-    child.kill("SIGKILL");
-  };
-  return { send, evaluate, list, close };
-}
-
 test(
-  "a plain press-and-drag inside a design scrolls the page's own carousel in every device view, and Cmd held keeps it for notes",
+  "a plain press-and-drag inside a design scrolls the page's own carousel in every device view, and notes on keep it for the board",
   { skip: !runBrowserE2e || !findChrome(), timeout: 240_000 },
   async () => {
     const temp = await mkdtemp(path.join(tmpdir(), "easel-frame-drag-e2e-"));
@@ -214,15 +146,19 @@ test(
         }
       }
 
-      // Cmd held is the notes gesture: the board's shield takes the press, so the page's
-      // carousel stays put.
-      await send("Input.dispatchKeyEvent", { type: "rawKeyDown", key: "Meta", code: "MetaLeft", modifiers: 4 });
-      await sleep(150);
+      // A Cmd tap turns notes on: the board's shield takes the press, so the page's
+      // carousel stays put, and the next tap turns notes off again.
+      const tapMeta = async () => {
+        await send("Input.dispatchKeyEvent", { type: "rawKeyDown", key: "Meta", code: "MetaLeft", modifiers: 4 });
+        await send("Input.dispatchKeyEvent", { type: "keyUp", key: "Meta", code: "MetaLeft", modifiers: 0 });
+        await sleep(150);
+      };
+      await tapMeta();
       assert.equal(await evaluate(`document.body.dataset.notes`), "true");
-      const held = await dragRail("phone", 4);
-      await send("Input.dispatchKeyEvent", { type: "keyUp", key: "Meta", code: "MetaLeft", modifiers: 0 });
-      await sleep(150);
-      assert.equal(held.moved, 0, "a drag with Cmd held reached the page");
+      const armed = await dragRail("phone");
+      assert.equal(armed.moved, 0, "a drag with notes on reached the page");
+      assert.equal(await evaluate(`document.body.dataset.notes`), "true");
+      await tapMeta();
       assert.equal(await evaluate(`document.body.dataset.notes`), "false");
     } finally {
       browser?.close();
