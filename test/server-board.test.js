@@ -381,7 +381,7 @@ test("the server home page is Liesel and lists the boards it has open", async (t
   assert.match(empty, /<title>Liesel<\/title>/);
   assert.match(empty, /<h1>Liesel<\/h1>/);
   assert.doesNotMatch(empty, /lavish/i);
-  assert.match(empty, /No boards are open/);
+  assert.match(empty, /No boards open yet/);
   assert.match(empty, /<form[^>]*id="newBoard"/);
   assert.match(empty, /name="folder"/);
   assert.match(empty, /name="name"/);
@@ -389,7 +389,75 @@ test("the server home page is Liesel and lists the boards it has open", async (t
   const registered = await register(base, boardDirectory);
   const listed = await (await fetch(`${base}/`, { headers: { accept: "text/html" } })).text();
   assert.match(listed, new RegExp(`<a href="/board/${registered.key}">hero</a>`));
-  assert.doesNotMatch(listed, /No boards are open/);
+  assert.doesNotMatch(listed, /No boards open yet/);
+  // The card previews the board's first design, served as the file on disk without the board SDK.
+  const preview = new RegExp(`data-src="(/board/${registered.key}/item/[^"/]+/v1\\.html)"`).exec(listed);
+  assert.ok(preview, "the card previews the first design");
+  const framed = await fetch(`${base}${preview[1]}`);
+  assert.equal(framed.status, 200);
+  const framedHtml = await framed.text();
+  assert.match(framedHtml, /The whole fleet/);
+  assert.doesNotMatch(framedHtml, /board-sdk/);
+  assert.match(listed, new RegExp(`data-unread-key="${registered.key}" data-replies="0"`));
+});
+
+test("the home page shows the newest board first and tells same-named boards apart by folder", async (t) => {
+  const { base, dir } = await setup(t);
+  const make = async (folder) => {
+    const response = await fetch(`${base}/api/board-folders`, {
+      method: "POST",
+      headers: write(base),
+      body: JSON.stringify({ folder, name: "Site" }),
+    });
+    assert.equal(response.status, 200);
+    return response.json();
+  };
+  const older = await make(path.join(dir, "alpha", "site"));
+  await new Promise((resolve) => setTimeout(resolve, 15));
+  const newer = await make(path.join(dir, "beta", "site"));
+  const listed = await (await fetch(`${base}/`, { headers: { accept: "text/html" } })).text();
+  assert.ok(listed.indexOf(newer.key) < listed.indexOf(older.key), "the newest board comes first");
+  assert.match(listed, />…\/alpha\/site</);
+  assert.match(listed, />…\/beta\/site</);
+  assert.match(listed, /No designs yet/);
+});
+
+test("the home page folder browser lists subfolders for the page's own origin only", async (t) => {
+  const { base, dir } = await setup(t);
+  await mkdir(path.join(dir, ".hidden"));
+  const listed = await fetch(`${base}/api/folder-list`, {
+    method: "POST",
+    headers: write(base),
+    body: JSON.stringify({ path: dir }),
+  });
+  assert.equal(listed.status, 200);
+  const payload = await listed.json();
+  assert.equal(payload.path, await realpath(dir));
+  assert.equal(payload.parent, path.dirname(await realpath(dir)));
+  assert.deepEqual(
+    payload.folders.map((folder) => folder.name),
+    ["hero"],
+  );
+  assert.equal(payload.folders[0].path, path.join(await realpath(dir), "hero"));
+
+  const bare = await fetch(`${base}/api/folder-list`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ path: dir }),
+  });
+  assert.equal(bare.status, 403);
+  for (const folder of ["relative/path", path.join(dir, "secret.txt"), path.join(dir, "missing")]) {
+    const refused = await fetch(`${base}/api/folder-list`, {
+      method: "POST",
+      headers: write(base),
+      body: JSON.stringify({ path: folder }),
+    });
+    assert.equal(refused.status, 400, `refuses ${folder}`);
+  }
+  // With no path it starts somewhere useful: the Liesel folder when there is one, else home.
+  const start = await fetch(`${base}/api/folder-list`, { method: "POST", headers: write(base), body: "{}" });
+  assert.equal(start.status, 200);
+  assert.ok(path.isAbsolute((await start.json()).path));
 });
 
 test("the home page makes a new board in a folder, creating the folder when it is missing", async (t) => {

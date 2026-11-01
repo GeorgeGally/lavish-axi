@@ -33,7 +33,7 @@ liesel init
 
 The agent opens the board (`liesel board open board`), writes HTML files into `board/`, and waits for your notes with `liesel poll board`. Each time you send notes it applies them, replies in the board's chat, and waits again.
 
-**Or start from the browser.** With the server running, the Liesel home page (the address `liesel board open` prints, without the `/board/...` part) lists your open boards and has a **New board** form: give it a name and a folder. A missing folder is created; a folder that already holds HTML files opens with each one on the board. Drop more HTML files onto the board to add them.
+**Or start from the browser.** With the server running, the Liesel home page (the address `liesel board open` prints, without the `/board/...` part) shows your open boards as cards, newest first: a live preview of each board's first design, its name, its folder (shortened just enough to tell same-named boards apart), when it last changed, and how many agent replies you have not read yet. **New board** opens a small form: give it a name and a folder, typed or picked with **Browse**. A missing folder is created; a folder that already holds HTML files opens with each one on the board. Drop more HTML files onto the board to add them.
 
 ## Reviewing a board
 

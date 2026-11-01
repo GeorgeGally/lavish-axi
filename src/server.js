@@ -79,6 +79,7 @@ import {
   writeBoard,
 } from "./board.js";
 import { missingHistory, readBoardHistory, writeBoardHistory } from "./board-history.js";
+import { createHomeHtml, folderLabels, listFolder } from "./home-page.js";
 import { createBoardHtml } from "./board-page.js";
 import { THUMB_SCALE, captureCrop, cropBox, cropFrameHtml, findChrome, thumbFrameHtml } from "./board-crop.js";
 import { createBoardNotifier, newSubmissionId, resolveNotifyCommand, runNotifyCommand } from "./board-notify.js";
@@ -806,14 +807,24 @@ export async function serve({
   app.get("/", async (_req, res, next) => {
     try {
       const sessions = await store.listSessions();
-      const boards = [];
+      const found = [];
       for (const session of sessions) {
         if (path.basename(session.file) !== BOARD_FILE_NAME || session.status === "ended") continue;
         const dir = path.dirname(session.file);
         const board = await readBoard(dir).catch(() => null);
-        boards.push({ key: session.key, name: board?.name || path.basename(dir) });
+        found.push({
+          key: session.key,
+          dir,
+          name: board?.name || path.basename(dir),
+          updatedAt: boardUpdatedAt(session, board),
+          agentReplies: (await boardChatForReading(dir, session)).filter((entry) => entry?.role === "agent").length,
+          preview: board ? await boardPreview(dir, session.key, board) : null,
+        });
       }
-      res.type("html").send(createLandingHtml(boards));
+      found.sort((a, b) => (Date.parse(b.updatedAt) || 0) - (Date.parse(a.updatedAt) || 0));
+      const labels = folderLabels(found.map((entry) => entry.dir));
+      const boards = found.map(({ dir, ...entry }, index) => ({ ...entry, folder: labels[index], folderTitle: dir }));
+      res.type("html").send(createHomeHtml(boards));
     } catch (error) {
       next(error);
     }
@@ -935,6 +946,47 @@ export async function serve({
     }
     await writeBoardHistory(dir, chat).catch(() => {});
     return chat;
+  }
+
+  // The chat as the board shows it, without writing anything: the home page only counts it.
+  async function boardChatForReading(dir, session) {
+    const live = Array.isArray(session.chat) ? session.chat : [];
+    const missing = missingHistory(await readBoardHistory(dir).catch(() => []), live);
+    return missing.length > 0 ? [...live, ...missing] : live;
+  }
+
+  // When a board last changed: its session or the newest build of any design on it.
+  function boardUpdatedAt(session, board) {
+    let latest = Date.parse(String(session.updated_at || "")) || 0;
+    for (const item of board?.items || []) {
+      for (const build of item.builds) latest = Math.max(latest, Date.parse(build.at) || 0);
+    }
+    return latest > 0 ? new Date(latest).toISOString() : "";
+  }
+
+  // The design a board's home-page card shows: the top-left design on its first tab. A saved
+  // thumbnail of its newest build is used when there is one; otherwise the card frames the
+  // file itself, served as it is on disk.
+  /** @returns {Promise<{ kind: "image" | "frame", src: string } | null>} */
+  async function boardPreview(dir, key, board) {
+    const firstTab = board.tabs[0]?.id;
+    const ordered = [
+      ...board.items.filter((item) => item.tab === firstTab).sort((a, b) => a.y - b.y || a.x - b.x),
+      ...board.items.filter((item) => item.tab !== firstTab),
+    ];
+    for (const item of ordered) {
+      if (!(await itemFileFor(dir, item))) continue;
+      const base = `/board/${encodeURIComponent(key)}/item/${encodeURIComponent(item.id)}`;
+      const latest = item.builds.at(-1);
+      if (
+        latest &&
+        (await stat(path.join(dir, BOARD_BUILD_DIR, item.id, `${latest.hash}.png`)).catch(() => null))?.isFile()
+      ) {
+        return { kind: "image", src: `${base}/thumb/${latest.hash}` };
+      }
+      return { kind: "frame", src: `${base}/${encodeURIComponent(path.basename(item.file))}` };
+    }
+    return null;
   }
 
   async function mirrorBoardChat(session) {
@@ -1179,6 +1231,18 @@ export async function serve({
         .trim()
         .slice(0, 120);
       res.json(await openBoardSession(folder, { name, reopen: true }));
+    } catch (error) {
+      if (boardErrorResponse(error, res)) return;
+      next(error);
+    }
+  });
+
+  // The New board form's folder browser: one folder's subfolder names. Browser-only, like
+  // making a folder, so neither another site nor a sandboxed design can list the disk.
+  app.post("/api/folder-list", async (req, res, next) => {
+    try {
+      if (!boardWriteGuard(req, res)) return;
+      res.json(await listFolder(req.body?.path, { nearest: Boolean(req.body?.nearest) }));
     } catch (error) {
       if (boardErrorResponse(error, res)) return;
       next(error);
@@ -3913,7 +3977,6 @@ function wantsHtml(req) {
   return accept.toLowerCase().includes("text/html");
 }
 
-/** @param {Array<{ key: string, name: string }>} boards */
 /**
  * The folder a New board form names: absolute, or under the home folder with `~/`. The
  * folder is created when missing. A file, the filesystem root and the home folder itself
@@ -3940,65 +4003,6 @@ export async function prepareBoardFolder(input) {
   if (existing && !existing.isDirectory()) throw new BoardError("That path is a file, not a folder");
   if (!existing) await mkdir(folder, { recursive: true });
   return folder;
-}
-
-function createLandingHtml(boards) {
-  const list =
-    boards.length > 0
-      ? `<ul class="boards">${boards.map((board) => `<li><a href="/board/${escapeHtml(board.key)}">${escapeHtml(board.name)}</a></li>`).join("")}</ul>`
-      : '<p class="empty">No boards are open.</p>';
-  const style = [
-    ":root{--paper:#f7f4ef;--card:#fffdf9;--ink:#25221f;--muted:#6e665d;--line:#d9d0c5;--accent:#25221f}",
-    "*{box-sizing:border-box}",
-    "body{margin:0;min-height:100vh;display:grid;place-items:center;background:var(--paper);color:var(--ink);font:16px/1.5 system-ui,sans-serif;padding:24px 16px}",
-    ".card{width:min(560px,100%);padding:32px;border:1px solid var(--line);border-radius:16px;background:var(--card);box-shadow:0 12px 40px #25221f18}",
-    "h1{margin:0 0 16px;font-size:26px}",
-    "h2{margin:32px 0 16px;font-size:18px}",
-    "p{margin:0}",
-    ".boards{margin:0;padding:0;list-style:none}.boards li+li{margin-top:6px}.boards a{color:inherit;font-weight:600}",
-    ".empty{color:var(--muted)}",
-    "form{display:grid;gap:16px}",
-    "label{display:grid;gap:6px;font-weight:600;font-size:14px}",
-    "input{font:inherit;font-weight:400;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:#fff;color:var(--ink)}",
-    "input:focus{outline:2px solid var(--ink);outline-offset:1px}",
-    ".hint{color:var(--muted);font-size:14px;font-weight:400}",
-    ".actions{display:flex;align-items:center;gap:16px}",
-    "button{font:inherit;font-weight:600;padding:10px 18px;border:0;border-radius:10px;background:var(--accent);color:#fff;cursor:pointer}",
-    "button[disabled]{opacity:.6;cursor:default}",
-    ".error{color:#a1301e;font-size:14px}",
-  ].join("");
-  const script = `(() => {
-  const form = document.getElementById("newBoard");
-  const name = form.elements.namedItem("name");
-  const folder = form.elements.namedItem("folder");
-  const error = document.getElementById("newBoardError");
-  const submit = form.querySelector("button");
-  let folderEdited = false;
-  const slug = (value) => value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
-  name.addEventListener("input", () => {
-    if (!folderEdited) folder.value = "~/Liesel/" + slug(name.value);
-  });
-  folder.addEventListener("input", () => { folderEdited = true; });
-  form.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    error.textContent = "";
-    submit.disabled = true;
-    try {
-      const response = await fetch("/api/board-folders", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ folder: folder.value, name: name.value }),
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok || !payload.key) throw new Error(payload.error || "The board could not be made.");
-      location.href = "/board/" + encodeURIComponent(payload.key);
-    } catch (failure) {
-      error.textContent = failure instanceof Error ? failure.message : String(failure);
-      submit.disabled = false;
-    }
-  });
-})();`;
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${PRODUCT_NAME}</title><style>${style}</style></head><body><main class="card"><h1>${PRODUCT_NAME}</h1>${list}<h2>New board</h2><form id="newBoard" autocomplete="off"><label>Name<input name="name" required maxlength="120" placeholder="Checkout redesign"></label><label>Folder<input name="folder" required value="~/Liesel/" spellcheck="false"><span class="hint">A missing folder is created. A folder that already holds HTML files opens with each one on the board. Drop more HTML files onto the board to add them.</span></label><div class="actions"><button type="submit">Create board</button><span class="error" id="newBoardError" role="alert"></span></div></form></main><script>${script}</script></body></html>`;
 }
 
 function createDeniedHtml({ title, message, workingUrl }) {
