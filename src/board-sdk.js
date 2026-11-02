@@ -71,7 +71,8 @@
 
   /** @param {Element} element */
   function selectorFor(element) {
-    if (!(element instanceof HTMLElement)) return "";
+    // An inline SVG's shapes are elements too: a click on a logo is about that logo.
+    if (!(element instanceof HTMLElement || element instanceof SVGElement)) return "";
     if (element.id) {
       const byId = `#${CSS.escape(element.id)}`;
       if (document.querySelectorAll(byId).length === 1) return byId;
@@ -83,7 +84,9 @@
         parts.unshift("body");
         break;
       }
-      let part = node.tagName.toLowerCase();
+      // The local name keeps an SVG name's case (clipPath, foreignObject), which a
+      // selector must match exactly; for HTML it is already lower case.
+      let part = CSS.escape(node.localName);
       const parentNode = node.parentElement;
       if (parentNode) {
         const sameTag = Array.from(parentNode.children).filter((child) => child.tagName === node.tagName);
