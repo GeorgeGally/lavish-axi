@@ -1752,6 +1752,34 @@ body[data-dragging="true"] .shield {
   font-variant-numeric: tabular-nums;
 }
 
+/* The agent has taken this note and not answered it: a thin ring turns around its number. */
+.thread-number.is-working {
+  position: relative;
+}
+
+.thread-number.is-working::after {
+  content: "";
+  position: absolute;
+  inset: -4px;
+  border: 1.5px solid rgba(22, 24, 29, 0.14);
+  border-top-color: var(--ink);
+  border-radius: 999px;
+  animation: thread-number-turn 0.9s linear infinite;
+  pointer-events: none;
+}
+
+@keyframes thread-number-turn {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .thread-number.is-working::after {
+    animation-duration: 2.4s;
+  }
+}
+
 .thread-title {
   overflow: hidden;
   font-size: 13px;

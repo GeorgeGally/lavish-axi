@@ -2557,6 +2557,20 @@ function answeredNote(note) {
   return Boolean(entry && entry.done_at);
 }
 
+/** The agent has taken this note and not answered it yet: its number shows a turning ring. */
+function workingNote(note) {
+  if (!note.prompt_id) return false;
+  const entry = state.chat.find((message) => message && message.prompt_id === note.prompt_id);
+  return Boolean(entry && entry.delivered_at && !entry.done_at);
+}
+
+/** @param {any} note @returns {"draft" | "sent" | "working" | "done"} */
+function pinState(note) {
+  if (!note.prompt_id) return "draft";
+  if (answeredNote(note)) return "done";
+  return workingNote(note) ? "working" : "sent";
+}
+
 function pinsFor(item, deviceId) {
   const page = item.page ? livePageOf(item.id, deviceId) : "";
   return (item.notes || [])
@@ -2569,7 +2583,7 @@ function pinsFor(item, deviceId) {
       y: note.y,
       ox: note.ox,
       oy: note.oy,
-      state: note.prompt_id ? (answeredNote(note) ? "done" : "sent") : "draft",
+      state: pinState(note),
     }));
 }
 
@@ -3586,7 +3600,9 @@ function threadHead(id, subject) {
   if (subject.kind === "note") {
     const crop = subject.note.crop?.id;
     if (crop) head.append(element("img", { class: "thread-thumb", src: attachmentUrl(crop), alt: "" }));
-    head.append(element("span", { class: "thread-number", text: String(subject.note.number) }));
+    const number = element("span", { class: "thread-number", text: String(subject.note.number) });
+    if (workingNote(subject.note)) number.classList.add("is-working");
+    head.append(number);
     const title = designName(subject.item, noteDevice(subject.note));
     threadTitles.set(id, `${subject.note.number} · ${title}`);
     head.append(element("span", { class: "thread-title", text: title }));
@@ -6283,6 +6299,8 @@ function connectLiveEvents() {
       if (payload?.type === "chat-sync") {
         if (Array.isArray(payload.data?.chat)) state.chat = payload.data.chat;
         renderChatPanel();
+        // A note taken or answered turns its pin's working ring on or off.
+        postAllPins();
         // A note sent or answered changes how many wait for the agent.
         if (runnerState.view) loadRunner();
       }

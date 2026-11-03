@@ -178,6 +178,22 @@
     return layer;
   }
 
+  /** The working ring's keyframes, added to the page once and marked as board UI. */
+  function ensurePinRingStyle() {
+    if (document.getElementById("liesel-pin-ring-style")) return;
+    const style = document.createElement("style");
+    style.id = "liesel-pin-ring-style";
+    style.setAttribute("data-liesel-ui", "pin-ring");
+    style.textContent = [
+      ".liesel-pin-ring{position:absolute;inset:-6px;border-radius:999px;box-sizing:border-box;",
+      "border:1.5px solid rgba(22,24,29,.14);border-top-color:#16181d;pointer-events:none;",
+      "animation:liesel-pin-turn .9s linear infinite}",
+      "@keyframes liesel-pin-turn{to{transform:rotate(360deg)}}",
+      "@media (prefers-reduced-motion:reduce){.liesel-pin-ring{animation-duration:2.4s}}",
+    ].join("");
+    (document.head || document.documentElement).appendChild(style);
+  }
+
   let reportedParked = "";
   function renderPins() {
     const layer = pinLayer();
@@ -218,6 +234,14 @@
       }
       element.textContent = String(pin.number);
       element.dataset.state = pin.state || "draft";
+      // Taken by the agent and not answered yet: a thin ring turns around the number.
+      if (pin.state === "working") {
+        ensurePinRingStyle();
+        const ring = document.createElement("span");
+        ring.className = "liesel-pin-ring";
+        ring.setAttribute("aria-hidden", "true");
+        element.appendChild(ring);
+      }
       if (pin.state === "draft") {
         // Not sent yet: an outline. Sent: filled. The artboard itself shows what the
         // agent already has.
