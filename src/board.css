@@ -3636,3 +3636,29 @@ input.agent-input {
 .artboard[data-final="other"]:has(+ .artboard-label:hover) {
   opacity: 1;
 }
+
+/* A design's own heading renames it in place. */
+.explain-title[data-rename] {
+  cursor: text;
+}
+
+.explain-title[data-rename]:hover {
+  text-decoration: underline;
+  text-decoration-color: var(--line-strong);
+  text-underline-offset: 0.18em;
+}
+
+.explain-title .rename-input {
+  width: auto;
+  max-width: 100%;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0 0.2em;
+  border: 1px solid var(--select);
+  border-radius: 0.25em;
+  background: var(--surface-strong);
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  outline: none;
+}

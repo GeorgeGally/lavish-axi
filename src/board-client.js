@@ -468,7 +468,19 @@ document.body.append(measure);
 
 function explainContent(group) {
   const inner = element("div", { class: "explain-inner" });
-  inner.append(element("h2", { class: "explain-title", text: group.title }));
+  const title = element("h2", { class: "explain-title", text: group.title });
+  // A design on its own is headed by its label: click (or tap) the name to rename it.
+  const named = group.single ? group.members[0].item : null;
+  if (named && !named.title && !named.placeholder && !named.compareOf && named.label === group.title) {
+    title.dataset.rename = named.id;
+    title.dataset.tap = "";
+    title.title = "Click to rename";
+    title.addEventListener("click", (event) => {
+      event.stopPropagation();
+      startRename(named.id, title);
+    });
+  }
+  inner.append(title);
   if (group.lines.length > 0) {
     const list = element("ul", { class: "explain-lines" });
     for (const line of group.lines) {
@@ -815,7 +827,21 @@ function render() {
       canvas.append(explain);
       state.explains.set(group.key, explain);
     }
-    explain.replaceChildren(explainContent(group));
+    // A heading being renamed keeps its field until Enter, Escape or a click away, and
+    // an unchanged explanation keeps its nodes, so a click on the name is never lost to
+    // a render between press and release.
+    const signature = JSON.stringify([
+      group.title,
+      group.lines,
+      group.changes,
+      group.compared,
+      group.single ? group.members[0].item.id : "",
+      group.single ? group.members[0].item.label : "",
+    ]);
+    if (!(group.single && renaming === group.members[0].item.id) && explain.dataset.signature !== signature) {
+      explain.dataset.signature = signature;
+      explain.replaceChildren(explainContent(group));
+    }
     explain.style.left = `${group.x}px`;
     explain.style.top = `${group.y}px`;
     explain.style.width = `${group.width}px`;
@@ -1144,14 +1170,27 @@ function restoreCopy(token, item) {
 }
 
 /** Rename a copy in place: its name becomes an input, Enter keeps it, Escape does not. */
-function startRename(itemId) {
+/**
+ * Rename a design in place: a copy from its label row, any design on its own from its
+ * heading. Enter or a click away saves the label in board.json (the file keeps its
+ * name), Escape keeps the old one.
+ * @param {string} itemId @param {HTMLElement} [host] where the name shows, when not the copy's label
+ */
+function startRename(itemId, host) {
   const item = itemById(itemId);
-  const record = [...state.artboards.values()].find(
-    (entry) => entry.itemId === itemId && !entry.root.hidden && !entry.actions.hidden,
-  );
-  if (!item?.copyOf || !record || state.ended) return;
+  const record = host
+    ? null
+    : [...state.artboards.values()].find(
+        (entry) => entry.itemId === itemId && !entry.root.hidden && !entry.actions.hidden,
+      );
+  const target = host || (item?.copyOf ? record?.name : null);
+  if (!item || !target || state.ended || renaming === item.id) return;
   renaming = item.id;
-  const input = element("input", { class: "rename-input", type: "text", "aria-label": "Name of this copy" });
+  const input = element("input", {
+    class: "rename-input",
+    type: "text",
+    "aria-label": item.copyOf ? "Name of this copy" : "Name of this design",
+  });
   input.value = item.label;
   input.size = Math.max(8, item.label.length + 2);
   let done = false;
@@ -1159,6 +1198,9 @@ function startRename(itemId) {
     if (done) return;
     done = true;
     renaming = "";
+    // The heading held a field: rebuild it on the next render whatever the name is.
+    const explain = target.closest(".explain");
+    if (explain instanceof HTMLElement) delete explain.dataset.signature;
     const label = input.value.trim().slice(0, 120);
     if (keep && label && label !== item.label) {
       item.label = label;
@@ -1180,7 +1222,7 @@ function startRename(itemId) {
   for (const type of ["click", "dblclick", "pointerdown"]) {
     input.addEventListener(type, (event) => event.stopPropagation());
   }
-  record.name.replaceChildren(input);
+  target.replaceChildren(input);
   input.focus();
   input.select();
 }
@@ -2490,6 +2532,9 @@ function bindNavigation() {
   plane.addEventListener("pointerdown", (event) => {
     if (event.metaKey || event.altKey) noteChord();
     if (event.target instanceof Element && event.target.closest("button")) return;
+    // A press that pans is kept from moving focus, so a name being edited is saved here.
+    const editing = document.activeElement;
+    if (editing instanceof HTMLElement && editing.classList.contains("rename-input")) editing.blur();
     if (event.pointerType === "touch") {
       stopGlide();
       event.preventDefault();
@@ -2506,6 +2551,8 @@ function bindNavigation() {
       }
       return;
     }
+    // A design's name takes its own click rather than starting a pan.
+    if (event.target instanceof Element && event.target.closest("[data-tap]")) return;
     const record = recordForShield(event.target);
     // Tune owns the press: the panel opens on the point under the pointer, and the
     // click that follows is consumed so it can never turn into a note.
@@ -2600,6 +2647,13 @@ function bindNavigation() {
         // A tap: Controls picks what is under it, notes drop a note there. Neither
         // waits for a click, which a touch browser may never send.
         const record = recordForShield(event.target);
+        // Something on the board that answers a tap, such as a design's name.
+        const tappable = event.target instanceof Element ? event.target.closest("[data-tap]") : null;
+        if (!record && tappable instanceof HTMLElement && event.type === "pointerup") {
+          suppressClick = true;
+          tappable.click();
+          return;
+        }
         if (!record || event.type !== "pointerup" || panModeActive()) return;
         suppressClick = true;
         if (tuneArmed()) openTargetTune(record, pointInFrame(record, event.clientX, event.clientY));
