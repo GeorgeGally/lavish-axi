@@ -3617,3 +3617,22 @@ input.agent-input {
     pointer-events: auto;
   }
 }
+
+/* The final design: its button reads "✓ Final" in ink, and the rest of its tab steps
+   back a little until hovered, so the pick reads at a glance. */
+.artboard-label .item-final[aria-pressed="true"] {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.artboard[data-final="other"],
+.artboard-label[data-final="other"] {
+  opacity: 0.55;
+  transition: opacity 160ms ease;
+}
+
+.artboard[data-final="other"]:hover,
+.artboard-label[data-final="other"]:hover,
+.artboard[data-final="other"]:has(+ .artboard-label:hover) {
+  opacity: 1;
+}

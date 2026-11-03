@@ -860,6 +860,7 @@ function render() {
         record.label.style.height = `${layout.labelReserve}px`;
         if (renaming !== member.item.id || index !== 0) record.name.textContent = index === 0 ? member.label : "";
         record.actions.hidden = index !== 0;
+        syncFinal(record, member.item);
         record.label.dataset.picked = String(index === 0 && pickedItem === member.item.id);
         if (index === 0) renderBuilds(record, member.item);
         else record.buildsEl?.remove();
@@ -1039,6 +1040,11 @@ function itemActions(item) {
     });
     return node;
   };
+  // One design per tab can be chosen as the final; its button says so and takes it back.
+  const final = button("Choose as final", "Choose this design as the final one", () => toggleFinal(item.id));
+  final.classList.add("item-final");
+  final.setAttribute("aria-pressed", "false");
+  actions.append(final);
   // A live page is the running app, not a file to copy.
   if (!item.page) actions.append(button("Duplicate", "Duplicate this design (⌘D)", () => duplicateDesign(item.id)));
   if (item.copyOf) {
@@ -1850,6 +1856,83 @@ function replyLinks(entry, previousAt) {
     writeStorage(linkStorageKey, JSON.stringify(stored));
   }
   return links;
+}
+
+/* ------------------------------------------------------------------- final */
+
+// The reviewer picks one design per tab as the final. It is the item's `status: "final"`
+// in board.json, the others on that tab go back to "open", and the agent hears of every
+// pick or take-back at once, as an ordinary prompt, so it reaches poll and the notify hook.
+const FINAL = "final";
+
+/** The tab's chosen design, if any. @param {string} tab */
+function finalOf(tab) {
+  return state.items.find((item) => item.tab === tab && item.status === FINAL) || null;
+}
+
+/** @param {any} item */
+function finalRef(item) {
+  return `${item.label} (item ${item.id}${item.file ? `, ${item.file}` : ""})`;
+}
+
+/** Choose this design as its tab's final, or take it back when it already is. @param {string} itemId */
+function toggleFinal(itemId) {
+  const item = itemById(itemId);
+  if (!item || state.ended) return;
+  const previous = finalOf(item.tab);
+  setFinal(item.tab, previous?.id === item.id ? "" : item.id, previous?.id || "");
+}
+
+/**
+ * Make `itemId` (or nothing) the final of `tab`: saved, shown, told to the agent, and
+ * offered back with Undo.
+ * @param {string} tab @param {string} itemId @param {string} previousId
+ */
+function setFinal(tab, itemId, previousId) {
+  if (state.ended || itemId === previousId) return;
+  const changes = [];
+  for (const other of state.items) {
+    if (other.tab !== tab) continue;
+    const next = other.id === itemId ? FINAL : other.status === FINAL ? "open" : other.status;
+    if (other.status !== next) {
+      other.status = next;
+      changes.push({ id: other.id, status: next });
+    }
+  }
+  if (changes.length > 0) {
+    boardPost("place", { items: changes }).catch(() => {
+      dockStatus.textContent = "Could not save the final design.";
+    });
+  }
+  const chosen = itemById(itemId);
+  const previous = itemById(previousId);
+  const message = chosen
+    ? `Chosen as final: ${finalRef(chosen)}${previous ? `, replacing ${finalRef(previous)}` : ""}`
+    : `No longer final: ${previous ? finalRef(previous) : "the design"}. No design on this tab is chosen as final now.`;
+  const about = chosen || previous;
+  if (about) sendPrompts([], message, [], { thread: `item:${about.id}`, item: about });
+  render();
+  showBoardToast(chosen ? "Chosen as final" : "No final design", chosen ? chosen.label : "", "Undo", () =>
+    setFinal(tab, previousId, itemId),
+  );
+}
+
+/** A design's final button and how it stands among its tab. @param {any} record @param {any} item */
+function syncFinal(record, item) {
+  const final = finalOf(item.tab);
+  const chosen = final?.id === item.id;
+  const button = record.actions.querySelector(".item-final");
+  if (button) {
+    button.textContent = chosen ? "✓ Final" : "Choose as final";
+    button.title = chosen ? "Chosen as final · click to take it back" : "Choose this design as the final one";
+    button.setAttribute("aria-pressed", String(chosen));
+    button.disabled = Boolean(state.ended);
+  }
+  const standing = final ? (chosen ? "chosen" : "other") : "";
+  for (const node of [record.root, record.label]) {
+    if (standing) node.dataset.final = standing;
+    else delete node.dataset.final;
+  }
 }
 
 /* ----------------------------------------------------------------- choices */
