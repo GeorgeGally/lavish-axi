@@ -82,6 +82,7 @@ test(
       const LOUD = 1;
 
       // Always shown, so it is reachable on touch without a hover.
+      assert.equal(await evaluate(`${finalButton(CALM)}.getAttribute("aria-label")`), "Choose as final");
       assert.equal(await evaluate(`${finalButton(CALM)}.hasAttribute("data-reveal")`), false);
       assert.equal(await evaluate(`getComputedStyle(${finalButton(CALM)}).opacity`), "1");
 
@@ -114,11 +115,13 @@ test(
       assert.match(await poll(), new RegExp(`^Chosen as final: ${calmLabel} \\(item ${calm}, 01-calm\\.html\\)$`, "m"));
 
       // Choose another: the pick moves, and the agent hears which it replaced.
+      await until(`${finalButton(CALM)}.getAttribute("aria-pressed") === "true"`, "calm shown as final");
       await evaluate(`${finalButton(LOUD)}.click()`);
       await savedAs({ [calm]: "open", [loud]: "final" });
       assert.match(await poll(), new RegExp(`Chosen as final: ${loudLabel} .*replacing ${calmLabel}`));
 
       // Take it back: no final at all.
+      await until(`${finalButton(LOUD)}.getAttribute("aria-pressed") === "true"`, "loud shown as final");
       await evaluate(`${finalButton(LOUD)}.click()`);
       await savedAs({ [calm]: "open", [loud]: "open" });
       assert.equal(await evaluate(`document.querySelectorAll(".artboard[data-final]").length`), 0);

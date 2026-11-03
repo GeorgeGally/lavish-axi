@@ -1041,8 +1041,10 @@ function itemActions(item) {
     return node;
   };
   // One design per tab can be chosen as the final; its button says so and takes it back.
-  const final = button("Choose as final", "Choose this design as the final one", () => toggleFinal(item.id));
+  // "Final" stays short so the label row fits beside a narrow screen's width.
+  const final = button("Final", "Choose as final", () => toggleFinal(item.id));
   final.classList.add("item-final");
+  final.setAttribute("aria-label", "Choose as final");
   final.setAttribute("aria-pressed", "false");
   actions.append(final);
   // A live page is the running app, not a file to copy.
@@ -1864,6 +1866,9 @@ function replyLinks(entry, previousAt) {
 // in board.json, the others on that tab go back to "open", and the agent hears of every
 // pick or take-back at once, as an ordinary prompt, so it reaches poll and the notify hook.
 const FINAL = "final";
+/** Statuses saved here and not yet confirmed: a board refresh that left before them keeps them. */
+/** @type {Map<string, string>} */
+const pendingStatus = new Map();
 
 /** The tab's chosen design, if any. @param {string} tab */
 function finalOf(tab) {
@@ -1900,9 +1905,16 @@ function setFinal(tab, itemId, previousId) {
     }
   }
   if (changes.length > 0) {
-    boardPost("place", { items: changes }).catch(() => {
-      dockStatus.textContent = "Could not save the final design.";
-    });
+    for (const change of changes) pendingStatus.set(change.id, change.status);
+    const settle = () => {
+      for (const change of changes) if (pendingStatus.get(change.id) === change.status) pendingStatus.delete(change.id);
+    };
+    boardPost("place", { items: changes })
+      .then(settle)
+      .catch(() => {
+        settle();
+        dockStatus.textContent = "Could not save the final design.";
+      });
   }
   const chosen = itemById(itemId);
   const previous = itemById(previousId);
@@ -1923,8 +1935,9 @@ function syncFinal(record, item) {
   const chosen = final?.id === item.id;
   const button = record.actions.querySelector(".item-final");
   if (button) {
-    button.textContent = chosen ? "✓ Final" : "Choose as final";
-    button.title = chosen ? "Chosen as final · click to take it back" : "Choose this design as the final one";
+    button.textContent = chosen ? "✓ Final" : "Final";
+    button.title = chosen ? "Chosen as final · click to take it back" : "Choose as final";
+    button.setAttribute("aria-label", chosen ? "Chosen as final; take it back" : "Choose as final");
     button.setAttribute("aria-pressed", String(chosen));
     button.disabled = Boolean(state.ended);
   }
@@ -6776,7 +6789,12 @@ function refreshBoard() {
         // Notes still being written here win over the server's older copy.
         const keepNotes =
           noteTimers.has(item.id) || Boolean(editing && (mine.notes || []).some((note) => note.id === editing));
-        return { ...item, notes: keepNotes ? mine.notes : item.notes, tune: mine.tune || item.tune };
+        return {
+          ...item,
+          notes: keepNotes ? mine.notes : item.notes,
+          tune: mine.tune || item.tune,
+          status: pendingStatus.get(item.id) ?? item.status,
+        };
       });
       const previousTabs = state.tabs.map((tab) => tab.id).join(",");
       state.tabs = payload.tabs || state.tabs;
