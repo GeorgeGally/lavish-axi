@@ -184,14 +184,76 @@
     const style = document.createElement("style");
     style.id = "liesel-pin-ring-style";
     style.setAttribute("data-liesel-ui", "pin-ring");
+    // A light dash travels along an outline drawn 2px off the badge, in the badge's own
+    // shape, with a soft shadow so it reads on light and dark designs alike.
     style.textContent = [
-      ".liesel-pin-ring{position:absolute;inset:-6px;border-radius:999px;box-sizing:border-box;",
-      "border:1.5px solid rgba(22,24,29,.14);border-top-color:#16181d;pointer-events:none;",
-      "animation:liesel-pin-turn .9s linear infinite}",
-      "@keyframes liesel-pin-turn{to{transform:rotate(360deg)}}",
-      "@media (prefers-reduced-motion:reduce){.liesel-pin-ring{animation-duration:2.4s}}",
+      ".liesel-pin-ring{position:absolute;overflow:visible;pointer-events:none;",
+      "filter:drop-shadow(0 0 .75px rgba(0,0,0,.7)) drop-shadow(0 1px 2px rgba(0,0,0,.3))}",
+      ".liesel-pin-ring rect{fill:none;stroke:#ffffff;stroke-width:1.5px;stroke-linecap:round;",
+      "stroke-dasharray:30 70;animation:liesel-pin-turn 1.4s linear infinite}",
+      "@keyframes liesel-pin-turn{to{stroke-dashoffset:-100}}",
+      "@media (prefers-reduced-motion:reduce){.liesel-pin-ring rect{animation:none;stroke-dasharray:none}}",
     ].join("");
     (document.head || document.documentElement).appendChild(style);
+  }
+
+  const PIN_RING_GAP = 2;
+  const PIN_RING_STROKE = 1.5;
+
+  /**
+   * Fit the working ring to its pin: an outline PIN_RING_GAP off the badge's outer edge,
+   * a circle for one digit and a pill for wider numbers. Kept across renders so the dash
+   * keeps travelling smoothly while the page scrolls.
+   * @param {HTMLElement} pin
+   * @param {boolean} working
+   */
+  function syncPinRing(pin, working) {
+    let ring = pin.querySelector(".liesel-pin-ring");
+    if (!working) {
+      ring?.remove();
+      return;
+    }
+    const ns = "http://www.w3.org/2000/svg";
+    if (!ring) {
+      ensurePinRingStyle();
+      ring = document.createElementNS(ns, "svg");
+      ring.setAttribute("class", "liesel-pin-ring");
+      ring.setAttribute("aria-hidden", "true");
+      const rect = document.createElementNS(ns, "rect");
+      rect.setAttribute("pathLength", "100");
+      ring.appendChild(rect);
+      pin.appendChild(ring);
+    }
+    const border = pin.clientLeft;
+    const width = pin.offsetWidth;
+    const height = pin.offsetHeight;
+    if (!width || !height) return;
+    // The stroke's centre line sits gap + half a stroke outside the badge's outer edge.
+    const out = PIN_RING_GAP + PIN_RING_STROKE / 2;
+    const pad = Math.ceil(out + PIN_RING_STROKE);
+    const svg = /** @type {SVGSVGElement} */ (ring);
+    svg.style.left = `${-border - pad}px`;
+    svg.style.top = `${-border - pad}px`;
+    svg.setAttribute("width", String(width + pad * 2));
+    svg.setAttribute("height", String(height + pad * 2));
+    const rect = /** @type {SVGRectElement} */ (svg.firstElementChild);
+    const h = height + out * 2;
+    rect.setAttribute("x", String(pad - out));
+    rect.setAttribute("y", String(pad - out));
+    rect.setAttribute("width", String(width + out * 2));
+    rect.setAttribute("height", String(h));
+    rect.setAttribute("rx", String(h / 2));
+    rect.setAttribute("ry", String(h / 2));
+  }
+
+  /** @param {HTMLElement} pin @param {string} text the number, set without dropping the ring */
+  function setPinNumber(pin, text) {
+    const first = pin.firstChild;
+    if (first && first.nodeType === 3) {
+      if (first.nodeValue !== text) first.nodeValue = text;
+      return;
+    }
+    pin.prepend(document.createTextNode(text));
   }
 
   let reportedParked = "";
@@ -232,16 +294,8 @@
         ].join(";");
         layer.appendChild(element);
       }
-      element.textContent = String(pin.number);
+      setPinNumber(element, String(pin.number));
       element.dataset.state = pin.state || "draft";
-      // Taken by the agent and not answered yet: a thin ring turns around the number.
-      if (pin.state === "working") {
-        ensurePinRingStyle();
-        const ring = document.createElement("span");
-        ring.className = "liesel-pin-ring";
-        ring.setAttribute("aria-hidden", "true");
-        element.appendChild(ring);
-      }
       if (pin.state === "draft") {
         // Not sent yet: an outline. Sent: filled. The artboard itself shows what the
         // agent already has.
@@ -262,6 +316,8 @@
       element.style.left = `${anchor.x}px`;
       element.style.top = `${anchor.y}px`;
       element.style.transform = "translate(-50%,-50%)";
+      // Taken by the agent and not answered yet: a light dash runs around the number.
+      syncPinRing(element, pin.state === "working");
     }
     for (const node of Array.from(layer.children)) {
       if (!(node instanceof HTMLElement) || !seen.has(node.dataset.pin)) node.remove();

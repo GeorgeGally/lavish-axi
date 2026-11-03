@@ -1752,7 +1752,14 @@ body[data-dragging="true"] .shield {
   font-variant-numeric: tabular-nums;
 }
 
-/* The agent has taken this note and not answered it: a thin ring turns around its number. */
+/* The agent has taken this note and not answered it: a light sweep runs along an outline
+   2px off the number, in the number's own shape (a circle, or a pill for two digits). */
+@property --thread-ring-turn {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+
 .thread-number.is-working {
   position: relative;
 }
@@ -1760,23 +1767,34 @@ body[data-dragging="true"] .shield {
 .thread-number.is-working::after {
   content: "";
   position: absolute;
-  inset: -4px;
-  border: 1.5px solid rgba(22, 24, 29, 0.14);
-  border-top-color: var(--ink);
+  inset: -3.5px;
+  padding: 1.5px;
   border-radius: 999px;
-  animation: thread-number-turn 0.9s linear infinite;
+  background: conic-gradient(
+    from var(--thread-ring-turn),
+    rgba(22, 24, 29, 0.12) 0deg 250deg,
+    var(--ink) 340deg,
+    rgba(22, 24, 29, 0.12) 360deg
+  );
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  animation: thread-number-turn 1.4s linear infinite;
   pointer-events: none;
 }
 
 @keyframes thread-number-turn {
   to {
-    transform: rotate(360deg);
+    --thread-ring-turn: 360deg;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .thread-number.is-working::after {
-    animation-duration: 2.4s;
+    animation: none;
+    background: rgba(22, 24, 29, 0.4);
   }
 }
 

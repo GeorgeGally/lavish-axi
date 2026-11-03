@@ -71,7 +71,10 @@ test(
       const saved = await fetch(`${base}/api/boards/${opened.key}/notes`, {
         method: "POST",
         headers: write,
-        body: JSON.stringify({ item: item.id, notes: [note] }),
+        body: JSON.stringify({
+          item: item.id,
+          notes: [note, { ...note, id: "n10", number: 10, x: 200, ox: 160, text: "Wider", prompt_id: "p-10" }],
+        }),
       });
       assert.equal(saved.status, 200);
       const queued = await fetch(`${base}/api/${opened.key}/prompts`, {
@@ -88,6 +91,16 @@ test(
               item: { id: item.id, label: item.label },
               pin: { id: "n1", number: 1 },
               thread: "n1",
+            },
+            {
+              uid: "u10",
+              prompt_id: "p-10",
+              prompt: "Wider",
+              selector: "#title",
+              tag: "pin",
+              item: { id: item.id, label: item.label },
+              pin: { id: "n10", number: 10 },
+              thread: "n10",
             },
           ],
           domSnapshot: "",
@@ -134,9 +147,46 @@ test(
       await until(`${pin}?.dataset.state === "working"`, "working pin", design);
       await until(ringOnPin, "ring on pin", design);
       assert.equal(
-        await evaluate(`getComputedStyle(${pin}.querySelector(".liesel-pin-ring")).animationName`, design),
+        await evaluate(`getComputedStyle(${pin}.querySelector(".liesel-pin-ring rect")).animationName`, design),
         "liesel-pin-turn",
       );
+      // The ring follows the badge's own shape 2px off its edge, centred on it: a circle
+      // for one digit, a pill for two, never a bigger circle off to one side.
+      /** @param {string} id */
+      const ringFit = (id) =>
+        evaluate(
+          `(() => {
+            const badge = document.querySelector('.liesel-pin[data-pin="${id}"]');
+            const rect = badge.querySelector(".liesel-pin-ring rect");
+            const b = badge.getBoundingClientRect();
+            const r = rect.getBoundingClientRect();
+            const stroke = parseFloat(getComputedStyle(rect).strokeWidth);
+            return {
+              dx: Math.abs(r.left + r.width / 2 - (b.left + b.width / 2)),
+              dy: Math.abs(r.top + r.height / 2 - (b.top + b.height / 2)),
+              gapX: (r.width - stroke - b.width) / 2,
+              gapY: (r.height - stroke - b.height) / 2,
+              round: Math.abs(Number(rect.getAttribute("rx")) - r.height / 2),
+              wide: r.width - r.height,
+              stroke,
+              color: getComputedStyle(rect).stroke,
+            };
+          })()`,
+          design,
+        );
+      await until(`!!document.querySelector('.liesel-pin[data-pin="n10"] .liesel-pin-ring')`, "ring on 10", design);
+      for (const { id, pill } of [
+        { id: "n1", pill: false },
+        { id: "n10", pill: true },
+      ]) {
+        const fit = await ringFit(id);
+        assert.ok(fit.dx < 0.5 && fit.dy < 0.5, `${id} ring centred: ${JSON.stringify(fit)}`);
+        assert.ok(Math.abs(fit.gapX - 2) < 0.5 && Math.abs(fit.gapY - 2) < 0.5, `${id} gap: ${JSON.stringify(fit)}`);
+        assert.ok(fit.round < 0.5, `${id} ends are round: ${JSON.stringify(fit)}`);
+        assert.equal(fit.wide > 4, pill, `${id} shape: ${JSON.stringify(fit)}`);
+        assert.ok(fit.stroke >= 1.5 && fit.stroke <= 2, `${id} thin stroke: ${JSON.stringify(fit)}`);
+        assert.equal(fit.color, "rgb(255, 255, 255)");
+      }
       await until(ringOnThread, "ring on thread");
 
       // The reply lands: the ring goes and the pin leaves the design for the gutter.
