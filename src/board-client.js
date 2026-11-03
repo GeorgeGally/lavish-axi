@@ -6571,14 +6571,13 @@ function onArtboardMessage(event) {
         inherited,
         crumbs,
         like,
-        // Elements that come in a run are tuned together unless the reviewer narrows it.
-        scope: like ? "all" : "one",
+        // A pick tunes the element picked, never its siblings: "All like this" is opt-in.
+        scope: "one",
         sizes: "all",
         error: data.error ? String(data.error) : "",
       };
       syncTargetValues(tuneTarget);
       renderTune();
-      if (like) outlineGroupInFrame(like.selector, 1500);
     }
     return;
   }

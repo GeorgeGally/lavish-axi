@@ -334,8 +334,8 @@ test(
 
 const RAIL_HTML = readFileSync(path.join(repoRoot, "test/fixtures/hftw-rail.html"), "utf8");
 
-// The Home for the Woods rail: a pick names exactly the block clicked, a change reaches
-// every card's block in that rail at every size, and a box's text settings say which
+// The Home for the Woods rail: a pick names exactly the block clicked, a change under
+// All like this reaches every card's block in that rail at every size, and a box's text settings say which
 // text inside sets its own.
 test(
   "Controls tunes all like this in a product rail, across sizes, and names text that sets its own",
@@ -385,9 +385,10 @@ test(
         await crumbs(),
         "Page > main > section.rail-section > div.rail-window > div.rail-track > article.product > *div.product-meta",
       );
-      assert.deepEqual(await scopes(), ["This one", "*All like this (5)", "*All sizes", "Desktop only"]);
+      assert.deepEqual(await scopes(), ["*This one", "All like this (5)", "*All sizes", "Desktop only"]);
 
-      // One change reaches every card's block in this rail, in every size, and nothing else.
+      // Chosen, one change reaches every card's block in this rail, in every size, and nothing else.
+      await choose("All like");
       await slide("Line height", "20");
       assert.deepEqual(
         await styleOf(desktop, ".rail-section:nth-of-type(1) .product-meta", "line-height"),
@@ -459,6 +460,75 @@ test(
       await evaluate(`document.querySelector(".tune-note-jump").click()`);
       await sleep(600);
       assert.match(await crumbs(), /\*div\.product-meta/);
+    } finally {
+      await b.close();
+    }
+  },
+);
+
+const EMAIL_HTML = `<!doctype html>
+<html><head><meta charset="utf-8"><title>email</title><style>
+body { margin: 0; font-family: Helvetica, Arial, sans-serif; color: rgb(13, 37, 63); }
+#email-content { width: 600px; margin: 40px auto; border-collapse: collapse; }
+td { padding: 24px 40px; }
+p { margin: 0 0 16px; font-size: 18px; font-weight: 400; line-height: 1.6; }
+a { color: rgb(46, 107, 168); }
+</style></head>
+<body><table id="email-content"><tbody><tr><td>
+<h1 id="title">Project Haley</h1>
+<p id="label">Assistance requested</p>
+<p id="body">We welcome suggestions re: potential buyers and prior experience in the space.</p>
+<p id="contact"><a href="mailto:someone@example.com">someone@example.com</a></p>
+</td></tr></tbody></table></body></html>
+`;
+
+// The CapFive email: three paragraphs in one cell look "like" each other, but making
+// the picked one bold must bold that paragraph alone, never the text below it.
+test(
+  "Controls tunes only the picked element by default, never the siblings like it",
+  { skip: !runBrowserE2e || !findChrome(), timeout: 240_000 },
+  async () => {
+    const b = await startBoard("01-email.html", EMAIL_HTML);
+    const { send, evaluate, tapAlt, click, design, pointInDesign, saved, url } = b;
+    try {
+      await send("Page.enable");
+      await send("Page.navigate", { url });
+      await sleep(2500);
+      const desktop = await design();
+      /** @param {string} selector */
+      const weightOf = (selector) =>
+        evaluate(`getComputedStyle(document.querySelector(${JSON.stringify(selector)})).fontWeight`, desktop);
+      const scopes = () =>
+        evaluate(
+          `[...document.querySelectorAll(".tune-scope-option")].map((b) => (b.getAttribute("aria-checked") === "true" ? "*" : "") + b.textContent)`,
+        );
+
+      const point = await pointInDesign(desktop, "#label");
+      await tapAlt();
+      await click(point.x, point.y);
+      await tapAlt();
+      assert.deepEqual(await scopes(), ["*This one", "All like this (3)", "*All sizes", "Desktop only"]);
+
+      await evaluate(`(() => {
+        const control = [...document.querySelectorAll("#tuneBody > .tune-control")].find((c) => c.querySelector(".tune-control-label span")?.textContent === "Weight");
+        const select = control.querySelector("select");
+        select.value = "800";
+        select.dispatchEvent(new Event("change", { bubbles: true }));
+      })()`);
+      await sleep(800);
+
+      assert.equal(await weightOf("#label"), "800");
+      assert.equal(await weightOf("#body"), "400", "the paragraph below keeps its weight");
+      assert.equal(await weightOf("#contact"), "400", "the contact line keeps its weight");
+      assert.equal(await weightOf("#contact a"), "400", "the link keeps its weight");
+      const keys = Object.keys(await saved());
+      assert.equal(keys.length, 1, JSON.stringify(keys));
+      assert.equal(
+        await evaluate(`document.querySelectorAll(${JSON.stringify(keys[0])}).length`, desktop),
+        1,
+        `${keys[0]} names the picked paragraph alone`,
+      );
+      assert.equal(await evaluate(`document.querySelector(${JSON.stringify(keys[0])}).id`, desktop), "label");
     } finally {
       await b.close();
     }
