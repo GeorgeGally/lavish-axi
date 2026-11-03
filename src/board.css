@@ -3609,3 +3609,11 @@ input.agent-input {
 .tune-side .tune-control-value {
   font-size: 12px;
 }
+
+/* On a phone or tablet the shield is always up, so one finger drags and two pinch the
+   board wherever they land, instead of a page inside a frame taking the touch. */
+@media (hover: none) and (pointer: coarse) {
+  .shield {
+    pointer-events: auto;
+  }
+}

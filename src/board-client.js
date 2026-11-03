@@ -2310,14 +2310,106 @@ function clearHover() {
   }
 }
 
+/*
+ * Touch: on a phone or tablet the shield stays up over every frame (see board.css), so
+ * no page can swallow a drag. One finger drags the board and glides on when let go,
+ * two fingers pinch to zoom around their midpoint, and a tap that never moved still
+ * drops a note or picks an element for Controls.
+ */
+const TOUCH_GLIDE_DECAY = 0.996; // per millisecond
+const TOUCH_GLIDE_MIN = 0.02; // px per millisecond
+const TOUCH_TAP_SLOP = 8;
+
 function bindNavigation() {
-  /** @type {null | { x: number, y: number, cameraX: number, cameraY: number, id: number, moved: boolean }} */
+  /** @type {null | { x: number, y: number, cameraX: number, cameraY: number, id: number, moved: boolean, touch?: boolean }} */
   let drag = null;
   let suppressClick = false;
+  /** @type {ReturnType<typeof setTimeout> | undefined} */
+  let clickTimer;
+  /** A note dropped where a click or tap landed on a design. @param {any} record @param {number} x @param {number} y */
+  const noteAt = (record, x, y) => {
+    const point = pointInFrame(record, x, y);
+    // A double-click means zoom, so the note waits out the double-click window.
+    clearTimeout(clickTimer);
+    clickTimer = setTimeout(() => {
+      pendingClick = { key: record.id, x, y, time: Date.now() };
+      postHit(record, point);
+    }, 220);
+  };
+  /** @type {Map<number, { x: number, y: number }>} every finger on the plane */
+  const touches = new Map();
+  /** @type {null | { distance: number, zoom: number, worldX: number, worldY: number }} */
+  let pinch = null;
+  /** @type {{ x: number, y: number, t: number }[]} the last moments of a one-finger drag */
+  let samples = [];
+  let glide = 0;
+
+  const stopGlide = () => {
+    if (glide) window.cancelAnimationFrame(glide);
+    glide = 0;
+  };
+
+  /** @param {number} vx @param {number} vy px per millisecond */
+  const glideFrom = (vx, vy) => {
+    stopGlide();
+    let last = performance.now();
+    const step = (now) => {
+      const dt = Math.min(now - last, 32);
+      last = now;
+      state.camera.x += vx * dt;
+      state.camera.y += vy * dt;
+      const decay = Math.pow(TOUCH_GLIDE_DECAY, dt);
+      vx *= decay;
+      vy *= decay;
+      scheduleApplyCamera();
+      if (Math.hypot(vx, vy) > TOUCH_GLIDE_MIN) glide = window.requestAnimationFrame(step);
+      else {
+        glide = 0;
+        saveCamera();
+      }
+    };
+    glide = window.requestAnimationFrame(step);
+  };
+
+  /** @param {{ x: number, y: number }} point @param {number} id */
+  const startTouchDrag = (point, id) => {
+    drag = { x: point.x, y: point.y, cameraX: state.camera.x, cameraY: state.camera.y, id, moved: false, touch: true };
+    samples = [{ x: point.x, y: point.y, t: performance.now() }];
+  };
+
+  const startPinch = () => {
+    const [a, b] = [...touches.values()];
+    const midX = (a.x + b.x) / 2;
+    const midY = (a.y + b.y) / 2 - barHeight();
+    pinch = {
+      distance: Math.max(1, Math.hypot(a.x - b.x, a.y - b.y)),
+      zoom: state.camera.zoom,
+      worldX: (midX - state.camera.x) / state.camera.zoom,
+      worldY: (midY - state.camera.y) / state.camera.zoom,
+    };
+    drag = null;
+    suppressClick = true;
+  };
 
   plane.addEventListener("pointerdown", (event) => {
     if (event.metaKey || event.altKey) noteChord();
     if (event.target instanceof Element && event.target.closest("button")) return;
+    if (event.pointerType === "touch") {
+      stopGlide();
+      event.preventDefault();
+      // A touch is captured by what it landed on already, so a tap on a design still
+      // clicks that design's shield.
+      touches.set(event.pointerId, { x: event.clientX, y: event.clientY });
+      userAdjustedCamera = true;
+      canvas.style.transition = "";
+      clearHover();
+      if (touches.size === 2) startPinch();
+      else if (touches.size === 1) {
+        suppressClick = false;
+        startTouchDrag({ x: event.clientX, y: event.clientY }, event.pointerId);
+      }
+      return;
+    }
     const record = recordForShield(event.target);
     // Tune owns the press: the panel opens on the point under the pointer, and the
     // click that follows is consumed so it can never turn into a note.
@@ -2346,10 +2438,27 @@ function bindNavigation() {
   });
 
   plane.addEventListener("pointermove", (event) => {
+    if (touches.has(event.pointerId)) {
+      touches.set(event.pointerId, { x: event.clientX, y: event.clientY });
+      if (pinch && touches.size >= 2) {
+        const [a, b] = [...touches.values()];
+        const zoom = clamp((pinch.zoom * Math.hypot(a.x - b.x, a.y - b.y)) / pinch.distance, MIN_ZOOM, MAX_ZOOM);
+        const midX = (a.x + b.x) / 2;
+        const midY = (a.y + b.y) / 2 - barHeight();
+        state.camera = { zoom, x: midX - pinch.worldX * zoom, y: midY - pinch.worldY * zoom };
+        scheduleApplyCamera();
+        return;
+      }
+      if (drag?.touch && event.pointerId === drag.id) {
+        samples.push({ x: event.clientX, y: event.clientY, t: performance.now() });
+        if (samples.length > 6) samples.shift();
+      }
+    }
     if (drag && event.pointerId === drag.id) {
       const dx = event.clientX - drag.x;
       const dy = event.clientY - drag.y;
-      if (!drag.moved && Math.hypot(dx, dy) < 3) return;
+      if (!drag.moved && Math.hypot(dx, dy) < (drag.touch ? TOUCH_TAP_SLOP : 3)) return;
+      if (drag.touch) suppressClick = true;
       drag.moved = true;
       userAdjustedCamera = true;
       canvas.style.transition = "";
@@ -2377,6 +2486,39 @@ function bindNavigation() {
   });
 
   const endDrag = (event) => {
+    if (touches.has(event.pointerId)) {
+      touches.delete(event.pointerId);
+      const ended = drag && drag.id === event.pointerId ? drag : null;
+      if (pinch) {
+        if (touches.size < 2) pinch = null;
+        // The finger still down carries on as a drag, from where it is now.
+        const [rest] = [...touches.entries()];
+        if (rest) startTouchDrag(rest[1], rest[0]);
+        else drag = null;
+        saveCamera();
+        return;
+      }
+      drag = null;
+      if (!ended) return;
+      if (!ended.moved) {
+        // A tap: Controls picks what is under it, notes drop a note there. Neither
+        // waits for a click, which a touch browser may never send.
+        const record = recordForShield(event.target);
+        if (!record || event.type !== "pointerup" || panModeActive()) return;
+        suppressClick = true;
+        if (tuneArmed()) openTargetTune(record, pointInFrame(record, event.clientX, event.clientY));
+        else if (annotateArmed()) noteAt(record, event.clientX, event.clientY);
+        return;
+      }
+      const now = performance.now();
+      const recent = samples.filter((sample) => now - sample.t < 120);
+      const first = recent[0];
+      const last = recent[recent.length - 1];
+      const span = first && last ? last.t - first.t : 0;
+      if (span > 0 && event.type === "pointerup") glideFrom((last.x - first.x) / span, (last.y - first.y) / span);
+      else saveCamera();
+      return;
+    }
     if (!drag || event.pointerId !== drag.id) return;
     drag = null;
     document.body.dataset.grabbing = "false";
@@ -2386,19 +2528,10 @@ function bindNavigation() {
   plane.addEventListener("pointercancel", endDrag);
   plane.addEventListener("pointerleave", () => clearHover());
 
-  /** @type {ReturnType<typeof setTimeout> | undefined} */
-  let clickTimer;
   plane.addEventListener("click", (event) => {
     const record = recordForShield(event.target);
     if (!record || suppressClick || panModeActive() || !annotateArmed()) return;
-    const point = pointInFrame(record, event.clientX, event.clientY);
-    const at = { x: event.clientX, y: event.clientY };
-    // A double-click means zoom, so the note waits out the double-click window.
-    clearTimeout(clickTimer);
-    clickTimer = setTimeout(() => {
-      pendingClick = { key: record.id, ...at, time: Date.now() };
-      postHit(record, point);
-    }, 220);
+    noteAt(record, event.clientX, event.clientY);
   });
 
   // While a gesture owns the pointer, the browser's own right-click menu is not one of
