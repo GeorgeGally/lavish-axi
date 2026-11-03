@@ -598,6 +598,35 @@
     return text ? `${element.tagName.toLowerCase()} · ${text}` : element.tagName.toLowerCase();
   }
 
+  const BOX_SIDES = ["top", "right", "bottom", "left"];
+  const BOX_CORNERS = [
+    { css: "top-left", label: "Top left" },
+    { css: "top-right", label: "Top right" },
+    { css: "bottom-right", label: "Bottom right" },
+    { css: "bottom-left", label: "Bottom left" },
+  ];
+
+  /**
+   * One control per side of a box property, each holding that side's own value, so the
+   * panel can open "all sides" into pairs or single sides.
+   * @param {string} css @param {number[]} values top, right, bottom, left @param {number} min @param {number} max
+   */
+  function boxSides(css, values, min, max) {
+    return BOX_SIDES.map((side, index) => ({
+      id: `${css}-${side}`,
+      css: `${css}-${side}`,
+      label: side[0].toUpperCase() + side.slice(1),
+      side,
+      type: "number",
+      unit: "px",
+      value: String(values[index]),
+      min,
+      max,
+      step: 1,
+      scope: "element",
+    }));
+  }
+
   /**
    * The controls that genuinely apply to a clicked element, plus the ones its nearest
    * section owns (a flex or grid gap belongs to the container, not the child). A
@@ -674,23 +703,28 @@
       });
     }
     if (box) {
-      const pad = Math.max(0, Math.round(pxOf(style.paddingTop)));
+      const pads = BOX_SIDES.map((side) => Math.max(0, Math.round(pxOf(style.getPropertyValue(`padding-${side}`)))));
+      const padMax = Math.max(48, Math.round(Math.max(...pads) * 4));
       add("padding", "padding", "Padding", {
         type: "number",
         unit: "px",
-        value: String(pad),
+        value: String(pads[0]),
         min: 0,
-        max: Math.max(48, Math.round(pad * 4)),
+        max: padMax,
         step: 1,
+        sides: boxSides("padding", pads, 0, padMax),
       });
-      const margin = Math.round(pxOf(style.marginTop));
+      const margins = BOX_SIDES.map((side) => Math.round(pxOf(style.getPropertyValue(`margin-${side}`))));
+      const marginMin = Math.min(0, Math.min(...margins) * 2);
+      const marginMax = Math.max(48, Math.round(Math.max(...margins) * 4));
       add("margin", "margin", "Margin", {
         type: "number",
         unit: "px",
-        value: String(margin),
-        min: Math.min(0, margin * 2),
-        max: Math.max(48, Math.round(margin * 4)),
+        value: String(margins[0]),
+        min: marginMin,
+        max: marginMax,
         step: 1,
+        sides: boxSides("margin", margins, marginMin, marginMax),
       });
       const width = Math.round(element.getBoundingClientRect().width);
       add("width", "width", "Width", {
@@ -711,14 +745,30 @@
         step: 1,
       });
       if (paints) {
-        const radius = Math.max(0, Math.round(pxOf(style.borderTopLeftRadius)));
+        const radii = BOX_CORNERS.map((corner) =>
+          Math.max(0, Math.round(pxOf(style.getPropertyValue(`border-${corner.css}-radius`)))),
+        );
+        const radiusMax = Math.max(32, Math.round(Math.max(...radii) * 4));
         add("radius", "border-radius", "Radius", {
           type: "number",
           unit: "px",
-          value: String(radius),
+          value: String(radii[0]),
           min: 0,
-          max: Math.max(32, Math.round(radius * 4)),
+          max: radiusMax,
           step: 1,
+          sides: BOX_CORNERS.map((corner, index) => ({
+            id: `radius-${corner.css}`,
+            css: `border-${corner.css}-radius`,
+            label: corner.label,
+            side: corner.css,
+            type: "number",
+            unit: "px",
+            value: String(radii[index]),
+            min: 0,
+            max: radiusMax,
+            step: 1,
+            scope: "element",
+          })),
         });
         const shadow = String(style.boxShadow);
         const known = SHADOW_PRESETS.some((preset) => preset.value === shadow);
@@ -1139,12 +1189,32 @@
       if (shared) next = { value: shared, group: true };
     }
     applied.set(css, next);
-    element.style.setProperty(css, next.value);
+    restyle(element, applied);
     // A narrower page stays centred, the way a max-width page is built.
     if (element === document.body && css === "max-width") {
       applied.set("margin-inline", { value: next.value ? "auto" : "", group: false });
       element.style.setProperty("margin-inline", next.value ? "auto" : "");
     }
+  }
+
+  // Shorthands go on before the sides they cover, whatever order they were tuned in, so
+  // "Left 24" set after "Padding 8" (or saved in either order) keeps its own side.
+  const SHORTHANDS = new Set(["padding", "margin", "border-radius", "border-width", "border-color", "gap", "inset"]);
+
+  /** @param {string} css */
+  function shorthandFirst(css) {
+    return SHORTHANDS.has(css) ? 0 : 1;
+  }
+
+  /**
+   * Write an element's overrides inline in a fixed order: every shorthand, then the
+   * longhands, so a side never loses to a shorthand set after it.
+   * @param {HTMLElement} element @param {Map<string, { value: string, group: boolean }>} applied
+   */
+  function restyle(element, applied) {
+    const entries = [...applied].sort(([a], [b]) => shorthandFirst(a) - shorthandFirst(b));
+    for (const [css] of entries) element.style.removeProperty(css);
+    for (const [css, entry] of entries) if (entry.value) element.style.setProperty(css, entry.value);
   }
 
   function resetElementStyles() {
@@ -1371,7 +1441,7 @@
       parentLabel: parent ? targetLabel(parent) : "",
     };
     for (const [node, applied] of held) {
-      if (applied) for (const [css, entry] of applied) node.style.setProperty(css, entry.value);
+      if (applied) restyle(node, applied);
     }
     post({ type: "tune-target", ...payload, controls });
   }

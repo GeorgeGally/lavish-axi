@@ -3533,3 +3533,79 @@ input.agent-input {
     display: none;
   }
 }
+
+/* Padding, Margin and Radius: a quiet link toggle beside the value opens the sides. */
+.tune-control-end {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.tune-control-end .tune-control-value {
+  max-width: none;
+}
+
+.tune-link {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  margin: -4px 0;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--ink-3);
+  cursor: pointer;
+}
+
+.tune-link:hover,
+.tune-link:focus-visible {
+  color: var(--ink);
+  background: rgba(22, 24, 29, 0.06);
+}
+
+.tune-link[aria-pressed="true"] {
+  color: var(--ink);
+}
+
+.tune-side-modes {
+  display: flex;
+  gap: 12px;
+  margin-top: 2px;
+}
+
+.tune-side-mode {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink-3);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.tune-side-mode[aria-pressed="true"],
+.tune-side-mode:hover {
+  color: var(--ink);
+}
+
+.tune-sides {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px 16px;
+}
+
+.tune-sides:empty {
+  display: none;
+}
+
+.tune-control.tune-side {
+  gap: 6px;
+}
+
+.tune-side .tune-control-label,
+.tune-side .tune-control-value {
+  font-size: 12px;
+}

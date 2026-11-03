@@ -4372,7 +4372,7 @@ function tuneSpecFor(itemId) {
 // closes when the pointer lets go, the control commits, or input goes quiet.
 let tuneUndo = [];
 let tuneRedo = [];
-/** @type {null | { itemId: string, before: Record<string, any>, element?: { deviceId: string, selector: string, css: string, before: string } }} */
+/** @type {null | { itemId: string, before: Record<string, any>, element?: { deviceId: string, selector: string, css: string[], before: Record<string, string> } }} */
 let tuneEdit = null;
 let tuneEditTimer;
 
@@ -4386,9 +4386,10 @@ function beginTuneEdit(item) {
 }
 
 /**
- * An element change opens like a design one, but remembers one selector's one property:
- * its saved override before, so undo can put that back (or take the override off).
- * @param {string} itemId @param {string} deviceId @param {string} selector @param {string} css
+ * An element change opens like a design one, but remembers one selector's properties
+ * (one, or every side an "all sides" slider writes): their saved overrides before, so
+ * undo can put them back (or take the overrides off) as one step.
+ * @param {string} itemId @param {string} deviceId @param {string} selector @param {string[]} css
  */
 function beginElementEdit(itemId, deviceId, selector, css) {
   const same =
@@ -4396,14 +4397,13 @@ function beginElementEdit(itemId, deviceId, selector, css) {
     tuneEdit.element &&
     tuneEdit.itemId === itemId &&
     tuneEdit.element.selector === selector &&
-    tuneEdit.element.css === css;
+    tuneEdit.element.css.join("\n") === css.join("\n");
   if (!same) {
     endTuneEdit();
-    tuneEdit = {
-      itemId,
-      before: {},
-      element: { deviceId, selector, css, before: savedElementValue(itemId, selector, css) },
-    };
+    /** @type {Record<string, string>} */
+    const before = {};
+    for (const property of css) before[property] = savedElementValue(itemId, selector, property);
+    tuneEdit = { itemId, before: {}, element: { deviceId, selector, css, before } };
   }
   clearTimeout(tuneEditTimer);
   tuneEditTimer = setTimeout(endTuneEdit, 800);
@@ -4422,9 +4422,16 @@ function endTuneEdit() {
   if (!edit || !item) return;
   if (edit.element) {
     const { deviceId, selector, css, before } = edit.element;
-    const after = savedElementValue(edit.itemId, selector, css);
-    if (after === before) return;
-    tuneUndo.push({ itemId: edit.itemId, deviceId, changes: [{ selector, css, before, after }] });
+    const changes = css
+      .map((property) => ({
+        selector,
+        css: property,
+        before: before[property] ?? "",
+        after: savedElementValue(edit.itemId, selector, property),
+      }))
+      .filter((change) => change.after !== change.before);
+    if (changes.length === 0) return;
+    tuneUndo.push({ itemId: edit.itemId, deviceId, changes });
     tuneRedo = [];
     return;
   }
@@ -4806,13 +4813,205 @@ function applyTargetValue(control, raw, selector = targetSelector(control.scope)
   if (!tuneTarget || !selector) return;
   const into = values || (tuneTarget.values = tuneTarget.values || {});
   into[control.id] = String(raw);
-  const value = tuneValue(control, raw);
+  applyTargetWrites([{ css: control.css, value: tuneValue(control, raw) }], selector);
+}
+
+/**
+ * Several properties of one selector changed by one control, as one undo step: an
+ * "all sides" slider, or a linked pair of sides.
+ * @param {{ css: string, value: string }[]} writes @param {string} selector
+ */
+function applyTargetWrites(writes, selector) {
+  if (!tuneTarget || !selector) return;
   const { itemId, deviceId } = tuneTarget;
   // Every size by default; "This size only" keeps the value to the frame it was picked in.
   const key = tuneTarget.sizes === "one" ? sizeKey(selector, deviceId) : selector;
-  beginElementEdit(itemId, deviceId, key, control.css);
-  persistElementTune({ itemId, selector: key, css: control.css, value });
-  refreshElementStyle(itemId, selector, control.css);
+  beginElementEdit(
+    itemId,
+    deviceId,
+    key,
+    writes.map((write) => write.css),
+  );
+  for (const write of writes) persistElementTune({ itemId, selector: key, css: write.css, value: write.value });
+  for (const write of writes) refreshElementStyle(itemId, selector, write.css);
+}
+
+/*
+ * Padding, Margin and Radius keep one "all sides" slider. Its link toggle opens the
+ * sides: linked pairs (left and right, top and bottom) first, then each side on its
+ * own. Radius opens straight to its four corners. Every side writes its own longhand
+ * to the tuned element only; the all-sides slider writes the shorthand and takes the
+ * sides' own values off, so it really sets every side.
+ */
+/** @type {Map<string, "all" | "pairs" | "each">} the opened state per element and control */
+const tuneBoxModes = new Map();
+
+/** @param {any} control */
+function boxModeKey(control) {
+  return `${tuneTarget?.selector || ""}\n${control.id}`;
+}
+
+/** The panel's value of each side, in the control's own order. @param {any} control */
+function sideValues(control) {
+  const values = tuneTarget?.values || {};
+  return control.sides.map((side) => String(values[side.id] ?? side.value ?? ""));
+}
+
+/** How a box control opens when the reviewer has not chosen: as far as its values differ. @param {any} control */
+function boxMode(control) {
+  const chosen = tuneBoxModes.get(boxModeKey(control));
+  if (chosen) return chosen;
+  const [top, right, bottom, left] = sideValues(control);
+  if (top === right && right === bottom && bottom === left) return "all";
+  const corners = control.sides[0]?.side?.includes("-");
+  return !corners && top === bottom && left === right ? "pairs" : "each";
+}
+
+/** @param {any} control @param {string} name */
+function sideNamed(control, name) {
+  return control.sides.find((side) => side.side === name);
+}
+
+/**
+ * Write a box control's sides. The all-sides slider takes each side's own value off,
+ * except a size-only value over a shared side, which it has to cover explicitly.
+ * @param {any} control @param {any[]} sides @param {string} raw @param {boolean} all
+ */
+function applyBoxValue(control, sides, raw, all) {
+  if (!tuneTarget) return;
+  const selector = targetSelector(control.scope);
+  const values = (tuneTarget.values = tuneTarget.values || {});
+  const saved = itemById(tuneTarget.itemId)?.elementTune?.[selector] || {};
+  const sizeOnly = tuneTarget.sizes === "one";
+  for (const side of sides) values[side.id] = String(raw);
+  if (all) values[control.id] = String(raw);
+  const writes = all
+    ? [
+        { css: control.css, value: tuneValue(control, raw) },
+        ...sides.map((side) => ({
+          css: side.css,
+          value: sizeOnly && saved[side.css] ? tuneValue(side, raw) : "",
+        })),
+      ]
+    : sides.map((side) => ({ css: side.css, value: tuneValue(side, raw) }));
+  applyTargetWrites(writes, selector);
+}
+
+/** Show a value on a rendered slider without firing its input. @param {HTMLElement} node @param {string} raw */
+function showSliderValue(node, raw) {
+  const input = /** @type {HTMLInputElement | null} */ (node.querySelector('input[type="range"]'));
+  const label = node.querySelector(".tune-control-value");
+  if (label) label.textContent = raw;
+  if (!input) return;
+  input.value = raw;
+  const low = Number(input.min) || 0;
+  const high = Number(input.max) || 100;
+  const percent = ((Number(input.value) - low) / (high - low || 1)) * 100;
+  input.style.setProperty("--fill", `${Math.max(0, Math.min(100, percent))}%`);
+}
+
+const LINK_ICON =
+  '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M6.5 9.5l3-3M7 4.6l1-1a2.5 2.5 0 013.5 3.5l-1 1M9 11.4l-1 1A2.5 2.5 0 014.5 8.9l1-1" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>';
+
+/**
+ * Padding, Margin or Radius: the all-sides slider with a link toggle on its label row,
+ * and, opened, the sides under it.
+ * @param {any} control
+ */
+function renderBoxControl(control) {
+  const values = (tuneTarget && tuneTarget.values) || {};
+  const node = createTuneControl({ id: "target", tune: values }, control, (raw) => {
+    applyBoxValue(control, control.sides, raw, true);
+    fill();
+  });
+  node.classList.add("tune-box");
+  const corners = control.sides[0]?.side?.includes("-");
+  const mode = boxMode(control);
+  const open = mode !== "all";
+  const toggle = element("button", {
+    class: "tune-link",
+    type: "button",
+    "aria-pressed": String(open),
+    "aria-label": open ? `${control.label}: one value for all sides` : `${control.label}: set sides separately`,
+    title: open ? "One value for all sides" : corners ? "Set each corner" : "Set sides separately",
+  });
+  toggle.innerHTML = LINK_ICON;
+  toggle.addEventListener("click", (event) => {
+    event.preventDefault();
+    tuneBoxModes.set(boxModeKey(control), open ? "all" : corners ? "each" : "pairs");
+    renderTune();
+  });
+  const label = node.querySelector(".tune-control-label");
+  const valueLabel = label?.querySelector(".tune-control-value");
+  if (label && valueLabel) {
+    const end = element("span", { class: "tune-control-end" });
+    label.append(end);
+    end.append(toggle, valueLabel);
+  }
+  const sides = element("div", { class: "tune-sides" });
+  const syncAll = () => {
+    const current = sideValues(control);
+    const same = current.every((value) => value === current[0]);
+    showSliderValue(node, same ? current[0] : String(values[control.id] ?? control.value ?? ""));
+    if (!same && valueLabel) valueLabel.textContent = "Mixed";
+  };
+  function fill() {
+    if (!open) return;
+    /** @type {{ id: string, label: string, sides: any[] }[]} */
+    const rows =
+      mode === "pairs"
+        ? [
+            {
+              id: `${control.id}-x`,
+              label: "Left · right",
+              sides: [sideNamed(control, "left"), sideNamed(control, "right")],
+            },
+            {
+              id: `${control.id}-y`,
+              label: "Top · bottom",
+              sides: [sideNamed(control, "top"), sideNamed(control, "bottom")],
+            },
+          ]
+        : control.sides.map((side) => ({ id: side.id, label: side.label, sides: [side] }));
+    sides.replaceChildren(
+      ...rows.map((row) => {
+        const first = row.sides[0];
+        const tune = { [row.id]: String(values[first.id] ?? first.value ?? "") };
+        const sub = createTuneControl({ id: "target", tune }, { ...first, id: row.id, label: row.label }, (raw) => {
+          applyBoxValue(control, row.sides, raw, false);
+          syncAll();
+        });
+        sub.classList.add("tune-side");
+        return sub;
+      }),
+    );
+  }
+  if (open) {
+    if (!corners) {
+      const switcher = element("div", {
+        class: "tune-side-modes",
+        role: "group",
+        "aria-label": `${control.label} sides`,
+      });
+      for (const [value, text] of [
+        ["pairs", "Pairs"],
+        ["each", "Each side"],
+      ]) {
+        const button = element("button", { class: "tune-side-mode", type: "button", text });
+        button.setAttribute("aria-pressed", String(mode === value));
+        button.addEventListener("click", () => {
+          tuneBoxModes.set(boxModeKey(control), /** @type {"pairs" | "each"} */ (value));
+          renderTune();
+        });
+        switcher.append(button);
+      }
+      node.append(switcher);
+    }
+    node.append(sides);
+    fill();
+  }
+  syncAll();
+  return node;
 }
 
 /**
@@ -4901,7 +5100,15 @@ function syncTargetValues(target) {
   };
   target.values = {};
   for (const control of target.controls || []) {
-    target.values[control.id] = valueOf(control, targetSelector(control.scope));
+    const selector = targetSelector(control.scope);
+    target.values[control.id] = valueOf(control, selector);
+    // A side shows its own saved value, else the all-sides one saved over it, else the file's.
+    for (const side of control.sides || []) {
+      const own = target.sizes === "one" ? saved[sizeKey(selector, target.deviceId)] || {} : {};
+      const shared = saved[selector] || {};
+      const css = own[side.css] || own[control.css] || shared[side.css] || shared[control.css];
+      target.values[side.id] = css ? rawOfCss(side, css) : String(side.value ?? "");
+    }
   }
   for (const group of target.inherited || []) {
     group.values = {};
@@ -4960,8 +5167,14 @@ function tuneChanges() {
     const selectors = new Set(panelSelectors());
     /** @type {Map<string, string>} the file's own value per selector and property, where the panel read it */
     const file = new Map();
-    for (const control of tuneTarget.controls || [])
-      file.set(`${targetSelector(control.scope)}\n${control.css}`, tuneValue(control, control.value ?? ""));
+    for (const control of tuneTarget.controls || []) {
+      // An all-sides value matches the file only when the file's sides are all that value.
+      const uneven = (control.sides || []).some((side) => String(side.value) !== String(control.value));
+      if (!uneven)
+        file.set(`${targetSelector(control.scope)}\n${control.css}`, tuneValue(control, control.value ?? ""));
+      for (const side of control.sides || [])
+        file.set(`${targetSelector(control.scope)}\n${side.css}`, tuneValue(side, side.value ?? ""));
+    }
     for (const group of tuneTarget.inherited || [])
       for (const control of group.controls)
         file.set(`${group.selector}\n${control.css}`, tuneValue(control, control.value ?? ""));
@@ -5086,9 +5299,12 @@ function renderTargetTune() {
           ? [element("p", { class: "tune-empty", text: "Nothing here to tune." })]
           : []
         : controls.map((control) => {
-            const node = createTuneControl({ id: "target", tune: tuneTarget?.values || {} }, control, (raw) =>
-              applyTargetValue(control, raw),
-            );
+            const node =
+              Array.isArray(control.sides) && control.sides.length === 4
+                ? renderBoxControl(control)
+                : createTuneControl({ id: "target", tune: tuneTarget?.values || {} }, control, (raw) =>
+                    applyTargetValue(control, raw),
+                  );
             for (const note of [renderOverrides(control), renderSizeNote(targetSelector(control.scope), control)])
               if (note) node.append(note);
             return node;
