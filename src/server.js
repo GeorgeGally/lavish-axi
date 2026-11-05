@@ -1031,6 +1031,12 @@ export async function serve({
     return { session, dir, board };
   }
 
+  // Absolute, because a page's <base> (a live snapshot's, or one a design brought to reach
+  // its own assets) rewrites every relative URL in it, this tag included.
+  function boardItemSdkSrc(req, resolved, item, device) {
+    return `${requestOrigin(req)}/board-sdk.js?key=${encodeURIComponent(resolved.session.key)}&item=${encodeURIComponent(item.id)}&device=${device}&v=${encodeURIComponent(version)}`;
+  }
+
   function publicBoard(board, specs = {}, captions = {}) {
     return {
       ...board,
@@ -1642,10 +1648,9 @@ export async function serve({
       const device = ["ultrawide", "desktop", "ipad", "phone"].includes(String(req.query.device || ""))
         ? String(req.query.device)
         : "desktop";
-      const src = `/board-sdk.js?key=${encodeURIComponent(resolved.session.key)}&item=${encodeURIComponent(item.id)}&device=${device}&v=${encodeURIComponent(version)}`;
       res.setHeader("content-security-policy", ARTIFACT_CONTENT_SECURITY_POLICY);
       res.setHeader("cache-control", "no-store");
-      res.type("html").send(injectBoardSdk(await readFile(file, "utf8"), src));
+      res.type("html").send(injectBoardSdk(await readFile(file, "utf8"), boardItemSdkSrc(req, resolved, item, device)));
     } catch (error) {
       next(error);
     }
@@ -1682,11 +1687,7 @@ export async function serve({
         res.type("html").send(html);
         return;
       }
-      // A live page's snapshot resolves its links on the project's proxy (its <base>), so
-      // the SDK is named by this server's own address.
-      const sdkOrigin = item.page ? `http://${LOOPBACK_HOST}:${publicPort}` : "";
-      const src = `${sdkOrigin}/board-sdk.js?key=${encodeURIComponent(resolved.session.key)}&item=${encodeURIComponent(item.id)}&device=${device}&v=${encodeURIComponent(version)}`;
-      res.type("html").send(injectBoardSdk(html, src));
+      res.type("html").send(injectBoardSdk(html, boardItemSdkSrc(req, resolved, item, device)));
     } catch (error) {
       next(error);
     }
@@ -4897,6 +4898,21 @@ export function isAllowedRequestHost({ host, forwardedHost }, allowedHostnames) 
 
 function hasPresentOriginOrReferer(req) {
   return Boolean(req.get("origin") || req.get("referer"));
+}
+
+/** The origin the browser reached this server on, forwarding proxy included. */
+function requestOrigin(req) {
+  const lastValue = (header) =>
+    String(header || "")
+      .split(",")
+      .pop()
+      .trim();
+  const forwarded = parseHostAuthority(lastValue(req.headers["x-forwarded-host"]));
+  const host = forwarded ?? parseHostAuthority(req.headers.host);
+  if (!host) return "";
+  const forwardedProtocol = forwarded ? lastValue(req.headers["x-forwarded-proto"]).toLowerCase() : "";
+  const protocol = forwardedProtocol === "http" || forwardedProtocol === "https" ? forwardedProtocol : req.protocol;
+  return `${protocol}://${host.authority}`;
 }
 
 // Guard state-changing, outward-facing routes (publishing to a third-party host) against CSRF: a

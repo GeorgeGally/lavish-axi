@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { chmod, mkdtemp, mkdir, readFile, realpath, rm, stat, utimes, writeFile } from "node:fs/promises";
+import http from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -177,6 +178,47 @@ test("a board item's explanation comes from its own liesel metas", async (t) => 
   assert.deepEqual(proposed.pair, { key: "01-hero", name: "hero", role: "proposed", variant: "b" });
 });
 
+test("a design with its own <base> still loads the SDK from this server", async (t) => {
+  const { base, boardDirectory } = await setup(t);
+  const registered = await register(base, boardDirectory);
+  const board = await readBoard(boardDirectory);
+  seedItem(board, { file: "based.html", label: "Based" });
+  await writeFile(boardFilePath(boardDirectory), `${JSON.stringify(board, null, 2)}\n`);
+  await writeFile(
+    path.join(boardDirectory, "based.html"),
+    '<!doctype html><html><head><base href="http://127.0.0.1:1/"></head><body>Based</body></html>',
+  );
+
+  // The page's <base> rewrites every relative URL in it, the injected tag included, so a
+  // root-relative SDK would ask the design's asset server and never run.
+  const html = await fetch(`${base}/board/${registered.key}/item/based/index.html`).then((res) => res.text());
+  const src = html.match(/<script src="([^"]+)"><\/script><\/body>/)?.[1] ?? "";
+  assert.equal(new URL(src, "http://127.0.0.1:1/").origin, base);
+  const sdk = await fetch(new URL(src, "http://127.0.0.1:1/"));
+  assert.equal(sdk.status, 200);
+
+  // The address the browser used, which on a phone is not this machine's loopback.
+  const { port } = new URL(base);
+  const answer = (headers) =>
+    new Promise((resolve, reject) => {
+      const request = http.get(
+        { host: "127.0.0.1", port, path: `/board/${registered.key}/item/based/index.html`, headers },
+        (response) => {
+          let body = "";
+          response.setEncoding("utf8");
+          response.on("data", (chunk) => (body += chunk));
+          response.on("end", () => resolve(body));
+        },
+      );
+      request.on("error", reject);
+    });
+  assert.match(await answer({ host: `localhost:${port}` }), new RegExp(`src="http://localhost:${port}/board-sdk\\.js`));
+  assert.match(
+    await answer({ host: base.slice("http://".length), "x-forwarded-host": "localhost", "x-forwarded-proto": "https" }),
+    /src="https:\/\/localhost\/board-sdk\.js/,
+  );
+});
+
 test("a board item is served with its own SDK and its sibling assets", async (t) => {
   const { base, boardDirectory } = await setup(t);
   const registered = await register(base, boardDirectory);
@@ -187,7 +229,10 @@ test("a board item is served with its own SDK and its sibling assets", async (t)
   const item = await fetch(`${base}/board/${registered.key}/item/v1/index.html`);
   assert.equal(item.status, 200);
   const html = await item.text();
-  assert.match(html, /<script src="\/board-sdk\.js\?key=[0-9a-f]+&item=v1&device=desktop&v=[^"]*"><\/script><\/body>/);
+  const sdkTag = new RegExp(
+    `<script src="${base}/board-sdk\\.js\\?key=[0-9a-f]+&item=v1&device=desktop&v=[^"]*"></script></body>`,
+  );
+  assert.match(html, sdkTag);
   assert.match(html, /The whole fleet/);
   assert.doesNotMatch(html, /\/sdk\.js/);
 
