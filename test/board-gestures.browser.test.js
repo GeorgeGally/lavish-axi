@@ -184,6 +184,14 @@ test(
       }
       const hovered = () =>
         evaluate(`document.querySelector('.artboard[data-device="desktop"]')?.dataset.hover === "true"`);
+      /** The sidebar's selected tab, from what a reader sees: its tab, its pane and whether it is open. */
+      const sidebar = () =>
+        evaluate(`(() => {
+          const tab = document.querySelector('#chat [role="tab"][aria-selected="true"]');
+          const pane = !document.getElementById("chatPane").hidden ? "chat" : "";
+          const controls = !document.getElementById("tune").hidden ? "controls" : "";
+          return [tab?.textContent.trim().toLowerCase().split(/\\s/)[0], pane + controls, document.body.dataset.panel].join(" ");
+        })()`);
 
       await send("Page.enable");
       await send("Page.navigate", { url });
@@ -214,6 +222,36 @@ test(
       await tap("Meta");
       await press("Escape", "Escape");
       assert.equal(await status(), off, "Escape turns notes off");
+
+      // Turning a mode on brings up the sidebar tab that mode works in; turning it off leaves
+      // the tab alone, and a chord or a closed sidebar changes neither.
+      await tap("Alt");
+      assert.equal(await sidebar(), "controls controls open", "Option shows Controls");
+      await tap("Alt");
+      assert.equal(await status(), off);
+      assert.equal(await sidebar(), "controls controls open", "turning the selector off keeps the tab");
+      await tap("Meta");
+      assert.equal(await sidebar(), "chat chat open", "Cmd shows Chat");
+      await tap("Alt");
+      assert.equal(await sidebar(), "controls controls open", "Option while notes are on swaps to Controls");
+      await tap("Meta");
+      assert.equal(await sidebar(), "chat chat open", "Cmd while the selector is on swaps to Chat");
+      await tap("Meta");
+      assert.equal(await status(), off);
+      assert.equal(await sidebar(), "chat chat open", "turning notes off keeps the tab");
+      await tap("Alt");
+      await press("Escape", "Escape");
+      assert.equal(await sidebar(), "controls controls open", "Escape keeps the tab");
+      await down("Meta");
+      await press("c", "KeyC");
+      await up("Meta");
+      assert.equal(await sidebar(), "controls controls open", "a Cmd chord keeps the tab");
+      await evaluate(`document.getElementById("chatToggle").click()`);
+      await tap("Meta");
+      assert.equal(await sidebar(), "chat chat closed", "a closed sidebar stays closed and changes tab behind it");
+      await tap("Meta");
+      await evaluate(`document.getElementById("chatOpen").click()`);
+      assert.equal(await sidebar(), "chat chat open", "reopening shows the tab the mode chose");
 
       // Chords flip nothing: Cmd+C, Cmd+Z, Cmd+scroll, Cmd+click, Option+drag, Cmd+Option.
       await down("Meta");

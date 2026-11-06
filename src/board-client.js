@@ -2288,9 +2288,20 @@ function updateGestureMode() {
   else clearHover();
 }
 
+/** @type {Record<"annotate" | "tune", { label: string, key: string, title: string, view: "chat" | "controls" }>} */
 const MODE_STATE = {
-  annotate: { label: "Notes", key: "⌘", title: "Click a design to leave a note · ⌘ or Esc turns notes off" },
-  tune: { label: "Controls", key: "⌥", title: "Click an element to load it into Controls · ⌥ or Esc turns this off" },
+  annotate: {
+    label: "Notes",
+    key: "⌘",
+    title: "Click a design to leave a note · ⌘ or Esc turns notes off",
+    view: "chat",
+  },
+  tune: {
+    label: "Controls",
+    key: "⌥",
+    title: "Click an element to load it into Controls · ⌥ or Esc turns this off",
+    view: "controls",
+  },
 };
 
 /** The mode that is on, said quietly in the top bar; nothing shows while both are off. */
@@ -2312,7 +2323,11 @@ function setArmedMode(mode) {
   armedMode = mode;
   updateGestureMode();
   renderModeState();
-  if (mode) document.querySelector(".annotate-hint")?.remove();
+  if (!mode) return;
+  // The tab the mode works in comes up, but a closed sidebar stays closed: opening it would
+  // slide the board out from under the pointer just as the reviewer goes to click.
+  showSideView(MODE_STATE[mode].view, false);
+  document.querySelector(".annotate-hint")?.remove();
 }
 
 /** A modifier held through a click, a scroll or another key was a chord, not a tap. */
@@ -4319,8 +4334,9 @@ let sideView = "chat";
  * The sidebar shows one of its tabs: Chat or Controls. Showing one opens a closed
  * sidebar, so a controls-selector click or a send is never answered out of sight.
  * @param {"chat" | "controls"} view
+ * @param {boolean} [reveal] false picks the tab and leaves a closed sidebar closed
  */
-function showSideView(view) {
+function showSideView(view, reveal = true) {
   const chat = document.getElementById("chat");
   sideView = view === "controls" ? view : "chat";
   if (chat) chat.dataset.view = sideView;
@@ -4340,7 +4356,7 @@ function showSideView(view) {
       tabs[name].tabIndex = on ? 0 : -1;
     }
   }
-  if (chat?.classList.contains("collapsed")) {
+  if (reveal && chat?.classList.contains("collapsed")) {
     setChatCollapsed(false);
     if (!userAdjustedCamera) fit(false);
   }
