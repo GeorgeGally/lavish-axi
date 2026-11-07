@@ -6853,3 +6853,20 @@ test("chat-sync stamps a note seen when a poll takes it, working when the artifa
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test("/health reports the build id the server was started with", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "liesel-serve-"));
+  const server = await serve({
+    port: 0,
+    stateFile: path.join(dir, "state.json"),
+    version: "9.9.9-test",
+    buildId: "abc",
+  });
+  try {
+    const health = await (await fetch(`http://127.0.0.1:${server.port}/health`)).json();
+    assert.equal(health.build_id, "abc");
+  } finally {
+    await server.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});

@@ -47,6 +47,8 @@ import {
   serverReplacementReason,
   shareCommand,
   shutdownServerOnPort,
+  isDifferentBuild,
+  localBuildId,
   shouldForceRestartForLocalBuild,
   shouldKillProcessOnPort,
   shouldNarratePollWaitTicks,
@@ -2916,12 +2918,37 @@ test("detached server entry dispatches the CLI", () => {
   assert.match(result.stdout, /\d+\.\d+\.\d+/);
 });
 
-test("local built CLI opens force a server restart while source and installed runs do not", () => {
+test("only a local built CLI compares builds with the running server", () => {
   const root = fileURLToPath(new URL("..", import.meta.url));
 
   assert.equal(shouldForceRestartForLocalBuild(`${root}/dist/cli.mjs`, true), true);
   assert.equal(shouldForceRestartForLocalBuild(`${root}/bin/liesel.js`, true), false);
   assert.equal(shouldForceRestartForLocalBuild("/usr/local/lib/node_modules/liesel/dist/cli.mjs", false), false);
+});
+
+// Every open from a local build used to replace the server, so a board in use lost its connection
+// each time any agent ran an open. Only a server on another build may be replaced.
+test("isDifferentBuild leaves a server on the same build running", () => {
+  assert.equal(isDifferentBuild("abc", { ok: true, app: SERVER_APP_ID, build_id: "abc" }), false);
+});
+
+test("isDifferentBuild replaces a server on another build or one that reports none", () => {
+  assert.equal(isDifferentBuild("new", { ok: true, app: SERVER_APP_ID, build_id: "old" }), true);
+  assert.equal(isDifferentBuild("new", { ok: true, app: SERVER_APP_ID }), true);
+});
+
+test("isDifferentBuild never replaces anything when this build has no id or nothing is running", () => {
+  assert.equal(isDifferentBuild("", { ok: true, app: SERVER_APP_ID, build_id: "old" }), false);
+  assert.equal(isDifferentBuild("new", null), false);
+});
+
+test("localBuildId reads the id the build wrote and is empty without one", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "liesel-build-id-"));
+  const file = path.join(dir, "build-id");
+  assert.equal(localBuildId(file), "");
+  await writeFile(file, "abc\n");
+  assert.equal(localBuildId(file), "abc");
+  await rm(dir, { recursive: true, force: true });
 });
 
 test("shouldRestartServer reuses a server running the same version", () => {

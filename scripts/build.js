@@ -1,4 +1,6 @@
-import { chmod, copyFile, cp, mkdir, readFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { chmod, copyFile, cp, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import path from "node:path";
 
 import * as esbuild from "esbuild";
 
@@ -86,3 +88,18 @@ for (const family of fontFamilies) {
     recursive: true,
   });
 }
+
+// Written last, so an open during a build still sees the old id and the finished build is what
+// replaces the server (`isDifferentBuild` in src/cli.js). Hashed from content, so re-running the
+// build over unchanged code does not restart anything.
+const buildHash = createHash("sha256");
+const builtFiles = await readdir("dist", { recursive: true, withFileTypes: true });
+const builtPaths = builtFiles
+  .filter((entry) => entry.isFile() && entry.name !== "build-id")
+  .map((entry) => path.join(entry.parentPath, entry.name))
+  .sort();
+for (const file of builtPaths) {
+  buildHash.update(file);
+  buildHash.update(await readFile(file));
+}
+await writeFile("dist/build-id", `${buildHash.digest("hex")}\n`);

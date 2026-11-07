@@ -415,7 +415,7 @@ async function openCommand(args) {
   const noGate = args.includes("--no-gate");
   const reopen = args.includes("--reopen");
   const baseUrl = await ensureServer({
-    forceRestart: shouldForceRestartForLocalBuild(process.argv[1] || ""),
+    localBuild: shouldForceRestartForLocalBuild(process.argv[1] || ""),
     reloadKey: sessionKey(absolute),
   });
   const response = await postJson(`${baseUrl}/api/sessions`, { file: absolute, noGate, reopen });
@@ -935,7 +935,7 @@ async function boardOpenCommand(args, dir) {
   const file = await canonicalFile(boardFilePath(dir));
   const reopen = args.includes("--reopen");
   const baseUrl = await ensureServer({
-    forceRestart: shouldForceRestartForLocalBuild(process.argv[1] || ""),
+    localBuild: shouldForceRestartForLocalBuild(process.argv[1] || ""),
     reloadKey: sessionKey(file),
   });
   const response = await postJson(`${baseUrl}/api/boards`, { dir, reopen });
@@ -2090,6 +2090,7 @@ async function serverCommand(args) {
     port,
     stateFile: stateFile(),
     version: VERSION,
+    buildId: localBuildId(),
     debug,
     extraListenHosts: flagValues(args, "--also-listen"),
   });
@@ -2375,11 +2376,12 @@ async function probeHealth(baseUrl, { reconcileNetwork, timeoutMs }) {
 
 // `reloadKey` names the session this invocation is about to open. A version-driven replacement
 // reloads that chrome only; every other open review page is told it is outdated and left alone.
-async function ensureServer({ forceRestart = false, reloadKey = "" } = {}) {
+async function ensureServer({ localBuild = false, reloadKey = "" } = {}) {
   const port = defaultPort();
   const requiredHosts = await requiredServerHosts();
   const { baseUrl, health: existing, duplicates, foreign } = await findRunningServer(port, { reconcileNetwork: true });
   if (foreign) throw otherInstallationError(port, foreign);
+  const forceRestart = localBuild && isDifferentBuild(localBuildId(), existing);
   const missingHosts =
     existing?.app === SERVER_APP_ID ? missingServerHosts(existing, hostsToServe(requiredHosts, duplicates)) : [];
   if (existing && !shouldRestartServer(VERSION, existing, forceRestart) && missingHosts.length === 0) {
@@ -2531,6 +2533,26 @@ export function serverReplacementReason(currentVersion, healthBody, forceRestart
 export function shouldForceRestartForLocalBuild(executablePath, sourceServerExists = localSourceServerExists()) {
   const localBuildEntry = fileURLToPath(new URL("../dist/cli.mjs", import.meta.url));
   return sourceServerExists && path.resolve(executablePath) === path.resolve(localBuildEntry);
+}
+
+// A local build replaces the running server only when that server is on another build: forcing it
+// on every open cut every board's connection each time any agent ran one. A server that reports no
+// id predates this check, so it is replaced once. Without an id of our own there is nothing to
+// compare, and leaving a working server alone is the safe side.
+export function isDifferentBuild(buildId, healthBody) {
+  if (!buildId || !healthBody || typeof healthBody !== "object") return false;
+  return healthBody.build_id !== buildId;
+}
+
+// Written by scripts/build.js as a hash of dist, so a rebuild that changes nothing is not a new
+// build. The CLI and a local server both read this one file; `../dist/` resolves to it from `src/`
+// and from `dist/` alike.
+export function localBuildId(file = fileURLToPath(new URL("../dist/build-id", import.meta.url))) {
+  try {
+    return readFileSync(file, "utf8").trim();
+  } catch {
+    return "";
+  }
 }
 
 function localSourceServerExists() {

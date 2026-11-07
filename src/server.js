@@ -360,6 +360,7 @@ export async function serve({
   port,
   stateFile,
   version = "",
+  buildId = "",
   debug = false,
   log = null,
   pollHeartbeatMs = 15_000,
@@ -867,6 +868,7 @@ export async function serve({
       ok: true,
       app: SERVER_APP_ID,
       version,
+      ...(buildId ? { build_id: buildId } : {}),
       state_id: serverStateId,
       state_dir: path.dirname(stateFile),
       // Where this process is listening and every address it was asked to serve (bound or still
