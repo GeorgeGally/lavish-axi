@@ -5774,6 +5774,124 @@ function renderTune() {
   renderVersions(item, spec);
 }
 
+/** Colour, inline: what it is now, colours worked out from it, sliders and a hex field. */
+function createColourControl(label, initial, apply) {
+  const { normalizeHex, hexToHsl, hslToHex, harmonySwatches } = /** @type {any} */ (window).LieselColour;
+  let current = normalizeHex(initial) || "#000000";
+  let hsl = hexToHsl(current);
+  const root = element("div", { class: "tune-colour" });
+  const head = element("div", { class: "tune-colour-head" });
+  const chip = element("span", { class: "tune-swatch" });
+  const hex = /** @type {any} */ (
+    element("input", {
+      type: "text",
+      class: "tune-hex",
+      spellcheck: "false",
+      autocomplete: "off",
+      "aria-label": `${label} hex`,
+    })
+  );
+  head.append(chip, hex);
+
+  const optionRow = () => {
+    const row = element("div", { class: "tune-colour-options" });
+    const options = Array.from({ length: 5 }, () => {
+      const option = element("button", { class: "tune-colour-option", type: "button" });
+      option.addEventListener("click", () => {
+        const picked = option.dataset.hex;
+        setColour(picked);
+        apply(picked);
+        endTuneEdit();
+      });
+      return option;
+    });
+    row.append(...options);
+    return { row, options };
+  };
+  const hues = optionRow();
+  const tones = optionRow();
+
+  const slider = (name, max, unit, field) => {
+    const row = element("label", { class: "tune-colour-slider" });
+    const value = element("span", { class: "tune-control-value" });
+    const title = element("span", { class: "tune-colour-slider-label" });
+    title.append(element("span", { text: name }), value);
+    const input = /** @type {any} */ (
+      element("input", { type: "range", min: "0", max: String(max), step: "1", "aria-label": `${label} ${name}` })
+    );
+    input.addEventListener("input", () => {
+      hsl = { ...hsl, [field]: Number(input.value) };
+      current = hslToHex(hsl);
+      paint();
+      apply(current);
+    });
+    input.addEventListener("change", endTuneEdit);
+    row.append(title, input);
+    return {
+      row,
+      input,
+      sync: () => ((input.value = String(hsl[field])), (value.textContent = `${hsl[field]}${unit}`)),
+    };
+  };
+  const hue = slider("Hue", 360, "°", "h");
+  const saturation = slider("Saturation", 100, "%", "s");
+  const lightness = slider("Lightness", 100, "%", "l");
+
+  // Black, white and greys have no hue of their own: keep the one on the sliders.
+  function setColour(next, typing = false) {
+    const parsed = hexToHsl(next);
+    const flat = parsed.l === 0 || parsed.l === 100;
+    hsl = { h: parsed.s === 0 ? hsl.h : parsed.h, s: flat ? hsl.s : parsed.s, l: parsed.l };
+    current = next;
+    paint(typing);
+  }
+
+  function paint(typing = false) {
+    chip.style.background = current;
+    if (!typing) hex.value = current;
+    hex.removeAttribute("aria-invalid");
+    for (const part of [hue, saturation, lightness]) part.sync();
+    const { h, s, l } = hsl;
+    saturation.input.style.setProperty(
+      "--track",
+      `linear-gradient(to right, ${hslToHex({ h, s: 0, l })}, ${hslToHex({ h, s: 100, l })})`,
+    );
+    lightness.input.style.setProperty("--track", `linear-gradient(to right, #000, ${hslToHex({ h, s, l: 50 })}, #fff)`);
+    const swatches = harmonySwatches(hsl);
+    const fill = (options, colours) =>
+      options.forEach((option, index) => {
+        option.dataset.hex = colours[index];
+        option.style.background = colours[index];
+        option.title = colours[index];
+        option.setAttribute("aria-label", `Use ${colours[index]}`);
+      });
+    fill(hues.options, swatches.hues);
+    fill(tones.options, swatches.tones);
+  }
+
+  hex.addEventListener("input", () => {
+    const next = normalizeHex(hex.value);
+    if (!next) {
+      hex.setAttribute("aria-invalid", "true");
+      return;
+    }
+    setColour(next, true);
+    apply(next);
+  });
+  hex.addEventListener("change", () => {
+    paint();
+    endTuneEdit();
+  });
+  hex.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") hex.blur();
+  });
+
+  hue.input.classList.add("tune-colour-hue");
+  root.append(head, hues.row, tones.row, hue.row, saturation.row, lightness.row);
+  paint();
+  return root;
+}
+
 function createTuneControl(item, control, onChange) {
   const wrapper = element("div", { class: "tune-control" });
   const valueLabel = element("span", { class: "tune-control-value", text: String(item.tune[control.id] ?? "") });
@@ -5964,29 +6082,7 @@ function createTuneControl(item, control, onChange) {
       timeline.destroy();
     });
   } else if (control.type === "color") {
-    const row = element("div", { class: "tune-colour" });
-    const swatch = element("button", {
-      class: "tune-swatch",
-      type: "button",
-      "aria-label": `${control.label} colour`,
-      title: "Pick a colour",
-    });
-    const hex = element("span", { class: "tune-hex" });
-    const input = element("input", { type: "color", class: "tune-colour-input" });
-    input.value = item.tune[control.id] || "#000000";
-    const paint = () => {
-      swatch.style.background = input.value;
-      hex.textContent = input.value;
-    };
-    swatch.addEventListener("click", () => input.click());
-    input.addEventListener("input", () => {
-      paint();
-      apply(input.value);
-    });
-    input.addEventListener("change", endTuneEdit);
-    row.append(swatch, input, hex);
-    paint();
-    wrapper.append(row);
+    wrapper.append(createColourControl(control.label, item.tune[control.id], apply));
   } else if (control.type === "select") {
     const select = element("select", {});
     for (const option of control.options || [])

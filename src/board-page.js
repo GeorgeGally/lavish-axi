@@ -309,6 +309,7 @@ ${SCREEN_FORMATS.map(
 <div class="ended" id="ended" hidden>Session ended. Run <code>liesel board open</code> when you want it reopened.</div>
 <script id="liesel-board" type="application/json">${bootstrap}</script>
 <script src="/dialkit/browser.global.js"></script>
+<script src="/board-colour.js?v=${encodeURIComponent(assetVersion)}"></script>
 <script src="/board-client.js?v=${encodeURIComponent(assetVersion)}"></script>
 </body>
 </html>`;

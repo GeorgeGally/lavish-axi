@@ -78,6 +78,7 @@ test("a board registers as a session and renders one page for its items", async 
   const html = await page.text();
   assert.match(html, /Liesel/);
   assert.match(html, /\/board-client\.js/);
+  assert.match(html, /\/board-colour\.js/);
   assert.match(html, /\/dialkit\/browser\.global\.js/);
   const dialkit = await fetch(`${base}/dialkit/browser.global.js`);
   assert.equal(dialkit.status, 200);

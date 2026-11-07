@@ -2159,7 +2159,8 @@ body[data-dragging="true"] .shield {
   min-width: 0;
 }
 
-.tune-control-label {
+.tune-control-label,
+.tune-colour-slider-label {
   display: flex;
   justify-content: space-between;
   align-items: baseline;
@@ -2243,37 +2244,96 @@ body[data-dragging="true"] .shield {
     0 0 0 4px rgba(37, 99, 235, 0.18);
 }
 
-/* Colour is one 28px circle and its hex, never a bar. */
+/* Colour, inline: the colour and its hex, colours worked out from it, then sliders. */
 .tune-colour {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.tune-colour-head {
   display: flex;
   align-items: center;
   gap: 10px;
 }
 
-.tune-swatch {
+.tune-swatch,
+.tune-colour-option {
+  flex: none;
   width: 28px;
   height: 28px;
   padding: 0;
   border: 0;
   border-radius: 50%;
   box-shadow: inset 0 0 0 1px rgba(22, 24, 29, 0.14);
+}
+
+.tune-colour-options {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+  margin-top: -4px;
+}
+
+.tune-colour-head + .tune-colour-options {
+  margin-top: 0;
+}
+
+.tune-colour-option {
   cursor: pointer;
 }
 
-.tune-colour-input {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  border: 0;
-  opacity: 0;
-  pointer-events: none;
+.tune-colour-option:focus-visible {
+  outline: 2px solid var(--ink-4);
+  outline-offset: 2px;
 }
 
 .tune-hex {
-  color: var(--ink-2);
+  width: 88px;
+  min-width: 0;
+  padding: 4px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
   font-size: 13px;
   font-variant-numeric: tabular-nums;
+}
+
+.tune-hex[aria-invalid="true"] {
+  border-color: #c0392b;
+}
+
+.tune-colour-slider {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* Each slider draws what it will do to this colour, so its track is the colour. */
+.tune-colour-slider input[type="range"]::-webkit-slider-runnable-track {
+  height: 8px;
+  border-radius: 4px;
+  background: var(--track);
+}
+
+.tune-colour-slider input[type="range"]::-moz-range-track {
+  height: 8px;
+  border-radius: 4px;
+  background: var(--track);
+}
+
+.tune-colour-slider input[type="range"]::-moz-range-progress {
+  background: transparent;
+}
+
+.tune-colour-slider input[type="range"]::-webkit-slider-thumb {
+  margin-top: -3px;
+}
+
+.tune-colour-slider .tune-colour-hue {
+  --track: linear-gradient(to right, #f33, #ff3, #3f3, #3ff, #33f, #f3f, #f33);
 }
 
 .tune-control select {

@@ -224,7 +224,7 @@ test(
       // Editing an inherited colour changes the section, and so the heading, live and saved.
       await evaluate(`document.querySelector(".tune-inherited").open = true`);
       await evaluate(`(() => {
-        const input = document.querySelector(".tune-inherited .tune-colour-input");
+        const input = document.querySelector(".tune-inherited .tune-hex");
         input.value = "#ff0000";
         input.dispatchEvent(new Event("input", { bubbles: true }));
         input.dispatchEvent(new Event("change", { bubbles: true }));
@@ -325,7 +325,29 @@ test(
       await tapAlt();
       await click(again.x, again.y);
       await evaluate(`document.querySelector(".tune-inherited").open = true`);
-      assert.equal(await evaluate(`document.querySelector(".tune-inherited .tune-hex").textContent`), "#ff0000");
+      assert.equal(await evaluate(`document.querySelector(".tune-inherited .tune-hex").value`), "#ff0000");
+
+      // No browser picker: a swatch and a slider both change the design live.
+      assert.equal(
+        await evaluate(
+          `document.querySelectorAll('.tune-body input[type="color"], #tuneBody input[type="color"]').length`,
+        ),
+        0,
+      );
+      assert.equal(await evaluate(`document.querySelectorAll(".tune-inherited .tune-colour-option").length`), 10);
+      await evaluate(`document.querySelector('.tune-inherited .tune-colour-option[data-hex="#00ffff"]').click()`);
+      await sleep(600);
+      assert.equal(await colourOf(frame, "#head"), "rgb(0, 255, 255)");
+      assert.equal(await evaluate(`document.querySelector(".tune-inherited .tune-hex").value`), "#00ffff");
+      await evaluate(`(() => {
+        const hue = document.querySelector(".tune-inherited .tune-colour-hue");
+        hue.value = "120";
+        hue.dispatchEvent(new Event("input", { bubbles: true }));
+        hue.dispatchEvent(new Event("change", { bubbles: true }));
+      })()`);
+      await sleep(900);
+      assert.equal(await colourOf(frame, "#head"), "rgb(0, 255, 0)");
+      assert.equal((await saved())[heroSelector].color, "#00ff00");
     } finally {
       await b.close();
     }
