@@ -2323,13 +2323,15 @@ const MODE_STATE = {
   },
 };
 
-/** The mode that is on, as one word in black under the top bar. */
+/** Every mode, in black under the top bar: the one that is on is white, the others dulled. */
 function renderModeState() {
   const badge = document.getElementById("modeState");
   if (!badge) return;
-  const state = armedMode ? MODE_STATE[armedMode] : null;
   badge.dataset.mode = armedMode;
-  badge.textContent = state ? state.text : "View";
+  for (const word of badge.children) {
+    if (/** @type {any} */ (word).dataset.mode === armedMode) word.setAttribute("aria-current", "true");
+    else word.removeAttribute("aria-current");
+  }
 }
 
 /** @param {"" | "annotate" | "tune"} mode turning one mode on turns the other off */

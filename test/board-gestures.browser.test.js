@@ -161,12 +161,13 @@ test(
           return [
             "notes:" + (document.body.dataset.notes === "true"),
             "controls:" + (document.body.dataset.controls === "true"),
-            "badge:" + badge.dataset.mode + ":" + badge.textContent,
+            "badge:" + badge.dataset.mode + ":" + badge.querySelector("[aria-current]").textContent,
+            "words:" + badge.textContent,
           ].join(" ");
         })()`);
-      const off = "notes:false controls:false badge::View";
-      const notesOn = "notes:true controls:false badge:annotate:Discuss";
-      const controlsOn = "notes:false controls:true badge:tune:Edit";
+      const off = "notes:false controls:false badge::View words:ViewDiscussEdit";
+      const notesOn = "notes:true controls:false badge:annotate:Discuss words:ViewDiscussEdit";
+      const controlsOn = "notes:false controls:true badge:tune:Edit words:ViewDiscussEdit";
 
       /** Where an element of the desktop design sits on the board's screen. */
       async function pointInDesign(selector) {

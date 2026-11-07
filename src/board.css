@@ -330,17 +330,23 @@ textarea:focus-visible {
 .mode-state {
   position: fixed;
   left: 50%;
-  top: 62px;
+  top: 76px;
   z-index: 30;
-  padding: 7px 14px;
+  display: flex;
+  gap: 14px;
+  padding: 7px 16px;
   border-radius: 999px;
   background: rgba(30, 28, 26, 0.88);
-  color: #fdfbf7;
+  color: rgba(253, 251, 247, 0.42);
   font-size: 12.5px;
   letter-spacing: 0.01em;
   white-space: nowrap;
   pointer-events: none;
   transform: translateX(-50%);
+}
+
+.mode-state [aria-current="true"] {
+  color: #fdfbf7;
 }
 
 .zoom .zoom-text {
