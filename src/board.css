@@ -2775,6 +2775,11 @@ body[data-dragging="true"] .shield {
   transition: background-color 160ms ease;
 }
 
+.settings-switch input:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .settings-switch input::after {
   content: "";
   position: absolute;

@@ -34,10 +34,14 @@ const MEMBER_GAP = { all: 200, ultrawide: 200, desktop: 140, ipad: 100, phone: 7
 // Only the All view shows more than one device, so this gap sets the air between the
 // 1440, 834 and 390 screens there, at the same breathing room as the space between items.
 const DEVICE_GAP = MEMBER_GAP.all;
-// An ultrawide artboard is as wide as the other three together, so the All view leaves
-// it out until it is switched on.
+// The formats that are on, remembered per board. An ultrawide artboard is as wide as the
+// other three together, so it stays off until it is switched on. Boards saved before each
+// format had a switch hold only that ultrawide choice, which still counts.
+const formatsStorageKey = `liesel:formats:${key}`;
 const ultrawideStorageKey = `liesel:ultrawide:${key}`;
 const annotateHintStorageKey = `liesel:gesture-hint:${key}`;
+
+const initialFormats = loadFormats();
 
 const state = {
   tabs: Array.isArray(bootstrap.tabs) ? bootstrap.tabs : [],
@@ -47,8 +51,8 @@ const state = {
   chat: Array.isArray(bootstrap.chat) ? bootstrap.chat : [],
   ended: Boolean(bootstrap.ended),
   activeTab: "",
-  deviceMode: loadDeviceMode(),
-  ultrawideInAll: readStorage(ultrawideStorageKey) === "on",
+  deviceMode: loadDeviceMode(initialFormats),
+  formats: initialFormats,
   camera: { x: 0, y: 0, zoom: 1 },
   /** @type {Map<string, any>} */
   artboards: new Map(),
@@ -131,9 +135,24 @@ function artboardKey(itemId, deviceId) {
   return `${itemId}::${deviceId}`;
 }
 
-function loadDeviceMode() {
-  const stored = readStorage(deviceStorageKey);
-  return ["all", ...DEVICES.map((device) => device.id)].includes(stored || "") ? String(stored) : "all";
+/** @returns {Set<string>} */
+function loadFormats() {
+  let saved = [];
+  try {
+    saved = JSON.parse(readStorage(formatsStorageKey) || "[]");
+  } catch {
+    saved = [];
+  }
+  const known = DEVICES.map((device) => device.id).filter((id) => Array.isArray(saved) && saved.includes(id));
+  if (known.length > 0) return new Set(known);
+  const ultrawide = readStorage(ultrawideStorageKey) === "on";
+  return new Set(DEVICES.map((device) => device.id).filter((id) => ultrawide || id !== "ultrawide"));
+}
+
+/** @param {Set<string>} formats */
+function loadDeviceMode(formats) {
+  const stored = String(readStorage(deviceStorageKey) || "");
+  return formats.has(stored) ? stored : "all";
 }
 
 function loadHeights() {
@@ -162,7 +181,11 @@ function saveHeights() {
 
 function visibleDevices() {
   if (state.deviceMode !== "all") return DEVICES.filter((device) => device.id === state.deviceMode);
-  return state.ultrawideInAll ? DEVICES : DEVICES.filter((device) => device.id !== "ultrawide");
+  return enabledFormats();
+}
+
+function enabledFormats() {
+  return DEVICES.filter((device) => state.formats.has(device.id));
 }
 
 function deviceById(id) {
@@ -1377,7 +1400,7 @@ document.getElementById("historyToggle")?.addEventListener("click", () => {
 const oldNotesStorageKey = `liesel:old-notes:${key}`;
 let showOldNotes = readStorage(oldNotesStorageKey) !== "off";
 
-// The switch lives in Settings, beside Show ultrawide.
+// The switch lives in Settings, beside the format switches.
 function renderOldNotesToggle() {
   document.body.classList.toggle("old-notes-hidden", !showOldNotes);
   const toggle = /** @type {HTMLInputElement | null} */ (document.getElementById("oldNotesSetting"));
@@ -2784,19 +2807,32 @@ function setTab(id) {
   else fit(false);
 }
 
-// Settings: whether the 3440 ultrawide joins the All view, remembered per board.
-function renderUltrawideToggle() {
-  const toggle = /** @type {HTMLInputElement | null} */ (document.getElementById("ultrawideSetting"));
-  if (toggle) toggle.checked = state.ultrawideInAll;
+// Settings: one switch per screen format, remembered per board. The last format on is
+// locked, so the board always has something to show.
+function renderFormatSwitches() {
+  for (const toggle of document.querySelectorAll("[data-format]")) {
+    const input = /** @type {HTMLInputElement} */ (toggle);
+    input.checked = state.formats.has(input.dataset.format || "");
+    input.disabled = input.checked && state.formats.size === 1;
+    input.title = input.disabled ? "At least one format stays on" : "";
+  }
 }
 
-/** @param {boolean} on */
-function setUltrawideInAll(on) {
-  if (on === state.ultrawideInAll) return;
+/** @param {string} id @param {boolean} on */
+function setFormat(id, on) {
+  if (on === state.formats.has(id) || (!on && state.formats.size === 1)) {
+    renderFormatSwitches();
+    return;
+  }
   flashSettingsSaved();
-  state.ultrawideInAll = on;
-  writeStorage(ultrawideStorageKey, on ? "on" : "off");
-  renderUltrawideToggle();
+  if (on) state.formats.add(id);
+  else state.formats.delete(id);
+  writeStorage(formatsStorageKey, JSON.stringify([...state.formats]));
+  if (!on && state.deviceMode === id) {
+    setDeviceMode("all");
+    return;
+  }
+  renderDevices();
   if (state.deviceMode !== "all") return;
   relayout();
   userAdjustedCamera = false;
@@ -2804,9 +2840,9 @@ function setUltrawideInAll(on) {
 }
 
 function renderDevices() {
-  renderUltrawideToggle();
+  renderFormatSwitches();
   if (!deviceBar) return;
-  const options = [{ id: "all", label: "All" }, ...DEVICES];
+  const options = [{ id: "all", label: "All" }, ...enabledFormats()];
   deviceBar.replaceChildren(
     ...options.map((device) => {
       const button = element("button", {
@@ -4370,7 +4406,7 @@ function toggleSideView() {
 
 /* ---------------------------------------------------------------- settings */
 
-// Settings opens from the gear in the top bar as a full page over the board: the ultrawide
+// Settings opens from the gear in the top bar as a full page over the board: the format
 // and old-notes switches, the project's dev server and the agent picker, all saved as they change. Its address is the board's with
 // #settings, so a reload keeps it open and the browser's Back returns to the board. It closes
 // on Escape, Back to board, or the gear.
@@ -4395,7 +4431,7 @@ function setSettingsOpen(open) {
       settingsPushed = true;
     }
     settingsPanel.scrollTop = 0;
-    renderUltrawideToggle();
+    renderFormatSwitches();
     loadRunner();
     loadProject();
     document.getElementById("settingsClose")?.focus({ preventScroll: true });
@@ -7306,9 +7342,12 @@ document.getElementById("newMenu")?.addEventListener("toggle", (event) => {
   const open = /** @type {ToggleEvent} */ (event).newState === "open";
   document.getElementById("newToggle")?.setAttribute("aria-expanded", String(open));
 });
-document.getElementById("ultrawideSetting")?.addEventListener("change", (event) => {
-  setUltrawideInAll(/** @type {HTMLInputElement} */ (event.currentTarget).checked);
-});
+for (const toggle of document.querySelectorAll("[data-format]")) {
+  toggle.addEventListener("change", (event) => {
+    const input = /** @type {HTMLInputElement} */ (event.currentTarget);
+    setFormat(input.dataset.format || "", input.checked);
+  });
+}
 document.getElementById("agentForm")?.addEventListener("submit", saveRunner);
 document.getElementById("agentSelect")?.addEventListener("change", (event) => {
   syncRunnerFields();

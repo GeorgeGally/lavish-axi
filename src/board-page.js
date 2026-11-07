@@ -1,6 +1,14 @@
 import { PRODUCT_NAME } from "./brand.js";
 import { pairInfo } from "./board.js";
 
+// The Settings switches, one per device in the board client's `DEVICES`.
+const SCREEN_FORMATS = [
+  ["ultrawide", "Ultrawide", "3440 wide"],
+  ["desktop", "Desktop", "1440 wide"],
+  ["ipad", "iPad", "834 wide"],
+  ["phone", "Phone", "390 wide"],
+];
+
 /** @param {unknown} value */
 function escapeHtml(value) {
   return String(value ?? "")
@@ -169,14 +177,16 @@ export function createBoardHtml(
         <h2 class="settings-heading" id="viewHeading">View</h2>
       </div>
       <div class="settings-card">
-        <label class="settings-row settings-switch">
+${SCREEN_FORMATS.map(
+  ([id, title, hint]) => `        <label class="settings-row settings-switch">
           <span class="settings-row-text">
-            <span class="settings-row-title">Show ultrawide</span>
-            <span class="settings-hint">Adds the 3440 ultrawide to the All view.</span>
+            <span class="settings-row-title">${title}</span>
+            <span class="settings-hint">${hint}</span>
           </span>
-          <input type="checkbox" role="switch" id="ultrawideSetting">
+          <input type="checkbox" role="switch" data-format="${id}">
         </label>
-        <label class="settings-row settings-switch">
+`,
+).join("")}        <label class="settings-row settings-switch">
           <span class="settings-row-text">
             <span class="settings-row-title">Show old notes</span>
             <span class="settings-hint">Answered notes wait in the gutter beside the design. Open notes always show.</span>

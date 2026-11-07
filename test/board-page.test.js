@@ -23,7 +23,7 @@ test("the tune controls live in the sidebar, behind a Controls tab beside Chat",
   assert.doesNotMatch(html, /tuneClose/);
 });
 
-test("Settings in the top bar holds the agent picker and the ultrawide toggle; the sidebar is Chat and Controls", () => {
+test("Settings in the top bar holds the agent picker and the format switches; the sidebar is Chat and Controls", () => {
   const html = createBoardHtml({ key: "k", file: "/tmp/board.json" }, /** @type {any} */ (board));
   const bar = html.slice(html.indexOf('<header class="bar"'), html.indexOf("</header>"));
   const sidebar = html.slice(html.indexOf('<aside class="chat"'), html.indexOf("</aside>") + "</aside>".length);
@@ -36,17 +36,21 @@ test("Settings in the top bar holds the agent picker and the ultrawide toggle; t
   assert.equal((sidebar.match(/role="tab"/g) || []).length, 2);
   assert.doesNotMatch(html, /sideTabAgent/);
   assert.doesNotMatch(sidebar, /agentPane|agentSelect/);
-  for (const id of [
-    "ultrawideSetting",
-    "agentForm",
-    "agentSelect",
-    "agentCwd",
-    "agentCommand",
-    "agentOutput",
-    "oldNotesSetting",
-  ]) {
+  for (const id of ["agentForm", "agentSelect", "agentCwd", "agentCommand", "agentOutput", "oldNotesSetting"]) {
     assert.match(settings, new RegExp(`id="${id}"`), id);
   }
+  // Every screen format has its own switch, in the device order, and no ultrawide-only one.
+  assert.doesNotMatch(settings, /ultrawideSetting|Show ultrawide/);
+  const formats = [...settings.matchAll(/<span class="settings-row-title">(\w+)<\/span>[\s\S]*?data-format="(\w+)"/g)];
+  assert.deepEqual(
+    formats.map((match) => [match[1], match[2]]),
+    [
+      ["Ultrawide", "ultrawide"],
+      ["Desktop", "desktop"],
+      ["iPad", "ipad"],
+      ["Phone", "phone"],
+    ],
+  );
   // No ultrawide or old-notes button in the bar any more: both are switches in Settings.
   assert.doesNotMatch(bar, /ultrawide/i);
   assert.doesNotMatch(bar, /oldNotes|old notes/i);
