@@ -17,10 +17,10 @@ body { margin: 0; font: 16px sans-serif; } h1 { margin: 0; padding: 40px; font-s
 </style></head><body><h1 id="title">The whole fleet</h1></body></html>
 `;
 
-// A note the agent has taken but not answered shows a thin turning ring around its
-// number, on the pin in the design and on its thread in Chat, until the reply lands.
+// A sent note shows a thin turning ring around its number, on the pin in the design and
+// on its thread in Chat, from the send until the reply lands, taken by the agent or not.
 test(
-  "A delivered note shows a working ring on its pin and thread until the agent replies",
+  "A sent note shows a working ring on its pin and thread until the agent replies",
   { skip: !runBrowserE2e || !findChrome(), timeout: 120_000 },
   async () => {
     const temp = await realpath(await mkdtemp(path.join(tmpdir(), "liesel-ring-e2e-")));
@@ -134,10 +134,14 @@ test(
       const ringOnPin = `!!${pin}?.querySelector(".liesel-pin-ring")`;
       const ringOnThread = `!!document.querySelector(".thread-number.is-working")`;
 
-      // Sent, not yet taken: a plain filled pin, no ring.
+      // Sent, not yet taken: the note is already waiting, so the ring already turns.
       await until(`${pin}?.dataset.state === "sent"`, "sent pin", design);
-      assert.equal(await evaluate(ringOnPin, design), false);
-      assert.equal(await evaluate(ringOnThread), false);
+      await until(ringOnPin, "ring on sent pin", design);
+      assert.equal(
+        await evaluate(`getComputedStyle(${pin}.querySelector(".liesel-pin-ring rect")).animationName`, design),
+        "liesel-pin-turn",
+      );
+      await until(ringOnThread, "ring on sent thread");
 
       // The agent takes it: the ring turns on the pin and on the thread's number.
       const polled = await fetch(

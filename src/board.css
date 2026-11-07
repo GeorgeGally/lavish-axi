@@ -326,37 +326,28 @@ textarea:focus-visible {
   display: none;
 }
 
-/* Which tapped mode is on, notes or the controls selector, and the key that turns it
-   off. Quiet by design: a dot, a word and the key, nothing while both are off. */
+/* Which mode the pointer is in, always in view just under the top bar. */
 .mode-state {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  height: 28px;
-  padding: 0 10px;
+  position: fixed;
+  left: 50%;
+  top: 62px;
+  z-index: 30;
+  padding: 7px 14px;
   border-radius: 999px;
-  background: rgba(22, 24, 29, 0.05);
-  color: var(--ink-2);
-  font-size: 13px;
-  font-weight: 500;
+  background: rgba(30, 28, 26, 0.88);
+  color: #fdfbf7;
+  font-size: 12.5px;
+  letter-spacing: 0.01em;
   white-space: nowrap;
+  pointer-events: none;
+  transform: translateX(-50%);
 }
 
-.mode-state::before {
-  content: "";
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--select);
-}
-
-.mode-state kbd {
-  color: var(--ink-4);
-  font: inherit;
-}
-
-.mode-state[hidden] {
-  display: none;
+/* The browsing line only names keys, which a phone or tablet does not have. */
+@media (pointer: coarse) {
+  .mode-state[data-mode=""] {
+    display: none;
+  }
 }
 
 .zoom .zoom-text {
@@ -1015,7 +1006,7 @@ body[data-dragging="true"] .shield {
 .annotate-hint {
   position: fixed;
   left: 50%;
-  top: 62px;
+  top: 98px;
   z-index: 30;
   padding: 7px 14px;
   border-radius: 999px;

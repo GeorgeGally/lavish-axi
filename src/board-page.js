@@ -72,6 +72,7 @@ export function createBoardHtml(
 <link rel="stylesheet" href="/dialkit/styles.css">
 </head>
 <body>
+<div class="mode-state" id="modeState" role="status" aria-live="polite"></div>
 <header class="bar">
   <a class="brand" href="/" title="All boards">${PRODUCT_NAME}</a>
   <button class="icon-button new-toggle" id="newToggle" type="button" popovertarget="newMenu" aria-label="New board or project" title="New board or project">
@@ -83,7 +84,6 @@ export function createBoardHtml(
   </div>
   <nav class="tabs" id="tabs" role="tablist" aria-label="Board tabs"></nav>
   <div class="bar-spacer"></div>
-  <span class="mode-state" id="modeState" role="status" aria-live="polite" hidden></span>
   <button class="bar-toggle" id="duplicateToggle" type="button" hidden>Duplicate</button>
   <button class="bar-toggle" id="historyToggle" type="button" hidden>History</button>
   <div class="segmented" id="devices" role="group" aria-label="Device"></div>

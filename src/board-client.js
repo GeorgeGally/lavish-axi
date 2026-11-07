@@ -2288,33 +2288,25 @@ function updateGestureMode() {
   else clearHover();
 }
 
-/** @type {Record<"annotate" | "tune", { label: string, key: string, title: string, view: "chat" | "controls" }>} */
+/** @type {Record<"annotate" | "tune", { text: string, view: "chat" | "controls" }>} */
 const MODE_STATE = {
   annotate: {
-    label: "Notes",
-    key: "⌘",
-    title: "Click a design to leave a note · ⌘ or Esc turns notes off",
+    text: "Notes on · click to leave a note · ⌘ to turn off",
     view: "chat",
   },
   tune: {
-    label: "Controls",
-    key: "⌥",
-    title: "Click an element to load it into Controls · ⌥ or Esc turns this off",
+    text: "Controls on · click an element to tune it · ⌥ to turn off",
     view: "controls",
   },
 };
 
-/** The mode that is on, said quietly in the top bar; nothing shows while both are off. */
+/** The mode that is on, or that neither is, in black under the top bar. */
 function renderModeState() {
   const badge = document.getElementById("modeState");
   if (!badge) return;
   const state = armedMode ? MODE_STATE[armedMode] : null;
-  badge.hidden = !state;
   badge.dataset.mode = armedMode;
-  badge.title = state ? state.title : "";
-  badge.replaceChildren(
-    ...(state ? [element("span", { text: state.label }), element("kbd", { text: state.key })] : []),
-  );
+  badge.textContent = state ? state.text : "Browsing · tap ⌘ for notes · tap ⌥ for Controls";
 }
 
 /** @param {"" | "annotate" | "tune"} mode turning one mode on turns the other off */
@@ -2855,11 +2847,19 @@ function answeredNote(note) {
   return Boolean(entry && entry.done_at);
 }
 
-/** The agent has taken this note and not answered it yet: its number shows a turning ring. */
+/** The agent has taken this note and not answered it yet. */
 function workingNote(note) {
   if (!note.prompt_id) return false;
   const entry = state.chat.find((message) => message && message.prompt_id === note.prompt_id);
   return Boolean(entry && entry.delivered_at && !entry.done_at);
+}
+
+/** Sent and not answered yet, taken or not: its number shows a turning ring. */
+function awaitingReply(note) {
+  if (!note.prompt_id) return false;
+  if (sendingPrompts.has(note.prompt_id)) return true;
+  const entry = state.chat.find((message) => message && message.prompt_id === note.prompt_id);
+  return Boolean(entry && !entry.done_at);
 }
 
 /** @param {any} note @returns {"draft" | "sent" | "working" | "done"} */
@@ -2882,6 +2882,7 @@ function pinsFor(item, deviceId) {
       ox: note.ox,
       oy: note.oy,
       state: pinState(note),
+      waiting: awaitingReply(note),
     }));
 }
 
@@ -3899,7 +3900,7 @@ function threadHead(id, subject) {
     const crop = subject.note.crop?.id;
     if (crop) head.append(element("img", { class: "thread-thumb", src: attachmentUrl(crop), alt: "" }));
     const number = element("span", { class: "thread-number", text: String(subject.note.number) });
-    if (workingNote(subject.note)) number.classList.add("is-working");
+    if (awaitingReply(subject.note)) number.classList.add("is-working");
     head.append(number);
     const title = designName(subject.item, noteDevice(subject.note));
     threadTitles.set(id, `${subject.note.number} · ${title}`);
@@ -6814,7 +6815,7 @@ function connectLiveEvents() {
       if (payload?.type === "chat-sync") {
         if (Array.isArray(payload.data?.chat)) state.chat = payload.data.chat;
         renderChatPanel();
-        // A note taken or answered turns its pin's working ring on or off.
+        // A note sent or answered turns its pin's working ring on or off.
         postAllPins();
         // A note sent or answered changes how many wait for the agent.
         if (runnerState.view) loadRunner();
@@ -7367,6 +7368,7 @@ state.activeTab = state.tabs[0]?.id || "";
 noticeFileChanges(true);
 setChatCollapsed(readStorage(panelStorageKey) === "closed");
 setPresence("waiting");
+renderModeState();
 renderTabs();
 renderDevices();
 relayout();

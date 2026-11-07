@@ -161,12 +161,13 @@ test(
           return [
             "notes:" + (document.body.dataset.notes === "true"),
             "controls:" + (document.body.dataset.controls === "true"),
-            "badge:" + (badge.hidden ? "none" : badge.textContent),
+            "badge:" + badge.dataset.mode + ":" + badge.textContent,
           ].join(" ");
         })()`);
-      const off = "notes:false controls:false badge:none";
-      const notesOn = "notes:true controls:false badge:Notes⌘";
-      const controlsOn = "notes:false controls:true badge:Controls⌥";
+      const off = "notes:false controls:false badge::Browsing · tap ⌘ for notes · tap ⌥ for Controls";
+      const notesOn = "notes:true controls:false badge:annotate:Notes on · click to leave a note · ⌘ to turn off";
+      const controlsOn =
+        "notes:false controls:true badge:tune:Controls on · click an element to tune it · ⌥ to turn off";
 
       /** Where an element of the desktop design sits on the board's screen. */
       async function pointInDesign(selector) {

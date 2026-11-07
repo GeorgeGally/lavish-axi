@@ -205,11 +205,11 @@
    * a circle for one digit and a pill for wider numbers. Kept across renders so the dash
    * keeps travelling smoothly while the page scrolls.
    * @param {HTMLElement} pin
-   * @param {boolean} working
+   * @param {boolean} waiting
    */
-  function syncPinRing(pin, working) {
+  function syncPinRing(pin, waiting) {
     let ring = pin.querySelector(".liesel-pin-ring");
-    if (!working) {
+    if (!waiting) {
       ring?.remove();
       return;
     }
@@ -316,8 +316,8 @@
       element.style.left = `${anchor.x}px`;
       element.style.top = `${anchor.y}px`;
       element.style.transform = "translate(-50%,-50%)";
-      // Taken by the agent and not answered yet: a light dash runs around the number.
-      syncPinRing(element, pin.state === "working");
+      // Sent and not answered yet: a light dash runs around the number.
+      syncPinRing(element, Boolean(pin.waiting));
     }
     for (const node of Array.from(layer.children)) {
       if (!(node instanceof HTMLElement) || !seen.has(node.dataset.pin)) node.remove();
