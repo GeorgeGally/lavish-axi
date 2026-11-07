@@ -4724,6 +4724,7 @@ let tuneRedo = [];
 /** @type {null | { itemId: string, before: Record<string, any>, element?: { deviceId: string, selector: string, css: string[], before: Record<string, string> } }} */
 let tuneEdit = null;
 let tuneEditTimer;
+let tuneEditHeld = false;
 
 function beginTuneEdit(item) {
   if (!tuneEdit || tuneEdit.itemId !== item.id) {
@@ -4764,6 +4765,8 @@ function savedElementValue(itemId, selector, css) {
 }
 
 function endTuneEdit() {
+  // An open option list is one change, however long the reviewer browses it.
+  if (tuneEditHeld) return;
   clearTimeout(tuneEditTimer);
   const edit = tuneEdit;
   tuneEdit = null;
@@ -6105,6 +6108,7 @@ function createTuneControl(item, control, onChange) {
       apply(select.value);
       endTuneEdit();
     });
+    bindTuneOptions(select, control.label, apply);
     wrapper.append(select);
   } else {
     const value = Number(item.tune[control.id] ?? control.value ?? 0);
@@ -6129,6 +6133,115 @@ function createTuneControl(item, control, onChange) {
     wrapper.append(input);
   }
   return wrapper;
+}
+
+/** @type {null | { select: HTMLSelectElement, close: (keep: boolean) => void }} */
+let tuneOptions = null;
+
+/**
+ * A native select's popup says nothing until an option is committed, so the design
+ * could not follow along. The select stays as the field and holds the value; its list
+ * is ours, and every option reached shows live the way a slider does.
+ * @param {HTMLSelectElement} select @param {string} label @param {(raw: string) => void} apply
+ */
+function bindTuneOptions(select, label, apply) {
+  select.addEventListener("mousedown", (event) => {
+    event.preventDefault();
+    select.focus();
+    if (tuneOptions?.select === select) tuneOptions.close(true);
+    else openTuneOptions(select, label, apply);
+  });
+  select.addEventListener("keydown", (event) => {
+    if (tuneOptions?.select === select || ![" ", "Enter", "ArrowDown", "ArrowUp"].includes(event.key)) return;
+    event.preventDefault();
+    openTuneOptions(select, label, apply);
+  });
+  tuneCleanup.push(() => {
+    if (tuneOptions?.select === select) tuneOptions.close(false);
+  });
+}
+
+/** @param {HTMLSelectElement} select @param {string} label @param {(raw: string) => void} apply */
+function openTuneOptions(select, label, apply) {
+  tuneOptions?.close(true);
+  const original = select.value;
+  const values = [...select.options].map((option) => option.value);
+  const menu = element("div", { class: "tune-options", role: "listbox", "aria-label": label });
+  let active = Math.max(0, values.indexOf(original));
+  /** @param {number} index */
+  const show = (index) => {
+    active = index;
+    rows.forEach((row, at) => row.setAttribute("aria-selected", String(at === index)));
+    rows[index].scrollIntoView({ block: "nearest" });
+    if (select.value === values[index]) return;
+    select.value = values[index];
+    apply(values[index]);
+  };
+  const rows = [...select.options].map((option, index) => {
+    const row = element("button", { class: "tune-option", type: "button", role: "option", text: option.textContent });
+    row.tabIndex = -1;
+    row.addEventListener("pointermove", () => show(index));
+    row.addEventListener("mousedown", (event) => event.preventDefault());
+    row.addEventListener("click", () => {
+      show(index);
+      close(true);
+    });
+    return row;
+  });
+  menu.append(...rows);
+  /** @param {KeyboardEvent} event */
+  const onKey = (event) => {
+    const last = rows.length - 1;
+    const moves = {
+      ArrowDown: Math.min(last, active + 1),
+      ArrowUp: Math.max(0, active - 1),
+      Home: 0,
+      End: last,
+    };
+    if (event.key in moves) show(moves[event.key]);
+    else if (event.key === "Enter" || event.key === " " || event.key === "Tab") close(true);
+    else if (event.key === "Escape") close(false);
+    else return;
+    if (event.key !== "Tab") event.preventDefault();
+    event.stopPropagation();
+  };
+  /** @param {Event} event */
+  const onOutside = (event) => {
+    const target = /** @type {Node} */ (event.target);
+    if (!menu.contains(target) && target !== select) close(false);
+  };
+  const onBlur = () => close(false);
+  /** @param {boolean} keep */
+  function close(keep) {
+    window.removeEventListener("keydown", onKey, true);
+    window.removeEventListener("pointerdown", onOutside, true);
+    window.removeEventListener("scroll", onOutside, true);
+    window.removeEventListener("blur", onBlur);
+    menu.remove();
+    tuneOptions = null;
+    if (!keep && select.value !== original) {
+      select.value = original;
+      apply(original);
+    }
+    tuneEditHeld = false;
+    endTuneEdit();
+  }
+  document.body.append(menu);
+  const field = select.getBoundingClientRect();
+  const below = window.innerHeight - field.bottom - 12;
+  const upward = menu.offsetHeight > below && field.top > below;
+  menu.style.left = `${field.left}px`;
+  menu.style.width = `${field.width}px`;
+  menu.style.maxHeight = `${Math.max(120, (upward ? field.top : below + 8) - 12)}px`;
+  menu.style.top = upward ? "" : `${field.bottom + 4}px`;
+  menu.style.bottom = upward ? `${window.innerHeight - field.top + 4}px` : "";
+  tuneEditHeld = true;
+  tuneOptions = { select, close };
+  window.addEventListener("keydown", onKey, true);
+  window.addEventListener("pointerdown", onOutside, true);
+  window.addEventListener("scroll", onOutside, true);
+  window.addEventListener("blur", onBlur);
+  show(active);
 }
 
 function flushTune(item) {

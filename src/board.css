@@ -2369,6 +2369,36 @@ body[data-dragging="true"] .shield {
   border-color: var(--ink-4);
 }
 
+.tune-options {
+  position: fixed;
+  z-index: 1000;
+  overflow-y: auto;
+  padding: 4px;
+  border: 1px solid var(--line-strong);
+  border-radius: 9px;
+  background: var(--surface-strong);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16);
+}
+
+.tune-option {
+  display: block;
+  width: 100%;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.tune-option[aria-selected="true"] {
+  background: var(--select);
+  color: #fff;
+}
+
 .tune-preview {
   position: relative;
   width: 100%;
@@ -3626,14 +3656,19 @@ input.agent-input {
 }
 
 .tune-side-modes {
-  display: flex;
-  gap: 12px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px;
   margin-top: 2px;
+  padding: 2px;
+  border-radius: 9px;
+  background: var(--line);
 }
 
 .tune-side-mode {
-  padding: 0;
+  padding: 5px 8px;
   border: 0;
+  border-radius: 7px;
   background: transparent;
   color: var(--ink-3);
   font: inherit;
@@ -3641,8 +3676,12 @@ input.agent-input {
   cursor: pointer;
 }
 
-.tune-side-mode[aria-pressed="true"],
 .tune-side-mode:hover {
+  color: var(--ink);
+}
+
+.tune-side-mode[aria-pressed="true"] {
+  background: var(--surface-strong);
   color: var(--ink);
 }
 
