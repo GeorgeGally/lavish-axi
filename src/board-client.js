@@ -1337,12 +1337,12 @@ function buildNotes(item, builds, index) {
   return [...new Set(said.map((text) => text.trim()).filter(Boolean))];
 }
 
-/** Ask the server to photograph builds that have no thumbnail yet (one, or all). */
-function requestThumbs(itemId, hash = "") {
-  fetch(`/api/boards/${encodeURIComponent(key)}/thumbs`, {
+/** Ask the server for one build's thumbnail, taking it if it has none yet. */
+function requestThumb(itemId, hash) {
+  return fetch(`/api/boards/${encodeURIComponent(key)}/thumbs`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify(hash ? { item: itemId, hash } : { item: itemId }),
+    body: JSON.stringify({ item: itemId, hash }),
   })
     .then((response) => (response.ok ? response.json() : null))
     .then((payload) => {
@@ -1354,6 +1354,17 @@ function requestThumbs(itemId, hash = "") {
     .catch(() => {});
 }
 
+/**
+ * One build at a time, newest first, so each card fills as soon as its picture exists:
+ * a single request for them all answers only when the slowest capture is done.
+ */
+async function requestHistoryThumbs(itemId, builds) {
+  for (const build of [...builds].reverse()) {
+    if (historyItem !== itemId) return;
+    await requestThumb(itemId, build.hash);
+  }
+}
+
 function openHistory(itemId, hash = "") {
   const item = itemById(itemId);
   if (!item) return;
@@ -1361,7 +1372,7 @@ function openHistory(itemId, hash = "") {
   pickedItem = itemId;
   const current = historyBuilds(item).at(-1);
   setCompare(hash && hash !== current?.hash ? { itemId, hash } : null);
-  requestThumbs(itemId);
+  requestHistoryThumbs(itemId, historyBuilds(item));
 }
 
 /** Close the history strip and any build laid out beside its item. */
@@ -1828,7 +1839,7 @@ function noticeFileChanges(initial) {
     if (stamp !== before) {
       reloadItem(item);
       setUpdated(item.id, true);
-      if ((item.builds || []).length > 1) requestThumbs(item.id, String(item.hash || ""));
+      if ((item.builds || []).length > 1) requestThumb(item.id, String(item.hash || ""));
     }
   }
   if (updatedItems.size !== marked && state.layout) render();
