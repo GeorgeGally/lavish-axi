@@ -343,13 +343,6 @@ textarea:focus-visible {
   transform: translateX(-50%);
 }
 
-/* The browsing line only names keys, which a phone or tablet does not have. */
-@media (pointer: coarse) {
-  .mode-state[data-mode=""] {
-    display: none;
-  }
-}
-
 .zoom .zoom-text {
   padding: 0 10px;
   font-size: 13px;

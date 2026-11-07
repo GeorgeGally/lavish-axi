@@ -2314,22 +2314,22 @@ function updateGestureMode() {
 /** @type {Record<"annotate" | "tune", { text: string, view: "chat" | "controls" }>} */
 const MODE_STATE = {
   annotate: {
-    text: "Notes on · click to leave a note · ⌘ to turn off",
+    text: "Discuss",
     view: "chat",
   },
   tune: {
-    text: "Controls on · click an element to tune it · ⌥ to turn off",
+    text: "Edit",
     view: "controls",
   },
 };
 
-/** The mode that is on, or that neither is, in black under the top bar. */
+/** The mode that is on, as one word in black under the top bar. */
 function renderModeState() {
   const badge = document.getElementById("modeState");
   if (!badge) return;
   const state = armedMode ? MODE_STATE[armedMode] : null;
   badge.dataset.mode = armedMode;
-  badge.textContent = state ? state.text : "Browsing · tap ⌘ for notes · tap ⌥ for Controls";
+  badge.textContent = state ? state.text : "View";
 }
 
 /** @param {"" | "annotate" | "tune"} mode turning one mode on turns the other off */
