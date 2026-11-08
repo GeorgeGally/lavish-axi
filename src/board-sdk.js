@@ -1466,6 +1466,10 @@
       if (!target || event.source !== target) return;
       const data = event.data;
       if (!data || data.channel !== channel) return;
+      if (data.type === "pass-option") {
+        passOption = data.on === true;
+        return;
+      }
       if (data.type === "stylesheet") {
         adoptStylesheet(String(data.href || ""), typeof data.text === "string" ? data.text : null);
         return;
@@ -1636,6 +1640,8 @@
   // Cmd and Option stop arming as soon as the reviewer touches the design itself.
   // `other` is Shift or Ctrl: with either held, a Cmd or Option press is never a tap.
   const held = { space: false, alt: false, meta: false, other: false };
+  // The board turns this on only while Option is held to hand the page back for a moment.
+  let passOption = false;
   /**
    * @param {boolean} [blur] focus left the frame: what was held was let go somewhere else
    * @param {number} [at] the key event's time on the wall clock, so the board times a tap by
@@ -1733,7 +1739,7 @@
       type,
       (event) => {
         const mouse = /** @type {MouseEvent} */ (event);
-        if (mouse.metaKey || mouse.altKey) post({ type: "chord" });
+        if (mouse.metaKey || mouse.altKey) post({ type: "chord", via: type === "pointerdown" ? "pointer" : "wheel" });
       },
       { capture: true, passive: true },
     );
@@ -1758,9 +1764,10 @@
 
   // Option is the controls selector's key: inside a frame the browser would otherwise
   // start a text selection, follow a link clicked with Option, or download it. None of
-  // that belongs to the board, so an Option press never reaches the page's own defaults.
+  // that belongs to the board, so an Option press never reaches the page's own defaults,
+  // except while the board says Option is holding View: then the click is the page's.
   function swallowOption(event) {
-    if (!event.altKey && !held.alt) return;
+    if (passOption || (!event.altKey && !held.alt)) return;
     event.preventDefault();
     event.stopPropagation();
   }
@@ -1770,7 +1777,8 @@
     document.addEventListener(
       type,
       (event) => {
-        if (/** @type {MouseEvent} */ (event).altKey || held.alt) event.preventDefault();
+        const option = /** @type {MouseEvent} */ (event).altKey || held.alt;
+        if (option && !passOption) event.preventDefault();
       },
       true,
     );

@@ -2279,11 +2279,23 @@ let spaceHeld = false;
 // in a chord (Cmd+C, Cmd+scroll, Option+drag), joined by any other modifier at any point
 // (Cmd-Shift-3, whose 3 macOS swallows), held too long, or let go in another app or a
 // hidden tab flips nothing.
+// Held past a tap, alone, either key switches its mode only while it is held: from View
+// or the other mode to its own, from its own back to View, so a reviewer can drop one note,
+// pick one element, or reach the page's buttons for a moment. Letting go puts the mode
+// back, and a shortcut, a scroll, another modifier or a lost release ends the hold at once.
 /** @type {"" | "annotate" | "tune"} */
 let armedMode = "";
 const TAP_MAX_MS = 350;
-/** @type {Record<"Meta" | "Alt", { down: boolean, chord: boolean, at: number }>} */
-const modifierTaps = { Meta: { down: false, chord: false, at: 0 }, Alt: { down: false, chord: false, at: 0 } };
+/** @type {Record<"Meta" | "Alt", { down: boolean, chord: boolean, at: number, timer: number }>} */
+const modifierTaps = {
+  Meta: { down: false, chord: false, at: 0, timer: 0 },
+  Alt: { down: false, chord: false, at: 0, timer: 0 },
+};
+/** The mode a held key switched from, to put back on release. */
+/** @type {null | { name: "Meta" | "Alt", restore: "" | "annotate" | "tune" }} */
+let heldMode = null;
+/** Whether the frames let an Option click through, as they must in a View held by Option. */
+let passOption = false;
 let lastHoverKey = "";
 let hoverFrame = 0;
 let panWheelAt = 0;
@@ -2345,22 +2357,67 @@ function renderModeState() {
   }
 }
 
-/** @param {"" | "annotate" | "tune"} mode turning one mode on turns the other off */
-function setArmedMode(mode) {
+/**
+ * @param {"" | "annotate" | "tune"} mode turning one mode on turns the other off
+ * @param {boolean} [side] bring up the mode's sidebar tab; a hold leaves the tab alone
+ */
+function setArmedMode(mode, side = true) {
   if (armedMode === mode) return;
   armedMode = mode;
   updateGestureMode();
   renderModeState();
-  if (!mode) return;
+  syncPassOption();
+  if (!mode || !side) return;
   // The tab the mode works in comes up, but a closed sidebar stays closed: opening it would
   // slide the board out from under the pointer just as the reviewer goes to click.
   showSideView(MODE_STATE[mode].view, false);
   document.querySelector(".annotate-hint")?.remove();
 }
 
-/** A modifier held through a click, a scroll or another key was a chord, not a tap. */
-function noteChord() {
-  for (const tap of Object.values(modifierTaps)) if (tap.down) tap.chord = true;
+/**
+ * A modifier held through a click, a scroll or another key was a chord, not a tap. A click
+ * is what a hold is for, so it keeps a held mode; anything else ends it.
+ * @param {"key" | "pointer"} [via]
+ */
+function noteChord(via = "key") {
+  for (const tap of Object.values(modifierTaps)) {
+    if (!tap.down) continue;
+    tap.chord = true;
+    window.clearTimeout(tap.timer);
+  }
+  if (via !== "pointer") endHeldMode();
+}
+
+/** @param {"Meta" | "Alt"} name */
+function modeOfKey(name) {
+  return name === "Meta" ? "annotate" : "tune";
+}
+
+/** A lone key still down past a tap switches its mode until it is let go. @param {"Meta" | "Alt"} name */
+function startHeldMode(name) {
+  const tap = modifierTaps[name];
+  if (!tap.down || tap.chord || heldMode) return;
+  const mode = modeOfKey(name);
+  heldMode = { name, restore: armedMode };
+  setArmedMode(armedMode === mode ? "" : mode, false);
+}
+
+/** Put back the mode a hold switched from. */
+function endHeldMode() {
+  if (!heldMode) return;
+  const { restore } = heldMode;
+  heldMode = null;
+  setArmedMode(restore, false);
+  syncPassOption();
+}
+
+/** An Option click must reach the page only in a View that Option itself is holding. */
+function syncPassOption() {
+  const next = heldMode?.name === "Alt" && armedMode === "";
+  if (next === passOption) return;
+  passOption = next;
+  for (const record of state.artboards.values())
+    postToArtboard(record.itemId, record.device.id, { type: "pass-option", on: passOption });
 }
 
 /**
@@ -2377,6 +2434,10 @@ function modifierPressed(name, joined = false, at = performance.now()) {
   tap.down = true;
   tap.chord = others;
   tap.at = at;
+  if (others) return;
+  // Timed from the key's own press, so a frame slow to report it does not stretch the wait.
+  const wait = Math.max(0, TAP_MAX_MS - (performance.now() - at));
+  tap.timer = window.setTimeout(() => startHeldMode(name), wait);
 }
 
 /**
@@ -2392,8 +2453,21 @@ function modifierReleased(name, lost = false, joined = false, at = performance.n
   const lone = tap.down && !tap.chord && !lost && !joined && at - tap.at <= TAP_MAX_MS;
   tap.down = false;
   tap.chord = false;
+  window.clearTimeout(tap.timer);
+  if (heldMode?.name === name) {
+    // A busy frame can report a quick tap's release after the hold began: still a tap.
+    if (!lone) {
+      endHeldMode();
+      return;
+    }
+    // The hold already switched to the mode the tap asks for; keep it and bring up its tab.
+    heldMode = null;
+    syncPassOption();
+    if (armedMode) showSideView(MODE_STATE[armedMode].view, false);
+    return;
+  }
   if (!lone) return;
-  const mode = name === "Meta" ? "annotate" : "tune";
+  const mode = modeOfKey(name);
   setArmedMode(armedMode === mode ? "" : mode);
 }
 
@@ -2451,7 +2525,7 @@ function hintAnnotateOnce(target) {
   writeStorage(annotateHintStorageKey, "seen");
   const hint = element("div", {
     class: "annotate-hint",
-    text: "Tap ⌘ for notes · tap ⌥ to pick an element for Controls · hold Space to pan",
+    text: "Tap ⌘ for notes · tap ⌥ to pick an element for Controls · hold either to switch just while held · hold Space to pan",
   });
   document.body.append(hint);
   window.requestAnimationFrame(() => {
@@ -2573,7 +2647,7 @@ function bindNavigation() {
   };
 
   plane.addEventListener("pointerdown", (event) => {
-    if (event.metaKey || event.altKey) noteChord();
+    if (event.metaKey || event.altKey) noteChord("pointer");
     if (event.target instanceof Element && event.target.closest("button")) return;
     // A press that pans is kept from moving focus, so a name being edited is saved here.
     const editing = document.activeElement;
@@ -7259,7 +7333,7 @@ function onArtboardMessage(event) {
     return;
   }
   if (data.type === "chord") {
-    noteChord();
+    noteChord(data.via === "pointer" ? "pointer" : "key");
     return;
   }
   if (data.type === "mode-off") {
