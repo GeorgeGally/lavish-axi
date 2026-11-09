@@ -2352,10 +2352,22 @@ function renderModeState() {
   if (!badge) return;
   badge.dataset.mode = armedMode;
   for (const word of badge.children) {
-    if (/** @type {any} */ (word).dataset.mode === armedMode) word.setAttribute("aria-current", "true");
+    const on = /** @type {any} */ (word).dataset.mode === armedMode;
+    if (on) word.setAttribute("aria-current", "true");
     else word.removeAttribute("aria-current");
+    word.setAttribute("aria-pressed", String(on));
   }
 }
+
+// Each word in the pill switches to its mode, the same way a tap of its key does.
+document.getElementById("modeState")?.addEventListener("click", (event) => {
+  const word = /** @type {HTMLElement | null} */ (/** @type {Element} */ (event.target).closest?.("button[data-mode]"));
+  if (!word) return;
+  const mode = /** @type {"" | "annotate" | "tune"} */ (word.dataset.mode ?? "");
+  heldMode = null;
+  setArmedMode(mode);
+  syncPassOption();
+});
 
 /**
  * @param {"" | "annotate" | "tune"} mode turning one mode on turns the other off
