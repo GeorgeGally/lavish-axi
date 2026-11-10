@@ -536,8 +536,17 @@ function explainHeight(group, width, size) {
   return measure.offsetHeight;
 }
 
+// A frame taller than the GPU's largest texture once zoomed blanks the whole canvas in
+// headed Chrome, so a frame never grows past what 100% on this screen can draw. Mirrors
+// maxFrameHeight in src/board-geometry.js, where the rule is tested.
+const MAX_LAYER_PX = 16384;
+function maxFrameHeight() {
+  const ratio = Number.isFinite(window.devicePixelRatio) && window.devicePixelRatio > 1 ? window.devicePixelRatio : 1;
+  return Math.floor(MAX_LAYER_PX / ratio);
+}
+
 function contentHeight(itemId, device) {
-  return state.heights.get(artboardKey(itemId, device.id)) || device.height;
+  return Math.min(state.heights.get(artboardKey(itemId, device.id)) || device.height, maxFrameHeight());
 }
 
 function artboardSize(itemId, device, framed) {
@@ -1635,7 +1644,7 @@ window.addEventListener("message", (event) => {
   if (!frame) return;
   if (data.type === "stylesheet") sendStylesheet(frame, frame.itemId, String(data.href || ""));
   if (data.type !== "size") return;
-  const height = clamp(Math.round(Number(data.height) || 0), 0, 30000);
+  const height = clamp(Math.round(Number(data.height) || 0), 0, maxFrameHeight());
   if (height > 0 && height !== state.heights.get(frame.key)) {
     state.heights.set(frame.key, height);
     if (!framedView()) scheduleLayout();
@@ -7410,7 +7419,7 @@ function onArtboardMessage(event) {
   }
   if (data.type === "size") {
     // A page that keeps growing as it is measured would drag the whole plane with it.
-    const height = clamp(Math.round(Number(data.height) || 0), 0, 30000);
+    const height = clamp(Math.round(Number(data.height) || 0), 0, maxFrameHeight());
     const id = artboardKey(itemId, deviceId);
     if (height > 0 && height !== state.heights.get(id)) {
       state.heights.set(id, height);

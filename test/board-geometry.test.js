@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { pointInsideArtboard, popoverPosition } from "../src/board-geometry.js";
+import { MAX_LAYER_PX, maxFrameHeight, pointInsideArtboard, popoverPosition } from "../src/board-geometry.js";
 
 test("pointInsideArtboard divides by the artboard scale at every zoom", () => {
   const rect = { left: 40, top: 100 };
@@ -48,4 +48,24 @@ test("popoverPosition stays inside a narrow phone artboard at small scale", () =
   const position = popoverPosition({ left: 1200, top: 56 }, { x: 380, y: 500 }, 0.27, { viewport, card });
   assert.ok(position.left >= 16);
   assert.ok(position.left + card.width <= viewport.width);
+});
+
+// A frame taller than the GPU's largest texture once zoomed vanishes from the board in
+// headed Chrome: a 30000px phone frame at DPR 2 crossed 16384 device px between 23% and 28%.
+test("maxFrameHeight keeps every frame under the GPU texture limit from Fit to 100%", () => {
+  assert.equal(MAX_LAYER_PX, 16384);
+  for (const dpr of [1, 1.25, 1.5, 2, 3]) {
+    const cap = maxFrameHeight(dpr);
+    assert.ok(cap >= 4096, `a frame keeps a usable height at DPR ${dpr}`);
+    for (const zoom of [0.02, 0.1, 0.23, 0.273, 0.2875, 0.5, 0.75, 1]) {
+      assert.ok(cap * zoom * dpr <= MAX_LAYER_PX, `${cap}px at zoom ${zoom}, DPR ${dpr}`);
+    }
+  }
+  assert.ok(30000 * 0.2875 * 2 > MAX_LAYER_PX, "the old 30000px cap broke past 27% at DPR 2");
+});
+
+test("maxFrameHeight treats a missing or tiny pixel ratio as 1", () => {
+  assert.equal(maxFrameHeight(0), maxFrameHeight(1));
+  assert.equal(maxFrameHeight(Number.NaN), maxFrameHeight(1));
+  assert.equal(maxFrameHeight(0.5), maxFrameHeight(1));
 });

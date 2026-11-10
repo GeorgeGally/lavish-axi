@@ -41,3 +41,20 @@ export function popoverPosition(iframeRect, anchor, scale, bounds) {
       );
   return { left, top, flipped: !below };
 }
+
+// The largest texture Chrome's GPU compositor draws in one piece. A frame whose zoomed
+// height passes it vanishes from the board in headed Chrome, taking the whole canvas
+// with it, so frame heights are capped to stay under it at 100% on this screen.
+export const MAX_LAYER_PX = 16384;
+
+/**
+ * The tallest a frame may grow, in CSS px, so it stays under MAX_LAYER_PX at every zoom
+ * from Fit to 100% on a screen with this pixel ratio. A taller page scrolls inside it.
+ * Mirrored by `maxFrameHeight` in src/board-client.js, which is served raw.
+ * @param {number} devicePixelRatio
+ * @returns {number}
+ */
+export function maxFrameHeight(devicePixelRatio) {
+  const ratio = Number.isFinite(devicePixelRatio) && devicePixelRatio > 1 ? devicePixelRatio : 1;
+  return Math.floor(MAX_LAYER_PX / ratio);
+}
