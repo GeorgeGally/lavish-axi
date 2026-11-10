@@ -119,6 +119,7 @@ import {
   validateDevConfig,
 } from "./project.js";
 import { crawlDevServer, discoverRoutes, fetchLocal, mergePages } from "./project-pages.js";
+import { watchProjectTree } from "./project-watch.js";
 import {
   bindHost,
   extraAllowedHosts,
@@ -2678,7 +2679,7 @@ export async function serve({
    *   key: string, root: string, boardFile: string,
    *   config: { command: string, port: number, proxyPort: number } | null,
    *   dev: ReturnType<typeof createDevServer>, proxy: ReturnType<typeof createLiveProxy>,
-   *   origin: string, watcher: import("chokidar").FSWatcher | null,
+   *   origin: string, watcher: ReturnType<typeof watchProjectTree> | null,
    *   sourceTimer: ReturnType<typeof setTimeout> | null, broadcastTimer: ReturnType<typeof setTimeout> | null,
    *   lastStatus: string, userStopped: boolean, issue: string,
    *   staticServer: ReturnType<typeof createStaticServer> | null, reusedPort: number,
@@ -2689,8 +2690,6 @@ export async function serve({
   /** @type {Map<string, Promise<LiveProject>>} */
   const projects = new Map();
   let projectsClosed = Promise.resolve();
-  const PROJECT_SOURCE_IGNORED =
-    /(^|[\\/])(node_modules|\.git|\.liesel|\.next|\.nuxt|\.output|\.svelte-kit|\.astro|\.turbo|\.cache|\.vercel|dist|build|coverage|out)([\\/]|$)/;
 
   /** @param {any} session */
   function projectRootOfSession(session) {
@@ -2945,28 +2944,20 @@ export async function serve({
 
   // A saved source file is how the board knows a live page may have changed: the page
   // itself hot-reloads through the proxy, and a page that does not is reloaded by the board.
+  // The watch is bounded (src/project-watch.js) and set up after the request that created
+  // the project returns, so a huge repository can never stall or starve the server.
   /** @param {LiveProject} project */
   function watchProjectSource(project) {
-    try {
-      const watcher = chokidar.watch(project.root, {
-        ignoreInitial: true,
-        ignored: (file) => PROJECT_SOURCE_IGNORED.test(path.relative(project.root, file)),
-        depth: 12,
-      });
-      watcher.on("all", (_event, file) => {
+    project.watcher = watchProjectTree(project.root, {
+      onChange: (file) => {
         if (project.sourceTimer) clearTimeout(project.sourceTimer);
         project.sourceTimer = setTimeout(() => {
           project.sourceTimer = null;
-          broadcastLiveEvent("project-source", project.key, { file: path.relative(project.root, String(file || "")) });
+          broadcastLiveEvent("project-source", project.key, { file });
         }, 300);
-      });
-      watcher.on("error", (error) =>
-        logEvent?.(`project watch error key=${project.key}: ${error instanceof Error ? error.message : error}`),
-      );
-      project.watcher = watcher;
-    } catch (error) {
-      writeLog(`[liesel] project watch failed key=${project.key}: ${error instanceof Error ? error.message : error}`);
-    }
+      },
+      onLog: (message) => writeLog(`[liesel] ${message} key=${project.key}`),
+    });
   }
 
   /** @param {LiveProject} project */
