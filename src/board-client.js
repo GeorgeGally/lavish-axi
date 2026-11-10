@@ -2292,7 +2292,7 @@ let spaceHeld = false;
 // or the other mode to its own, from its own back to View, so a reviewer can drop one note,
 // pick one element, or reach the page's buttons for a moment. Letting go puts the mode
 // back, and a shortcut, a scroll, another modifier or a lost release ends the hold at once.
-/** @type {"" | "annotate" | "tune"} */
+/** @type {"" | "annotate" | "tune" | "move"} */
 let armedMode = "";
 const TAP_MAX_MS = 350;
 /** @type {Record<"Meta" | "Alt", { down: boolean, chord: boolean, at: number, timer: number }>} */
@@ -2301,7 +2301,7 @@ const modifierTaps = {
   Alt: { down: false, chord: false, at: 0, timer: 0 },
 };
 /** The mode a held key switched from, to put back on release. */
-/** @type {null | { name: "Meta" | "Alt", restore: "" | "annotate" | "tune" }} */
+/** @type {null | { name: "Meta" | "Alt", restore: "" | "annotate" | "tune" | "move" }} */
 let heldMode = null;
 /** Whether the frames let an Option click through, as they must in a View held by Option. */
 let passOption = false;
@@ -2312,10 +2312,11 @@ let panWheelAt = 0;
 /** @type {null | { x: number, y: number }} */
 let lastPointer = null;
 
-// Four gestures own the pointer over a design, one at a time: Space held pans, the
-// controls selector (Option) tunes, notes (Cmd) annotate, and with none of them the
-// click belongs to the page. The shield is the only surface the board has over a frame,
-// so every one of the three armed gestures raises it, and none can leak into another.
+// Five gestures own the pointer over a design, one at a time: Space held pans, the
+// controls selector (Option) tunes, notes (Cmd) annotate, Move (from the pill) drags an
+// element, and with none of them the click belongs to the page. The shield is the only
+// surface the board has over a frame, so every armed gesture raises it, and none can
+// leak into another.
 function gestureMode() {
   if (spaceHeld) return "hand";
   return armedMode;
@@ -2333,17 +2334,21 @@ function tuneArmed() {
   return gestureMode() === "tune";
 }
 
+function moveArmed() {
+  return gestureMode() === "move";
+}
+
 function updateGestureMode() {
   const mode = gestureMode();
   document.body.dataset.gesture = mode;
   document.body.dataset.pan = String(mode === "hand");
   document.body.dataset.notes = String(armedMode === "annotate");
   document.body.dataset.controls = String(armedMode === "tune");
-  if (mode === "annotate" || mode === "tune") hoverUnderPointer();
+  if (mode === "annotate" || mode === "tune" || mode === "move") hoverUnderPointer();
   else clearHover();
 }
 
-/** @type {Record<"annotate" | "tune", { text: string, view: "chat" | "controls" }>} */
+/** @type {Record<"annotate" | "tune" | "move", { text: string, view: "chat" | "controls" }>} */
 const MODE_STATE = {
   annotate: {
     text: "Chat",
@@ -2351,6 +2356,11 @@ const MODE_STATE = {
   },
   tune: {
     text: "Edit",
+    view: "controls",
+  },
+  // A move is an element change like an Edit one, so it is sent from Controls.
+  move: {
+    text: "Move",
     view: "controls",
   },
 };
@@ -2372,14 +2382,14 @@ function renderModeState() {
 document.getElementById("modeState")?.addEventListener("click", (event) => {
   const word = /** @type {HTMLElement | null} */ (/** @type {Element} */ (event.target).closest?.("button[data-mode]"));
   if (!word) return;
-  const mode = /** @type {"" | "annotate" | "tune"} */ (word.dataset.mode ?? "");
+  const mode = /** @type {"" | "annotate" | "tune" | "move"} */ (word.dataset.mode ?? "");
   heldMode = null;
   setArmedMode(mode);
   syncPassOption();
 });
 
 /**
- * @param {"" | "annotate" | "tune"} mode turning one mode on turns the other off
+ * @param {"" | "annotate" | "tune" | "move"} mode turning one mode on turns the others off
  * @param {boolean} [side] bring up the mode's sidebar tab; a hold leaves the tab alone
  */
 function setArmedMode(mode, side = true) {
@@ -2567,7 +2577,8 @@ function pointInFrame(record, clientX, clientY) {
 
 function postHit(record, payload) {
   const tune = payload.hover && tuneArmed() ? { tune: true, depth: tuneDepth } : {};
-  postToArtboard(record.itemId, record.device.id, { type: "hit", ...payload, ...tune });
+  const move = payload.hover && moveArmed() ? { move: true } : {};
+  postToArtboard(record.itemId, record.device.id, { type: "hit", ...payload, ...tune, ...move });
 }
 
 /** Moving the pointer to something else starts the selector back at what is under it. */
@@ -2700,6 +2711,16 @@ function bindNavigation() {
       openTargetTune(record, pointInFrame(record, event.clientX, event.clientY));
       return;
     }
+    // Move owns the press too: it grabs the element under the pointer and the drag moves it.
+    if (record && moveArmed() && event.button === 0) {
+      event.preventDefault();
+      suppressClick = true;
+      clearHover();
+      plane.setPointerCapture(event.pointerId);
+      document.body.dataset.grabbing = "true";
+      startMove(record, event);
+      return;
+    }
     const onShield = Boolean(record);
     const pan = event.button === 1 || (event.button === 0 && (panModeActive() || !onShield));
     suppressClick = pan && onShield;
@@ -2734,6 +2755,10 @@ function bindNavigation() {
         samples.push({ x: event.clientX, y: event.clientY, t: performance.now() });
         if (samples.length > 6) samples.shift();
       }
+    }
+    if (moveDrag && event.pointerId === moveDrag.pointerId) {
+      dragMove(event.clientX, event.clientY);
+      return;
     }
     if (drag && event.pointerId === drag.id) {
       const dx = event.clientX - drag.x;
@@ -2807,6 +2832,11 @@ function bindNavigation() {
       else saveCamera();
       return;
     }
+    if (moveDrag && event.pointerId === moveDrag.pointerId) {
+      document.body.dataset.grabbing = "false";
+      endMove(event.type === "pointerup");
+      return;
+    }
     if (!drag || event.pointerId !== drag.id) return;
     drag = null;
     document.body.dataset.grabbing = "false";
@@ -2834,7 +2864,7 @@ function bindNavigation() {
     clearTimeout(clickTimer);
     // A drag or a tune click is not a zoom, and swallowing the double-click keeps the
     // four gestures exclusive.
-    if (gestureMode() === "hand" || gestureMode() === "tune") return;
+    if (gestureMode() === "hand" || gestureMode() === "tune" || gestureMode() === "move") return;
     event.preventDefault();
     if (annotateArmed() && recordForShield(event.target)) toggleActual(event.clientX, event.clientY);
     else {
@@ -5059,6 +5089,157 @@ function selectTuneElement(selector) {
   tuneTarget = { itemId, deviceId, pending: true };
   renderTune();
   postToArtboard(itemId, deviceId, { type: "tune-element", selector });
+}
+
+/*
+ * Move: a drag over a design moves the element under the pointer by a CSS translate,
+ * saved and undone like any other element change, so the file itself stays as it was
+ * and History keeps the original. When the drag ends, the moved element loads into
+ * Controls, where Send hands the move to the agent as a tune note.
+ */
+/** @type {null | { record: any, pointerId: number, x: number, y: number, scale: number, dx: number, dy: number, moved: boolean, picked: boolean, released: boolean, selector: string, base: string[] }} */
+let moveDrag = null;
+
+/** @param {any} record @param {PointerEvent} event */
+function startMove(record, event) {
+  const rect = record.iframe.getBoundingClientRect();
+  moveDrag = {
+    record,
+    pointerId: event.pointerId,
+    x: event.clientX,
+    y: event.clientY,
+    scale: rect.width / record.device.width || state.camera.zoom,
+    dx: 0,
+    dy: 0,
+    moved: false,
+    picked: false,
+    released: false,
+    selector: "",
+    base: [],
+  };
+  postToArtboard(record.itemId, record.device.id, {
+    type: "move-pick",
+    ...pointInFrame(record, event.clientX, event.clientY),
+  });
+}
+
+/** The frame says what the press grabbed and where it already sits. @param {any} record @param {any} data */
+function onMovePicked(record, data) {
+  const drag = moveDrag;
+  if (!drag || drag.picked || drag.record !== record) return;
+  drag.picked = true;
+  drag.selector = String(data.selector || "");
+  drag.base = splitCssList(String(data.translate || ""));
+  if (!drag.selector) {
+    moveDrag = null;
+    return;
+  }
+  if (drag.released) finishMove(drag);
+  else if (drag.moved) previewMove(drag);
+}
+
+/** @param {number} clientX @param {number} clientY */
+function dragMove(clientX, clientY) {
+  const drag = moveDrag;
+  if (!drag || drag.released) return;
+  if (!drag.moved && Math.hypot(clientX - drag.x, clientY - drag.y) < 3) return;
+  drag.moved = true;
+  drag.dx = (clientX - drag.x) / drag.scale;
+  drag.dy = (clientY - drag.y) / drag.scale;
+  if (drag.picked) previewMove(drag);
+}
+
+/** @param {boolean} keep a release keeps the move, a cancelled pointer takes it back */
+function endMove(keep) {
+  const drag = moveDrag;
+  if (!drag) return;
+  if (!keep || !drag.moved) {
+    moveDrag = null;
+    if (drag.picked && drag.moved) refreshElementStyle(drag.record.itemId, drag.selector, "translate");
+    return;
+  }
+  drag.released = true;
+  // A frame slow to say what was grabbed finishes the move when it answers.
+  if (drag.picked) finishMove(drag);
+}
+
+/** @param {NonNullable<typeof moveDrag>} drag */
+function previewMove(drag) {
+  const { itemId, device } = drag.record;
+  postToArtboard(itemId, device.id, {
+    type: "style",
+    selector: drag.selector,
+    css: "translate",
+    value: movedTranslate(drag),
+  });
+}
+
+/** @param {NonNullable<typeof moveDrag>} drag */
+function finishMove(drag) {
+  moveDrag = null;
+  const { record, selector } = drag;
+  const itemId = record.itemId;
+  const deviceId = record.device.id;
+  const after = movedTranslate(drag);
+  const before = savedElementValue(itemId, selector, "translate");
+  if (after === before) return;
+  endTuneEdit();
+  persistElementTune({ itemId, selector, css: "translate", value: after });
+  refreshElementStyle(itemId, selector, "translate");
+  tuneUndo.push({ itemId, deviceId, changes: [{ selector, css: "translate", before, after }] });
+  tuneRedo = [];
+  openSelectorTune(record, selector);
+}
+
+/** The translate a drag ends on: where the element sat, plus how far it was dragged. @param {NonNullable<typeof moveDrag>} drag */
+function movedTranslate(drag) {
+  const [x = "0px", y = "0px", ...rest] = drag.base;
+  return [offsetCss(x, drag.dx), offsetCss(y, drag.dy), ...rest].join(" ");
+}
+
+/** @param {string} value a translate component @param {number} delta px */
+function offsetCss(value, delta) {
+  const step = Math.round(delta);
+  const px = /^(-?[\d.]+)px$/.exec(value);
+  if (px) return `${Math.round(Number(px[1])) + step}px`;
+  const summed = /^calc\((.+) \+ (-?\d+)px\)$/.exec(value);
+  if (summed) {
+    const total = Number(summed[2]) + step;
+    return total ? `calc(${summed[1]} + ${total}px)` : summed[1];
+  }
+  return step ? `calc(${value} + ${step}px)` : value;
+}
+
+/** A computed list split on its top-level spaces, so a calc() stays whole. @param {string} value */
+function splitCssList(value) {
+  if (!value || value === "none") return [];
+  const parts = [];
+  let depth = 0;
+  let current = "";
+  for (const char of value.trim()) {
+    if (char === "(") depth += 1;
+    if (char === ")") depth -= 1;
+    if (char === " " && depth === 0) {
+      if (current) parts.push(current);
+      current = "";
+    } else current += char;
+  }
+  if (current) parts.push(current);
+  return parts;
+}
+
+/** Load one element of a frame into Controls by its selector. @param {any} record @param {string} selector */
+function openSelectorTune(record, selector) {
+  outlineInFrame("");
+  tuneTarget = { itemId: record.itemId, deviceId: record.device.id, pending: true };
+  tuneOrigin = [];
+  tuneItemId = record.itemId;
+  tuneDeviceId = record.device.id;
+  showTuneLoaded(true);
+  showSideView("controls");
+  markTuneSent(false);
+  renderTune();
+  postToArtboard(record.itemId, record.device.id, { type: "tune-element", selector });
 }
 
 /**
@@ -7471,6 +7652,10 @@ function onArtboardMessage(event) {
       syncTargetValues(tuneTarget);
       renderTune();
     }
+    return;
+  }
+  if (data.type === "move-pick") {
+    onMovePicked(record, data);
     return;
   }
   if (data.type === "tune-depth") {

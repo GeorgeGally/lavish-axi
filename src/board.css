@@ -326,7 +326,8 @@ textarea:focus-visible {
   display: none;
 }
 
-/* Which mode the pointer is in, always in view just under the top bar. */
+/* Which mode the pointer is in, always in view just under the top bar, centred over the
+   board that is left in view: the window, or the part beside an open sidebar. */
 .mode-state {
   position: fixed;
   left: 50%;
@@ -342,6 +343,11 @@ textarea:focus-visible {
   letter-spacing: 0.01em;
   white-space: nowrap;
   transform: translateX(-50%);
+  transition: left 280ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+body[data-panel="open"] .mode-state {
+  left: calc((100% - var(--panel-width)) / 2);
 }
 
 .mode-state button {
@@ -673,7 +679,7 @@ body[data-pan="true"] .shield {
 }
 
 /* The shield only hears the pointer while a gesture is armed (notes, the controls
-   selector or the hand); the rest of the time it stays out of the way so the page inside the frame takes its own clicks and scrolling. */
+   selector, move or the hand); the rest of the time it stays out of the way so the page inside the frame takes its own clicks and scrolling. */
 .shield {
   position: absolute;
   inset: 0;
@@ -684,6 +690,7 @@ body[data-pan="true"] .shield {
 
 body[data-gesture="annotate"] .shield,
 body[data-gesture="tune"] .shield,
+body[data-gesture="move"] .shield,
 body[data-gesture="hand"] .shield {
   pointer-events: auto;
 }
@@ -694,6 +701,10 @@ body[data-gesture="annotate"] .shield {
 
 body[data-gesture="tune"] .shield {
   cursor: cell;
+}
+
+body[data-gesture="move"] .shield {
+  cursor: move;
 }
 
 /* A file over the board belongs to the frames under it, not to the shield. */
@@ -2591,6 +2602,11 @@ body[data-dragging="true"] .shield {
 @media (max-width: 760px) {
   :root {
     --panel-width: 100vw;
+  }
+
+  /* The sidebar covers the whole width, so there is no board beside it to centre on. */
+  body[data-panel="open"] .mode-state {
+    left: 50%;
   }
 
   .board-name {

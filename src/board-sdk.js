@@ -1368,6 +1368,22 @@
     if (groupOutline) drawGroupOutline();
   });
 
+  /**
+   * What a Move drag at a point takes hold of: the element under it, or the nearest box
+   * around it when that is inline text a translate cannot move. Never the page itself.
+   * @param {number} x @param {number} y
+   */
+  function movablePick(x, y) {
+    let node = Number.isFinite(x) && Number.isFinite(y) ? document.elementFromPoint(x, y) : null;
+    while (node instanceof Element && node !== document.body && node !== document.documentElement) {
+      if (node.closest("[data-liesel-ui]")) return null;
+      const display = getComputedStyle(node).display;
+      if (display !== "inline" && display !== "contents") return node;
+      node = node.parentElement;
+    }
+    return null;
+  }
+
   /** What the board tunes when a controls-selector click lands on a point in the page. */
   function reportTuneTarget(x, y, depth = 0) {
     const { element, leaf } = tunePick(x, y, depth);
@@ -1558,6 +1574,18 @@
         reportTuneSelector(String(data.selector || ""));
         return;
       }
+      if (data.type === "move-pick") {
+        // Where the grabbed element already sits, its saved move included, so a second
+        // drag carries on from there.
+        const element = movablePick(Number(data.x), Number(data.y));
+        drawHover(null);
+        post({
+          type: "move-pick",
+          selector: element ? selectorFor(element) : "",
+          translate: element ? getComputedStyle(element).translate : "",
+        });
+        return;
+      }
       if (data.type === "style") {
         applyElementStyle(String(data.selector || ""), String(data.css || ""), String(data.value ?? ""));
         return;
@@ -1582,6 +1610,10 @@
         // Empty page background still takes a note: it is about that part of the page.
         const usable =
           target instanceof Element && !target.closest("[data-liesel-ui]") && target !== document.documentElement;
+        if (data.hover && data.move) {
+          drawHover(movablePick(x, y));
+          return;
+        }
         if (data.hover && data.tune) {
           // The controls selector outlines what a click would pick, the whole page included,
           // and says how far up it could go so the board's Up and Down keys stay in range.

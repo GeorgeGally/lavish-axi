@@ -165,9 +165,9 @@ test(
             "words:" + badge.textContent,
           ].join(" ");
         })()`);
-      const off = "notes:false controls:false badge::View words:ViewChatEdit";
-      const notesOn = "notes:true controls:false badge:annotate:Chat words:ViewChatEdit";
-      const controlsOn = "notes:false controls:true badge:tune:Edit words:ViewChatEdit";
+      const off = "notes:false controls:false badge::View words:ViewChatEditMove";
+      const notesOn = "notes:true controls:false badge:annotate:Chat words:ViewChatEditMove";
+      const controlsOn = "notes:false controls:true badge:tune:Edit words:ViewChatEditMove";
 
       /** Where an element of the desktop design sits on the board's screen. */
       async function pointInDesign(selector) {
