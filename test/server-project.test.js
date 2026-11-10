@@ -244,6 +244,39 @@ test("a dev server that dies is started again by itself", async (t) => {
   await post(base, `/api/boards/${key}/project/stop`, {});
 });
 
+test("a frame left open across a Liesel restart starts the project's server instead of spinning forever", async (t) => {
+  const { base, dir, repo, marker } = await setup(t);
+  const { body: opened } = await post(base, "/api/projects", { path: repo });
+  await waitFor(async () => {
+    const view = await fetch(`${base}/api/boards/${opened.key}/project`).then((response) => response.json());
+    return view.dev.status === "running" ? view : null;
+  });
+  await post(base, `/api/boards/${opened.key}/project/stop`, {});
+  await rm(marker, { force: true });
+  // A new Liesel on the same state: the board page is not reopened, so nothing asks it to start.
+  const next = await serve({
+    port: 0,
+    stateFile: path.join(dir, "state.json"),
+    version: "9.9.9-test",
+    detectTailscale: async () => null,
+    idleTimeoutMs: null,
+    env: { ...process.env, FAKE_DEV_MARKER: marker, LIESEL_NOTIFY_CMD: "" },
+    log: () => {},
+  });
+  const nextBase = `http://127.0.0.1:${next.port}`;
+  t.after(async () => {
+    await post(nextBase, `/api/boards/${opened.key}/project/stop`, {}).catch(() => null);
+    await next.close();
+  });
+  const idle = await fetch(`${nextBase}/api/boards/${opened.key}/project`).then((response) => response.json());
+  assert.equal(idle.dev.status, "stopped");
+  const page = await waitFor(async () => {
+    const text = await fetch(`${idle.proxy}/`).then((response) => response.text());
+    return /Shop \//.test(text) ? text : null;
+  });
+  assert.match(page, /<h1 id=title>Shop \/<\/h1>/, "the open frame's own refresh got the server going");
+});
+
 test("a server already running from the repo is reused, and replaced when it goes away", async (t) => {
   const { base, repo, marker } = await setup(t);
   const { spawn } = await import("node:child_process");

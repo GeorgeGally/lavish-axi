@@ -2346,7 +2346,7 @@ function updateGestureMode() {
 /** @type {Record<"annotate" | "tune", { text: string, view: "chat" | "controls" }>} */
 const MODE_STATE = {
   annotate: {
-    text: "Discuss",
+    text: "Chat",
     view: "chat",
   },
   tune: {

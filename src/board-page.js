@@ -80,7 +80,7 @@ export function createBoardHtml(
 <link rel="stylesheet" href="/dialkit/styles.css">
 </head>
 <body>
-<div class="mode-state" id="modeState" role="group" aria-label="Mode"><button type="button" data-mode="" aria-current="true" aria-pressed="true">View</button><button type="button" data-mode="annotate" aria-pressed="false">Discuss</button><button type="button" data-mode="tune" aria-pressed="false">Edit</button></div>
+<div class="mode-state" id="modeState" role="group" aria-label="Mode"><button type="button" data-mode="" aria-current="true" aria-pressed="true">View</button><button type="button" data-mode="annotate" aria-pressed="false">Chat</button><button type="button" data-mode="tune" aria-pressed="false">Edit</button></div>
 <header class="bar">
   <a class="brand" href="/" title="All boards">${PRODUCT_NAME}</a>
   <button class="icon-button new-toggle" id="newToggle" type="button" popovertarget="newMenu" aria-label="New board or project" title="New board or project">

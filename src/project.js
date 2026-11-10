@@ -854,6 +854,7 @@ export function liveFallbackHtml({ title, message, sdkSrc, busy = false, action 
  *   reservedPorts?: () => number[],
  *   onAnswer?: () => void,
  *   onUnreachable?: (port: number) => void,
+ *   onIdle?: () => void,
  *   statusMessage?: () => { title: string, message: string, busy?: boolean, action?: "restart" | "start" | "settings" | "" },
  * }} options
  */
@@ -863,6 +864,7 @@ export function createLiveProxy({
   reservedPorts = () => [],
   onAnswer = () => {},
   onUnreachable = () => {},
+  onIdle = () => {},
   statusMessage,
 }) {
   let origin = "";
@@ -915,6 +917,8 @@ export function createLiveProxy({
     }
     const port = target();
     if (!port) {
+      // A frame asking with nothing behind it is the board open: get a server going.
+      onIdle();
       const status = statusMessage?.() || {
         title: "No dev server",
         message: "Start the project's dev server from the board.",

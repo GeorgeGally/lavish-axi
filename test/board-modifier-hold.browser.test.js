@@ -166,7 +166,7 @@ test(
       await sleep(300);
       assert.equal(await mode(), "view");
 
-      // From View: holding Cmd is Discuss while held, and a click under it leaves a note.
+      // From View: holding Cmd is Chat while held, and a click under it leaves a note.
       await hold("Meta");
       assert.equal(await mode(), "annotate", "holding Cmd turns notes on while held");
       await up("Meta");
@@ -187,7 +187,7 @@ test(
       await up("Alt");
       assert.equal(await mode(), "view", "letting Option go returns to View");
 
-      // From Discuss: holding Cmd hands the page back while held, its buttons included.
+      // From Chat: holding Cmd hands the page back while held, its buttons included.
       const button = await pointInDesign("#press");
       await tap("Meta");
       assert.equal(await mode(), "annotate", "a tap still latches notes on");
@@ -196,11 +196,11 @@ test(
       assert.equal(await presses(), before, "with notes on a click never reaches the page");
       await press("Escape", "Escape");
       await hold("Meta");
-      assert.equal(await mode(), "view", "holding Cmd in Discuss is View while held");
+      assert.equal(await mode(), "view", "holding Cmd in Chat is View while held");
       await click(button.x, button.y);
       assert.equal(await presses(), before + 1, "the page's own button takes the held click");
       await up("Meta");
-      assert.equal(await mode(), "annotate", "letting Cmd go returns to Discuss");
+      assert.equal(await mode(), "annotate", "letting Cmd go returns to Chat");
 
       // From Edit: holding Option hands the page back too, and Option never eats the click.
       await tap("Alt");

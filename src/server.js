@@ -2760,6 +2760,13 @@ export async function serve({
           project.reusedPort = 0;
           void launchProject(project, { reuse: false });
         },
+        // A frame left open across a Liesel restart never asks the board's auto start again,
+        // so its own refresh starts the server; a Stop, a give-up or a setup issue holds.
+        onIdle: () => {
+          if (project.userStopped || project.gaveUp || project.issue || project.launching) return;
+          if (project.dev.running() || project.staticServer || project.reusedPort) return;
+          void launchProject(project);
+        },
         statusMessage: () => liveStatusMessage(project),
       });
       project.origin = await project.proxy.listen(config?.proxyPort || 0);

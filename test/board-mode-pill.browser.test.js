@@ -107,8 +107,8 @@ test(
       await send("Page.navigate", { url });
       await sleep(2500);
       assert.equal(await state(), "view:View");
-      await clickWord("Discuss");
-      assert.equal(await state(), "annotate:Discuss");
+      await clickWord("Chat");
+      assert.equal(await state(), "annotate:Chat");
       await clickWord("Edit");
       assert.equal(await state(), "tune:Edit");
       await clickWord("View");
