@@ -8,6 +8,8 @@
   const TONE_LIGHTNESS = [15, 32, 50, 68, 85];
   // Below this a hue turn is invisible, so the turns borrow a colour that shows.
   const MIN_VISIBLE_SATURATION = 45;
+  const MAX_SITE_SWATCHES = 24;
+  const VARIABLE_NAME = /^--[\w-]{1,80}$/;
 
   /** `#rrggbb`, or "" for anything that is not a hex colour. @param {unknown} value */
   function normalizeHex(value) {
@@ -65,5 +67,31 @@
     };
   }
 
-  return { normalizeHex, hexToHsl, hslToHex, harmonySwatches };
+  /**
+   * The site colours a frame reported, as swatches: each a `#rrggbb`, with the custom
+   * property behind it when there is one. One per hex, capped, junk dropped.
+   * @param {unknown} value
+   * @returns {{ hex: string, name?: string }[]}
+   */
+  function normalizePalette(value) {
+    if (!Array.isArray(value)) return [];
+    /** @type {Map<string, { hex: string, name?: string }>} */
+    const byHex = new Map();
+    for (const entry of value) {
+      if (byHex.size >= MAX_SITE_SWATCHES) break;
+      const hex = normalizeHex(entry?.hex);
+      if (!hex || byHex.has(hex)) continue;
+      const name = String(entry?.name ?? "");
+      byHex.set(hex, VARIABLE_NAME.test(name) ? { hex, name } : { hex });
+    }
+    return [...byHex.values()];
+  }
+
+  /** The custom property a value is exactly `var(--name)` of, or "". @param {unknown} value */
+  function variableOf(value) {
+    const match = /^var\(\s*(--[\w-]+)\s*\)$/.exec(String(value ?? "").trim());
+    return match && VARIABLE_NAME.test(match[1]) ? match[1] : "";
+  }
+
+  return { normalizeHex, hexToHsl, hslToHex, harmonySwatches, normalizePalette, variableOf };
 })();

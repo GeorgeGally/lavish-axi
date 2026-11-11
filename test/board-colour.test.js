@@ -3,7 +3,9 @@ import test from "node:test";
 
 import "../src/board-colour.js";
 
-const { normalizeHex, hexToHsl, hslToHex, harmonySwatches } = /** @type {any} */ (globalThis).LieselColour;
+const { normalizeHex, hexToHsl, hslToHex, harmonySwatches, normalizePalette, variableOf } = /** @type {any} */ (
+  globalThis
+).LieselColour;
 
 test("normalizeHex accepts what a person types and refuses the rest", () => {
   assert.equal(normalizeHex("#AABBCC"), "#aabbcc");
@@ -48,4 +50,28 @@ test("a grey, black or white still offers five different colours", () => {
     assert.equal(new Set(harmonySwatches(hsl).hues).size, 5, JSON.stringify(hsl));
     assert.equal(new Set(harmonySwatches(hsl).tones).size, 5, JSON.stringify(hsl));
   }
+});
+
+test("a site palette keeps one swatch per hex, named only by a real custom property", () => {
+  assert.deepEqual(
+    normalizePalette([
+      { hex: "#B95546", name: "--brand" },
+      { hex: "#b95546", name: "--brand-copy" },
+      { hex: "fff" },
+      { hex: "red", name: "--named" },
+      { hex: "#222222", name: "brand; color: red" },
+      null,
+    ]),
+    [{ hex: "#b95546", name: "--brand" }, { hex: "#ffffff" }, { hex: "#222222" }],
+  );
+  assert.deepEqual(normalizePalette("nope"), []);
+  const many = Array.from({ length: 40 }, (_, index) => ({ hex: `#0000${index.toString(16).padStart(2, "0")}` }));
+  assert.equal(normalizePalette(many).length, 24);
+});
+
+test("variableOf names the token a value is exactly var() of", () => {
+  assert.equal(variableOf("var(--brand)"), "--brand");
+  assert.equal(variableOf(" var( --ink-2 ) "), "--ink-2");
+  for (const other of ["#b95546", "var(--a, red)", "calc(var(--a))", "", undefined])
+    assert.equal(variableOf(other), "");
 });

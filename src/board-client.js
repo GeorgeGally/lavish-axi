@@ -68,6 +68,8 @@ const state = {
   heights: loadHeights(),
   /** @type {Map<string, any[]>} */
   autoSpecs: new Map(),
+  /** @type {Map<string, { hex: string, name?: string }[]>} each page item's own colours, for the colour swatches */
+  autoPalettes: new Map(),
   /** @type {any} */
   layout: null,
 };
@@ -4822,7 +4824,7 @@ let tuneDeviceId = "";
  * What a controls-selector click last landed on: its selectors, its own controls and their live values.
  * Inherited groups are the elements it sits in that set something it inherits, nearest first.
  * @typedef {{ selector: string, label: string, controls: any[], values: Record<string, string> }} InheritedGroup
- * @type {null | { itemId: string, deviceId: string, selector?: string, sectionSelector?: string, label?: string, sectionLabel?: string, parentSelector?: string, parentLabel?: string, controls?: any[], values?: Record<string, string>, inherited?: InheritedGroup[], crumbs?: { selector: string, label: string }[], like?: null | { selector: string, count: number, stable?: boolean }, scope?: "one" | "all", sizes?: "all" | "one", error?: string, pending?: boolean, source?: any }}
+ * @type {null | { itemId: string, deviceId: string, selector?: string, sectionSelector?: string, label?: string, sectionLabel?: string, parentSelector?: string, parentLabel?: string, controls?: any[], values?: Record<string, string>, inherited?: InheritedGroup[], crumbs?: { selector: string, label: string }[], like?: null | { selector: string, count: number, stable?: boolean }, scope?: "one" | "all", sizes?: "all" | "one", error?: string, pending?: boolean, source?: any, palette?: { hex: string, name?: string }[] }}
  */
 let tuneTarget = null;
 /**
@@ -6124,6 +6126,19 @@ function changeTarget(selector) {
 }
 
 /**
+ * A value the reviewer set to one of the site's own colour tokens: the change record
+ * names that token, so the agent writes `var(--name)` rather than its hex.
+ * @param {any} item @param {unknown} value
+ */
+function usesVariable(item, value) {
+  const name = /** @type {any} */ (window).LieselColour.variableOf(value);
+  if (!name) return {};
+  const palette = (tuneTarget ? tuneTarget.palette : state.autoPalettes.get(item.id)) || [];
+  const hex = palette.find((entry) => entry.name === name)?.hex;
+  return { uses_variable: { name, ...(hex ? { value: hex } : {}) } };
+}
+
+/**
  * The change contract: one record per changed property, so the agent edits the source
  * of the value (a variable, a class, a component) instead of pasting the CSS line.
  * The server normalizes these and writes each one's summary line (src/board-changes.js).
@@ -6152,6 +6167,7 @@ function tuneChangeRecords(item) {
         },
         scope: target.scope,
         ...(change.variable ? { variable: change.variable } : {}),
+        ...usesVariable(item, change.after),
         ...(change.fontImport ? { font_import: change.fontImport } : {}),
         frame: { item: item.id, device: device.id, ...(item.page ? { page: item.page } : { file: item.file }) },
         // On a live page: the component and source file that render the picked element.
@@ -6416,10 +6432,18 @@ function renderTune() {
   renderVersions(item, spec);
 }
 
-/** Colour, inline: what it is now, colours worked out from it, sliders and a hex field. */
-function createColourControl(label, initial, apply) {
-  const { normalizeHex, hexToHsl, hslToHex, harmonySwatches } = /** @type {any} */ (window).LieselColour;
-  let current = normalizeHex(initial) || "#000000";
+/**
+ * Colour, inline: what it is now, the site's own colours, colours worked out from it,
+ * sliders and a hex field. A site colour that is a custom property applies as
+ * `var(--name)`, so the change record names the token the reviewer picked.
+ * @param {string} label @param {unknown} initial @param {(raw: string) => void} apply
+ * @param {{ palette?: { hex: string, name?: string }[], variable?: string }} [options]
+ *   `variable` is the custom property already driving this value: picking it again is no change.
+ */
+function createColourControl(label, initial, apply, { palette = [], variable = "" } = {}) {
+  const { normalizeHex, hexToHsl, hslToHex, harmonySwatches, variableOf } = /** @type {any} */ (window).LieselColour;
+  const picked = variableOf(initial);
+  let current = normalizeHex(initial) || palette.find((entry) => picked && entry.name === picked)?.hex || "#000000";
   let hsl = hexToHsl(current);
   const root = element("div", { class: "tune-colour" });
   const head = element("div", { class: "tune-colour-head" });
@@ -6435,23 +6459,45 @@ function createColourControl(label, initial, apply) {
   );
   head.append(chip, hex);
 
-  const optionRow = () => {
+  /** @type {HTMLElement[]} */
+  const allOptions = [];
+  /** A captioned set of swatches; hovering one names it in the caption. @param {string} title @param {number} count @param {string} kind */
+  const optionGroup = (title, count, kind) => {
+    const group = element("div", {
+      class: `tune-colour-group tune-colour-${kind}`,
+      role: "group",
+      "aria-label": `${label}: ${title}`,
+    });
+    const caption = element("span", { class: "tune-colour-caption", text: title });
     const row = element("div", { class: "tune-colour-options" });
-    const options = Array.from({ length: 5 }, () => {
+    const options = Array.from({ length: count }, () => {
       const option = element("button", { class: "tune-colour-option", type: "button" });
+      const name = () => (option.dataset.name ? `${option.dataset.name} · ` : "");
+      const show = () => (caption.textContent = `${name()}${option.dataset.hex}`);
+      const hide = () => (caption.textContent = title);
+      option.addEventListener("pointerenter", show);
+      option.addEventListener("focus", show);
+      option.addEventListener("pointerleave", hide);
+      option.addEventListener("blur", hide);
       option.addEventListener("click", () => {
-        const picked = option.dataset.hex;
-        setColour(picked);
-        apply(picked);
+        const colour = option.dataset.hex;
+        const token = option.dataset.name || "";
+        setColour(colour);
+        apply(token && token !== variable ? `var(${token})` : colour);
         endTuneEdit();
       });
+      allOptions.push(option);
       return option;
     });
     row.append(...options);
-    return { row, options };
+    group.append(caption, row);
+    return { group, options };
   };
-  const hues = optionRow();
-  const tones = optionRow();
+  const site = optionGroup("Site", palette.length, "site");
+  const suggested = optionGroup("Suggested", 10, "suggested");
+  const swatches = element("div", { class: "tune-colour-palette" });
+  if (palette.length > 0) swatches.append(site.group);
+  swatches.append(suggested.group);
 
   const slider = (name, max, unit, field) => {
     const row = element("label", { class: "tune-colour-slider" });
@@ -6500,16 +6546,23 @@ function createColourControl(label, initial, apply) {
       `linear-gradient(to right, ${hslToHex({ h, s: 0, l })}, ${hslToHex({ h, s: 100, l })})`,
     );
     lightness.input.style.setProperty("--track", `linear-gradient(to right, #000, ${hslToHex({ h, s, l: 50 })}, #fff)`);
-    const swatches = harmonySwatches(hsl);
+    const worked = harmonySwatches(hsl);
+    /** @param {HTMLElement[]} options @param {{ hex: string, name?: string }[]} colours */
     const fill = (options, colours) =>
       options.forEach((option, index) => {
-        option.dataset.hex = colours[index];
-        option.style.background = colours[index];
-        option.title = colours[index];
-        option.setAttribute("aria-label", `Use ${colours[index]}`);
+        const { hex: colour, name } = colours[index];
+        option.dataset.hex = colour;
+        if (name) option.dataset.name = name;
+        option.style.background = colour;
+        option.title = name ? `${name} · ${colour}` : colour;
+        option.setAttribute("aria-label", `Use ${name ? `${name} (${colour})` : colour}`);
       });
-    fill(hues.options, swatches.hues);
-    fill(tones.options, swatches.tones);
+    fill(site.options, palette);
+    fill(
+      suggested.options,
+      [...worked.hues, ...worked.tones].map((colour) => ({ hex: colour })),
+    );
+    for (const option of allOptions) option.setAttribute("aria-pressed", String(option.dataset.hex === current));
   }
 
   hex.addEventListener("input", () => {
@@ -6530,7 +6583,7 @@ function createColourControl(label, initial, apply) {
   });
 
   hue.input.classList.add("tune-colour-hue");
-  root.append(head, hues.row, tones.row, hue.row, saturation.row, lightness.row);
+  root.append(head, swatches, hue.row, saturation.row, lightness.row);
   paint();
   return root;
 }
@@ -6725,7 +6778,12 @@ function createTuneControl(item, control, onChange) {
       timeline.destroy();
     });
   } else if (control.type === "color") {
-    wrapper.append(createColourControl(control.label, item.tune[control.id], apply));
+    wrapper.append(
+      createColourControl(control.label, item.tune[control.id], apply, {
+        palette: (item.id === "target" ? tuneTarget?.palette : state.autoPalettes.get(item.id)) || [],
+        variable: control.variable?.name || (String(control.css).startsWith("--") ? control.css : ""),
+      }),
+    );
   } else if (control.type === "font") {
     wrapper.append(createFontControl(control, String(item.tune[control.id] ?? control.value ?? ""), apply));
   } else if (control.type === "select") {
@@ -8678,6 +8736,8 @@ function onArtboardMessage(event) {
         error: data.error ? String(data.error) : "",
         // A live page names the component and source file that render the element.
         source: itemById(itemId)?.page ? sourceHelpers.normalizeSource(data.source) || { unknown: true } : null,
+        // The page's own colours, first among the colour swatches.
+        palette: /** @type {any} */ (window).LieselColour.normalizePalette(data.palette),
       };
       syncTargetValues(tuneTarget);
       renderTune();
@@ -8697,6 +8757,7 @@ function onArtboardMessage(event) {
     const controls = Array.isArray(data.controls) ? data.controls : [];
     if (controls.length === 0) return;
     state.autoSpecs.set(itemId, controls);
+    state.autoPalettes.set(itemId, /** @type {any} */ (window).LieselColour.normalizePalette(data.palette));
     const item = itemById(itemId);
     if (item) {
       item.tune = item.tune || {};

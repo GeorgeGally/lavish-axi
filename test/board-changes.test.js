@@ -69,6 +69,27 @@ test("a change record keeps the variable behind a value and the repeated element
   );
 });
 
+test("a site token the reviewer picked travels as uses_variable, beside the variable that drove the old value", () => {
+  const [picked] = normalizeChangeRecords([
+    {
+      ...RAW_CHANGES[0],
+      new_value: "var(--accent)",
+      uses_variable: { name: "--accent", value: "#b95546" },
+    },
+  ]);
+  assert.deepEqual(picked.uses_variable, { name: "--accent", value: "#b95546" });
+  assert.deepEqual(picked.variable, RAW_CHANGES[0].variable);
+  assert.equal(
+    picked.summary,
+    "Heading: color #1f2a44 → var(--accent) on `main > section.hero > h1` only (driven by --brand-ink) (uses --accent) seen at 1440×900",
+  );
+  assert.match(CHANGE_CONTRACT_RULE, /uses_variable/);
+  assert.equal(
+    normalizeChangeRecords([{ ...RAW_CHANGES[0], uses_variable: { name: "accent" } }])[0].uses_variable,
+    undefined,
+  );
+});
+
 test("records that cannot name a selector and a property are dropped, not guessed", () => {
   assert.deepEqual(normalizeChangeRecords("nope"), []);
   assert.deepEqual(

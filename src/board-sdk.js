@@ -443,9 +443,8 @@
     );
   }
 
-  // With no declaration from the page, the panel is built from the CSS custom
-  // properties the page actually uses, so every variant is tunable.
-  function collectTuneControls() {
+  /** Every custom property the page's own sheets declare or read. */
+  function customPropertyNames() {
     const names = new Set();
     const walk = (rules) => {
       for (const rule of rules) {
@@ -466,6 +465,13 @@
     } catch {
       // Cross-origin sheets are not readable; the page's own sheet is.
     }
+    return names;
+  }
+
+  // With no declaration from the page, the panel is built from the CSS custom
+  // properties the page actually uses, so every variant is tunable.
+  function collectTuneControls() {
+    const names = customPropertyNames();
     const root = getComputedStyle(document.documentElement);
     const controls = [];
     for (const name of names) {
@@ -570,6 +576,70 @@
           .padStart(2, "0"),
       )
       .join("")}`;
+  }
+
+  /** `#rrggbb` for an opaque-enough rgb() reading, "" for anything else. @param {string} value */
+  function paletteHexOf(value) {
+    const rgb = /^rgba?\(([^)]+)\)$/.exec(String(value).trim());
+    if (!rgb) return "";
+    const parts = rgb[1]
+      .split(/[\s,/]+/)
+      .filter(Boolean)
+      .map(Number);
+    if (parts.length < 3 || parts.slice(0, 3).some((part) => !Number.isFinite(part))) return "";
+    if (parts.length > 3 && !(parts[3] >= 0.5)) return "";
+    return hexOf(value);
+  }
+
+  /** @type {null | { hex: string, name?: string }[]} */
+  let sitePaletteCache = null;
+
+  /**
+   * The page's own colours for the panel's swatches: its colour custom properties first,
+   * then the colours its elements paint most, one swatch per hex. Read once per page
+   * load, before any tune preview, so the swatches stay put while a reviewer tunes.
+   */
+  function sitePalette() {
+    if (sitePaletteCache) return sitePaletteCache;
+    /** @type {Map<string, { hex: string, name?: string }>} */
+    const byHex = new Map();
+    const probe = document.createElement("i");
+    probe.style.display = "none";
+    (document.body || document.documentElement).append(probe);
+    try {
+      for (const name of customPropertyNames()) {
+        if (byHex.size >= 16) break;
+        probe.style.color = "";
+        probe.style.color = `var(${name})`;
+        const raw = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+        if (!raw || !CSS.supports("color", raw)) continue;
+        const hex = paletteHexOf(getComputedStyle(probe).color);
+        if (hex && !byHex.has(hex)) byHex.set(hex, { hex, name });
+      }
+    } finally {
+      probe.remove();
+    }
+    /** @type {Map<string, number>} */
+    const uses = new Map();
+    const count = (/** @type {string} */ value) => {
+      const hex = paletteHexOf(value);
+      if (hex) uses.set(hex, (uses.get(hex) || 0) + 1);
+    };
+    const elements = document.body ? Array.from(document.body.querySelectorAll("*")).slice(0, 1500) : [];
+    for (const element of elements) {
+      const style = getComputedStyle(element);
+      if (style.display === "none") continue;
+      if (shortText(element.textContent)) count(style.color);
+      count(style.backgroundColor);
+      if (style.borderTopStyle !== "none" && style.borderTopWidth !== "0px") count(style.borderTopColor);
+    }
+    const used = [...uses].sort((left, right) => right[1] - left[1]).map(([hex]) => hex);
+    for (const hex of used) {
+      if (byHex.size >= 24) break;
+      if (!byHex.has(hex)) byHex.set(hex, { hex });
+    }
+    sitePaletteCache = [...byHex.values()];
+    return sitePaletteCache;
   }
 
   /** @param {string} value */
@@ -2174,11 +2244,13 @@
       // A live project page names the component and source file that render it.
       ...(live && !page ? { source: sourceHelpers.elementSourceOf(element) } : {}),
     };
+    // Read while the previews are off, so the page's own colours are what it ranks.
+    const palette = sitePalette();
     for (const [node, applied] of held) {
       if (applied) restyle(node, applied);
     }
     pseudoPreview(true);
-    post({ type: "tune-target", ...payload, controls });
+    post({ type: "tune-target", ...payload, controls, palette });
   }
 
   /** @param {string} selector */
@@ -2266,7 +2338,7 @@
         return;
       }
       if (data.type === "tune-spec") {
-        post({ type: "tune-spec", controls: collectTuneControls() });
+        post({ type: "tune-spec", controls: collectTuneControls(), palette: sitePalette() });
         return;
       }
       if (data.type === "tune-target") {

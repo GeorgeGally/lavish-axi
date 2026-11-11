@@ -17,7 +17,7 @@ const MAX_TEXT = 500;
  * from here.
  */
 export const CHANGE_CONTRACT_RULE =
-  'A prompt tagged "tune" carries `changes`: one record per property the reviewer changed on the board, with the selector, element label, property, old_value, new_value, viewport, scope and, when one drives the value, the CSS custom property behind it (`variable`). On a live project page `source` names the component and source file that render the element (`{ component, file, line }`, with `owners` further up), or `{ unknown: true }` when the page gave no development hints. The board only previewed these; make each change at its source. When `variable` is set, change that custom property where it is defined (or add a new token) instead of overriding the element. When scope.kind is "repeated", change the shared class, rule or component that all scope.count elements use, not one of them. A change with viewport.only belongs in a media query or a responsive rule for that size. Never paste the board CSS as inline styles or `!important` overrides; edit the variable, class or component that renders the element.';
+  'A prompt tagged "tune" carries `changes`: one record per property the reviewer changed on the board, with the selector, element label, property, old_value, new_value, viewport, scope and, when one drives the value, the CSS custom property behind it (`variable`). On a live project page `source` names the component and source file that render the element (`{ component, file, line }`, with `owners` further up), or `{ unknown: true }` when the page gave no development hints. The board only previewed these; make each change at its source. When `variable` is set, change that custom property where it is defined (or add a new token) instead of overriding the element. When `uses_variable` is set, the reviewer picked that existing site token as the new value: set the property to `var(<uses_variable.name>)` in the rule that sets it on the element, instead of editing `variable`, and leave the definitions of both tokens alone. When scope.kind is "repeated", change the shared class, rule or component that all scope.count elements use, not one of them. A change with viewport.only belongs in a media query or a responsive rule for that size. Never paste the board CSS as inline styles or `!important` overrides; edit the variable, class or component that renders the element.';
 
 /** @param {unknown} value @param {number} [max] */
 function text(value, max = MAX_TEXT) {
@@ -129,6 +129,7 @@ export function changeSummary(change) {
   else if (scope.kind === "page") parts.push("on the page");
   else parts.push(`on \`${change.selector}\` only`);
   if (change.variable) parts.push(`(driven by ${change.variable.name})`);
+  if (change.uses_variable) parts.push(`(uses ${change.uses_variable.name})`);
   if (change.source && !change.source.unknown) parts.push(`in ${sourceLabel(change.source)}`);
   const viewport = change.viewport;
   if (viewport?.width) {
@@ -143,7 +144,8 @@ export function changeSummary(change) {
  * @returns {{
  *   selector: string, label: string, property: string, old_value: string, new_value: string,
  *   scope: ReturnType<typeof normalizeScope>, viewport?: NonNullable<ReturnType<typeof normalizeViewport>>,
- *   variable?: NonNullable<ReturnType<typeof normalizeVariable>>, font_import?: string,
+ *   variable?: NonNullable<ReturnType<typeof normalizeVariable>>,
+ *   uses_variable?: NonNullable<ReturnType<typeof normalizeVariable>>, font_import?: string,
  *   frame?: NonNullable<ReturnType<typeof normalizeFrame>>, source?: NonNullable<ReturnType<typeof normalizeSource>>,
  *   summary: string,
  * } | null}
@@ -164,6 +166,7 @@ export function normalizeChangeRecord(value) {
   };
   const viewport = normalizeViewport(entry.viewport);
   const variable = normalizeVariable(entry.variable);
+  const usesVariable = normalizeVariable(entry.uses_variable);
   const fontImport = text(entry.font_import);
   const frame = normalizeFrame(entry.frame);
   const source = normalizeSource(entry.source);
@@ -171,6 +174,7 @@ export function normalizeChangeRecord(value) {
     ...record,
     ...(viewport ? { viewport } : {}),
     ...(variable ? { variable } : {}),
+    ...(usesVariable ? { uses_variable: usesVariable } : {}),
     ...(fontImport.startsWith("https://fonts.googleapis.com/") ? { font_import: fontImport } : {}),
     ...(frame ? { frame } : {}),
     ...(source ? { source } : {}),

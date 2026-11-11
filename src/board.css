@@ -2306,7 +2306,8 @@ body[data-dragging="true"] .shield {
     0 0 0 4px rgba(37, 99, 235, 0.18);
 }
 
-/* Colour, inline: the colour and its hex, colours worked out from it, then sliders. */
+/* Colour, inline: the colour and its hex, the site's colours beside colours worked out
+   from it, then sliders. */
 .tune-colour {
   display: grid;
   gap: 12px;
@@ -2330,19 +2331,64 @@ body[data-dragging="true"] .shield {
   box-shadow: inset 0 0 0 1px rgba(22, 24, 29, 0.14);
 }
 
-.tune-colour-options {
+/* Site colours first, then the suggested ones in a column of their own. */
+.tune-colour-palette {
   display: flex;
-  justify-content: space-between;
-  gap: 6px;
-  margin-top: -4px;
+  gap: 12px;
 }
 
-.tune-colour-head + .tune-colour-options {
-  margin-top: 0;
+.tune-colour-group {
+  display: grid;
+  flex: 1 1 0;
+  align-content: start;
+  gap: 6px;
+  min-width: 0;
+}
+
+.tune-colour-group + .tune-colour-group {
+  padding-left: 12px;
+  border-left: 1px solid var(--line);
+}
+
+/* Five across: the turns round the wheel over the tones of this hue. */
+.tune-colour-suggested {
+  flex: none;
+  width: 110px;
+}
+
+.tune-colour-suggested .tune-colour-options {
+  grid-template-columns: repeat(5, 18px);
+}
+
+/* Names the swatch under the pointer: its custom property, then its hex. */
+.tune-colour-caption {
+  overflow: hidden;
+  color: var(--ink-3);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+  letter-spacing: 0.02em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tune-colour-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, 18px);
+  gap: 5px;
 }
 
 .tune-colour-option {
+  width: 18px;
+  height: 18px;
   cursor: pointer;
+}
+
+.tune-colour-option[aria-pressed="true"] {
+  box-shadow:
+    inset 0 0 0 1px rgba(22, 24, 29, 0.14),
+    0 0 0 1.5px var(--surface),
+    0 0 0 3px var(--ink-3);
 }
 
 .tune-colour-option:focus-visible {
