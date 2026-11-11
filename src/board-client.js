@@ -1,6 +1,8 @@
 /* global CSS, document, window, location, Element, HTMLElement, requestAnimationFrame, cancelAnimationFrame, IntersectionObserver */
 
 const bootstrap = JSON.parse(document.getElementById("liesel-board")?.textContent || "{}");
+// The server inlines src/board-source.js here: how a live page's component and source file read.
+const sourceHelpers = /** @type {typeof import("./board-source.js")} */ (/* liesel:board-source */ {});
 const key = String(bootstrap.key || "");
 const cameraStorageKey = `liesel:camera2:${key}`;
 const deviceStorageKey = `liesel:device:${key}`;
@@ -3549,6 +3551,8 @@ function addNote(item, payload, deviceId) {
   if (excerpt) note.excerpt = excerpt;
   const heading = String(payload.heading || "").slice(0, 120);
   if (heading) note.heading = heading;
+  // A live page's note names the component and source file that render the element.
+  if (item.page) note.source = sourceHelpers.normalizeSource(payload.source) || { unknown: true };
   const box = payload.box;
   if (box && ["x", "y", "w", "h"].every((name) => Number.isFinite(Number(box[name])))) {
     note.box = { x: Number(box.x), y: Number(box.y), w: Number(box.w), h: Number(box.h) };
@@ -3659,6 +3663,7 @@ function sendPromptsNow(noteIds, message, images, context = {}) {
         viewport: deviceById(noteDevice(live.note)).width,
         ...(live.note.excerpt ? { excerpt: live.note.excerpt } : {}),
         ...(live.note.heading ? { heading: live.note.heading } : {}),
+        ...(live.note.source ? { source: live.note.source } : {}),
       },
       ...(withCrop.length > 0 ? { attachments: withCrop } : {}),
     });
@@ -4306,6 +4311,7 @@ function sendFollowup(threadId, followup, text) {
       viewport: deviceById(noteDevice(note)).width,
       ...(note.excerpt ? { excerpt: note.excerpt } : {}),
       ...(note.heading ? { heading: note.heading } : {}),
+      ...(note.source ? { source: note.source } : {}),
     };
   }
   showSideView("chat");
@@ -4816,7 +4822,7 @@ let tuneDeviceId = "";
  * What a controls-selector click last landed on: its selectors, its own controls and their live values.
  * Inherited groups are the elements it sits in that set something it inherits, nearest first.
  * @typedef {{ selector: string, label: string, controls: any[], values: Record<string, string> }} InheritedGroup
- * @type {null | { itemId: string, deviceId: string, selector?: string, sectionSelector?: string, label?: string, sectionLabel?: string, parentSelector?: string, parentLabel?: string, controls?: any[], values?: Record<string, string>, inherited?: InheritedGroup[], crumbs?: { selector: string, label: string }[], like?: null | { selector: string, count: number }, scope?: "one" | "all", sizes?: "all" | "one", error?: string, pending?: boolean }}
+ * @type {null | { itemId: string, deviceId: string, selector?: string, sectionSelector?: string, label?: string, sectionLabel?: string, parentSelector?: string, parentLabel?: string, controls?: any[], values?: Record<string, string>, inherited?: InheritedGroup[], crumbs?: { selector: string, label: string }[], like?: null | { selector: string, count: number }, scope?: "one" | "all", sizes?: "all" | "one", error?: string, pending?: boolean, source?: any }}
  */
 let tuneTarget = null;
 /**
@@ -6133,6 +6139,11 @@ function tuneChangeRecords(item) {
         ...(change.variable ? { variable: change.variable } : {}),
         ...(change.fontImport ? { font_import: change.fontImport } : {}),
         frame: { item: item.id, device: device.id, ...(item.page ? { page: item.page } : { file: item.file }) },
+        // On a live page: the component and source file that render the picked element.
+        // A section or ancestor is another element, whose source was not read.
+        ...(tuneTarget?.source && target.scope.kind !== "page" && !target.scope.role
+          ? { source: tuneTarget.source }
+          : {}),
       };
     });
 }
@@ -6214,11 +6225,22 @@ function sendTune() {
     });
 }
 
+/** What renders the tuned element on a live page: `Button · components/Hero.tsx:42`. */
+function tuneSourceLabel() {
+  const source = tuneTarget?.source;
+  return source ? sourceHelpers.sourceLabel(source, project?.root || "") : "";
+}
+
 function renderTargetTune() {
   const sub = document.getElementById("tuneSub");
   const body = document.getElementById("tuneBody");
   if (!body || !tuneTarget) return;
-  if (sub) sub.textContent = "";
+  if (sub) {
+    const source = tuneTarget.source;
+    sub.textContent = tuneSourceLabel();
+    if (source) sub.setAttribute("title", sourceHelpers.sourceText(source, project?.root || ""));
+    else sub.removeAttribute("title");
+  }
   const title = document.getElementById("tuneTitle");
   if (title) title.textContent = tuneTitleText(tuneTarget.label || "Tune");
   const crumbs = renderTuneCrumbs();
@@ -7523,7 +7545,7 @@ function copyTune() {
   const done = () => {
     if (sub) sub.textContent = "Copied";
     setTimeout(() => {
-      if (sub && sub.textContent === "Copied") sub.textContent = "";
+      if (sub && sub.textContent === "Copied") sub.textContent = tuneSourceLabel();
     }, 1600);
   };
   if (navigator.clipboard?.writeText) navigator.clipboard.writeText(text).then(done, done);
@@ -8547,6 +8569,8 @@ function onArtboardMessage(event) {
         scope: "one",
         sizes: "all",
         error: data.error ? String(data.error) : "",
+        // A live page names the component and source file that render the element.
+        source: itemById(itemId)?.page ? sourceHelpers.normalizeSource(data.source) || { unknown: true } : null,
       };
       syncTargetValues(tuneTarget);
       renderTune();

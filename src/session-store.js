@@ -29,6 +29,7 @@ import {
   stampWorking,
   unstampDelivery,
 } from "./chat-messages.js";
+import { normalizeSource } from "./board-source.js";
 import { normalizeMermaidNodeTarget } from "./mermaid-node.js";
 import { EXCALIDRAW_SCENE_TARGET_TYPE, normalizeExcalidrawSceneTarget } from "./whiteboard-core.js";
 
@@ -936,7 +937,7 @@ function normalizeBoardItemRef(value) {
 
 /**
  * @param {unknown} value
- * @returns {{ id?: string, number: number, viewport?: number, excerpt?: string, heading?: string } | null}
+ * @returns {{ id?: string, number: number, viewport?: number, excerpt?: string, heading?: string, source?: object } | null}
  */
 function normalizeBoardPinRef(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
@@ -948,7 +949,7 @@ function normalizeBoardPinRef(value) {
     .trim()
     .slice(0, 60);
   const viewport = Math.trunc(Number(entry.viewport));
-  /** @type {{ viewport?: number, excerpt?: string, heading?: string }} */
+  /** @type {{ viewport?: number, excerpt?: string, heading?: string, source?: object }} */
   const reference = Number.isFinite(viewport) && viewport > 0 ? { viewport } : {};
   // The pinned element's visible text and its section heading, so the agent can find
   // the spot without decoding the selector.
@@ -962,6 +963,9 @@ function normalizeBoardPinRef(value) {
     .trim()
     .slice(0, 120);
   if (heading) reference.heading = heading;
+  // On a live project page: the component and source file that render the pinned element.
+  const source = normalizeSource(/** @type {any} */ (value).source);
+  if (source) reference.source = source;
   return id ? { id, number, ...reference } : { number, ...reference };
 }
 

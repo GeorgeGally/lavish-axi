@@ -50,6 +50,9 @@
   pinWindowHeight();
   const channel = "liesel";
   const state = { pins: [], tuning: {} };
+  // The server inlines src/board-source.js here, so the page can say which component
+  // and source file render an element.
+  const sourceHelpers = /** @type {typeof import("./board-source.js")} */ (/* liesel:board-source */ {});
 
   function parentWindow() {
     return parent && parent !== window ? parent : null;
@@ -1727,7 +1730,11 @@
     box.style.height = `${rect.height}px`;
     box.style.opacity = editLabel.outline ? "1" : "0";
     const name = element === document.body ? "body" : crumbLabel(element);
-    tag.textContent = editLabel.property ? `${name} \u00b7 ${editLabel.property}` : name;
+    // On a live project page the tag also names the component and file that render it.
+    const source = live && element !== document.body ? sourceHelpers.elementSourceOf(element) : null;
+    tag.textContent = [name, source ? sourceHelpers.sourceLabel(source) : "", editLabel.property]
+      .filter(Boolean)
+      .join(" \u00b7 ");
     // One size on screen at any zoom, within reason.
     const scale = Math.min(4, Math.max(0.5, 1 / (editLabel.scale || 1)));
     tag.style.transform = `scale(${scale})`;
@@ -1914,6 +1921,8 @@
       // One click steps up: the panel offers the element this one sits in.
       parentSelector: parent ? selectorFor(parent) : "",
       parentLabel: parent ? targetLabel(parent) : "",
+      // A live project page names the component and source file that render it.
+      ...(live && !page ? { source: sourceHelpers.elementSourceOf(element) } : {}),
     };
     for (const [node, applied] of held) {
       if (applied) restyle(node, applied);
@@ -2119,6 +2128,7 @@
           excerpt: visibleText(target),
           heading: sectionHeading(target),
           box: pageBox(target),
+          ...(live ? { source: sourceHelpers.elementSourceOf(target) } : {}),
         });
       }
     },

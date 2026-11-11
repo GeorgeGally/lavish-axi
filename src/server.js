@@ -36,6 +36,7 @@ import {
   serializeLayoutWarnings,
 } from "./layout-warnings.js";
 import * as artifactRevisions from "./artifact-revisions.js";
+import * as boardSource from "./board-source.js";
 import * as mermaidNode from "./mermaid-node.js";
 import * as tableCellHelpers from "./table-cell.js";
 import { extractMermaidSources, whiteboardSourceHash } from "./mermaid-source.js";
@@ -3822,7 +3823,7 @@ export async function serve({
   app.get("/board-client.js", async (req, res, next) => {
     try {
       res.setHeader("cache-control", "no-store");
-      res.type("application/javascript").send(await readFile(boardClientUrl, "utf8"));
+      res.type("application/javascript").send(inlineBoardSource(await readFile(boardClientUrl, "utf8")));
     } catch (error) {
       next(error);
     }
@@ -3850,7 +3851,7 @@ export async function serve({
   app.get("/board-sdk.js", async (req, res, next) => {
     try {
       res.setHeader("cache-control", "no-store");
-      res.type("application/javascript").send(await readFile(boardSdkUrl, "utf8"));
+      res.type("application/javascript").send(inlineBoardSource(await readFile(boardSdkUrl, "utf8")));
     } catch (error) {
       next(error);
     }
@@ -5448,6 +5449,23 @@ function serializeModuleHelpers(module) {
     declarations: entries.map(([name, fn]) => `const ${name}=${fn.toString()};`).join("\n"),
     names: entries.map(([name]) => name),
   };
+}
+
+const BOARD_SOURCE_PLACEHOLDER = "/* liesel:board-source */ {}";
+
+/**
+ * The board scripts read the source-inspection helpers (src/board-source.js) through a
+ * placeholder this fills with the serialized module, so the same code is unit tested here
+ * and runs in the page without a global the page could see.
+ * @param {string} script
+ */
+export function inlineBoardSource(script) {
+  if (!script.includes(BOARD_SOURCE_PLACEHOLDER)) return script;
+  const { declarations, names } = serializeModuleHelpers(boardSource);
+  return script.replace(
+    BOARD_SOURCE_PLACEHOLDER,
+    () => `(() => {\n${declarations}\nreturn { ${names.join(", ")} };\n})()`,
+  );
 }
 
 /**

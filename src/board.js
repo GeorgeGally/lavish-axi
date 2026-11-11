@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { readdir, readFile, realpath, rename, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 
+import { normalizeSource } from "./board-source.js";
 import { BOARD_FILE_NAME } from "./brand.js";
 import { normalizeLivePage } from "./project.js";
 
@@ -23,7 +24,7 @@ const MAX_NOTE_IMAGES = 8;
  * markup or a copy of an item's content.
  */
 /** @typedef {{ id: string, label: string }} BoardTab */
-/** @typedef {{ id: string, number: number, label: string, selector: string, tag: string, text: string, x: number, y: number, ox?: number, oy?: number, page?: string, attachments?: Array<{ id: string, name?: string }>, prompt_id?: string, at?: string, device?: string, excerpt?: string, heading?: string, box?: { x: number, y: number, w: number, h: number }, crop?: { id: string } }} BoardNote */
+/** @typedef {{ id: string, number: number, label: string, selector: string, tag: string, text: string, x: number, y: number, ox?: number, oy?: number, page?: string, attachments?: Array<{ id: string, name?: string }>, prompt_id?: string, at?: string, device?: string, excerpt?: string, heading?: string, box?: { x: number, y: number, w: number, h: number }, crop?: { id: string }, source?: object }} BoardNote */
 /** @typedef {{ id: string, label: string, type: "number" | "color" | "select" | "spring" | "easing" | "pad" | "timeline", css: string, min?: number, max?: number, step?: number, duration?: number, unit?: string, options?: Array<{ value: string, label: string }>, value: string }} TuneControl */
 /** @typedef {{ id: string, label: string, values: Record<string, string>, at: string }} TuneVersion */
 /**
@@ -263,6 +264,9 @@ function normalizeNotes(value) {
     if (excerpt) note.excerpt = excerpt;
     const heading = text(entry.heading, 120);
     if (heading) note.heading = heading;
+    // On a live project page: the component and source file that render the element.
+    const source = normalizeSource(entry.source);
+    if (source) note.source = source;
     const box = entry.box && typeof entry.box === "object" ? entry.box : null;
     if (box && ["x", "y", "w", "h"].every((name) => Number.isFinite(Number(box[name])))) {
       note.box = {

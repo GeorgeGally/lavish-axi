@@ -6,6 +6,8 @@
  * record (docs/invariants.md).
  */
 
+import { normalizeSource, sourceLabel } from "./board-source.js";
+
 export const MAX_CHANGE_RECORDS = 60;
 
 const MAX_TEXT = 500;
@@ -15,7 +17,7 @@ const MAX_TEXT = 500;
  * from here.
  */
 export const CHANGE_CONTRACT_RULE =
-  'A prompt tagged "tune" carries `changes`: one record per property the reviewer changed on the board, with the selector, element label, property, old_value, new_value, viewport, scope and, when one drives the value, the CSS custom property behind it (`variable`). The board only previewed these; make each change at its source. When `variable` is set, change that custom property where it is defined (or add a new token) instead of overriding the element. When scope.kind is "repeated", change the shared class, rule or component that all scope.count elements use, not one of them. A change with viewport.only belongs in a media query or a responsive rule for that size. Never paste the board CSS as inline styles or `!important` overrides; edit the variable, class or component that renders the element.';
+  'A prompt tagged "tune" carries `changes`: one record per property the reviewer changed on the board, with the selector, element label, property, old_value, new_value, viewport, scope and, when one drives the value, the CSS custom property behind it (`variable`). On a live project page `source` names the component and source file that render the element (`{ component, file, line }`, with `owners` further up), or `{ unknown: true }` when the page gave no development hints. The board only previewed these; make each change at its source. When `variable` is set, change that custom property where it is defined (or add a new token) instead of overriding the element. When scope.kind is "repeated", change the shared class, rule or component that all scope.count elements use, not one of them. A change with viewport.only belongs in a media query or a responsive rule for that size. Never paste the board CSS as inline styles or `!important` overrides; edit the variable, class or component that renders the element.';
 
 /** @param {unknown} value @param {number} [max] */
 function text(value, max = MAX_TEXT) {
@@ -115,20 +117,6 @@ function normalizeFrame(value) {
   return Object.keys(frame).length > 0 ? frame : null;
 }
 
-/** Where in the source the element comes from, when the board knows. @param {unknown} value */
-function normalizeSource(value) {
-  const entry = plainObject(value);
-  const file = text(entry?.file);
-  if (!entry || !file) return null;
-  /** @type {{ file: string, line?: number, column?: number }} */
-  const source = { file };
-  const line = Math.trunc(Number(entry.line));
-  if (Number.isFinite(line) && line > 0) source.line = line;
-  const column = Math.trunc(Number(entry.column));
-  if (Number.isFinite(column) && column > 0) source.column = column;
-  return source;
-}
-
 /**
  * The one line a person reads for a change record.
  * @param {ReturnType<typeof normalizeChangeRecord> & {}} change
@@ -141,6 +129,7 @@ export function changeSummary(change) {
   else if (scope.kind === "page") parts.push("on the page");
   else parts.push(`on \`${change.selector}\` only`);
   if (change.variable) parts.push(`(driven by ${change.variable.name})`);
+  if (change.source && !change.source.unknown) parts.push(`in ${sourceLabel(change.source)}`);
   const viewport = change.viewport;
   if (viewport?.width) {
     const size = viewport.height ? `${viewport.width}×${viewport.height}` : `${viewport.width}px wide`;

@@ -15,6 +15,7 @@ import path from "node:path";
 
 import { AsyncMutex } from "./async-mutex.js";
 import { CHANGE_CONTRACT_RULE, changeRecordLines } from "./board-changes.js";
+import { sourceText } from "./board-source.js";
 
 /** @type {typeof import("node:child_process").spawn} */
 const crossSpawn = createRequire(import.meta.url)("cross-spawn");
@@ -257,6 +258,7 @@ export function buildRunnerPrompt({ boardDir, boardName, items, prompts, cwd, pr
       if (prompt.pin.heading) where.push(`in section "${String(prompt.pin.heading).slice(0, 120)}"`);
       if (prompt.pin.viewport) where.push(`at ${prompt.pin.viewport}px wide`);
       lines.push(`   ${where.join(" ")}`);
+      if (prompt.pin.source) lines.push(`   Source: ${sourceText(prompt.pin.source, project?.root)}`);
     } else if (prompt?.selector) {
       lines.push(`   Element: \`${prompt.selector}\`${page ? ` at path ${page}` : ""}`);
     }
