@@ -2460,8 +2460,10 @@ function syncPassOption() {
 function modifierPressed(name, joined = false, at = performance.now()) {
   const tap = modifierTaps[name];
   if (tap.down) return;
-  // Cmd and Option pressed together, or either with Space held, is a chord for both.
-  const others = joined || spaceHeld || Object.values(modifierTaps).some((other) => other.down);
+  // Option during a Move drag frees it from snapping; it never switches the mode.
+  if (name === "Alt") setMoveFree(true);
+  // Cmd and Option pressed together, or either with Space held or mid-drag, is a chord.
+  const others = joined || spaceHeld || Boolean(moveDrag) || Object.values(modifierTaps).some((other) => other.down);
   noteChord();
   tap.down = true;
   tap.chord = others;
@@ -2480,6 +2482,7 @@ function modifierPressed(name, joined = false, at = performance.now()) {
  */
 function modifierReleased(name, lost = false, joined = false, at = performance.now()) {
   const tap = modifierTaps[name];
+  if (name === "Alt") setMoveFree(false);
   // A tap is timed by the keys' own timestamps, never by when the board heard them: a busy
   // focused design can hold a keyup back for hundreds of ms before reporting it.
   const lone = tap.down && !tap.chord && !lost && !joined && at - tap.at <= TAP_MAX_MS;
@@ -2758,7 +2761,7 @@ function bindNavigation() {
       }
     }
     if (moveDrag && event.pointerId === moveDrag.pointerId) {
-      dragMove(event.clientX, event.clientY);
+      dragMove(event.clientX, event.clientY, event.altKey);
       return;
     }
     if (drag && event.pointerId === drag.id) {
@@ -5110,8 +5113,14 @@ function selectTuneElement(selector) {
  * and History keeps the original. When the drag ends, the moved element loads into
  * Controls, where Send hands the move to the agent as a tune note.
  */
-/** @type {null | { record: any, pointerId: number, x: number, y: number, scale: number, dx: number, dy: number, moved: boolean, picked: boolean, released: boolean, selector: string, base: string[] }} */
+/** @typedef {{ left: number, top: number, right: number, bottom: number }} MoveBox */
+/** @type {null | { record: any, pointerId: number, x: number, y: number, scale: number, dx: number, dy: number, moved: boolean, picked: boolean, released: boolean, selector: string, base: string[], box: MoveBox | null, targets: MoveBox[], scroll: { x: number, y: number }, pointer: { x: number, y: number }, free: boolean }} */
 let moveDrag = null;
+
+/** How close, in screen px at any zoom, an edge or centre must come before it snaps. */
+const MOVE_SNAP_PX = 6;
+/** The grid a move falls back to, in the design's own CSS px. */
+const MOVE_GRID = 8;
 
 /** @param {any} record @param {PointerEvent} event */
 function startMove(record, event) {
@@ -5129,6 +5138,11 @@ function startMove(record, event) {
     released: false,
     selector: "",
     base: [],
+    box: null,
+    targets: [],
+    scroll: { x: 0, y: 0 },
+    pointer: { x: event.clientX, y: event.clientY },
+    free: event.altKey,
   };
   postToArtboard(record.itemId, record.device.id, {
     type: "move-pick",
@@ -5143,29 +5157,157 @@ function onMovePicked(record, data) {
   drag.picked = true;
   drag.selector = String(data.selector || "");
   drag.base = splitCssList(String(data.translate || ""));
+  drag.box = moveBox(data.box);
+  drag.targets = Array.isArray(data.targets) ? data.targets.map(moveBox).filter((box) => box !== null) : [];
+  drag.scroll = { x: Number(data.scroll?.x) || 0, y: Number(data.scroll?.y) || 0 };
   if (!drag.selector) {
     moveDrag = null;
     return;
   }
+  if (!drag.moved) return;
+  snapMove(drag);
   if (drag.released) finishMove(drag);
-  else if (drag.moved) previewMove(drag);
+  else previewMove(drag);
 }
 
-/** @param {number} clientX @param {number} clientY */
-function dragMove(clientX, clientY) {
+/** @param {any} value @returns {MoveBox | null} */
+function moveBox(value) {
+  const box = {
+    left: Number(value?.left),
+    top: Number(value?.top),
+    right: Number(value?.right),
+    bottom: Number(value?.bottom),
+  };
+  return Object.values(box).every(Number.isFinite) ? box : null;
+}
+
+/**
+ * @param {number} clientX @param {number} clientY
+ * @param {boolean} free Option held: the drag follows the pointer with no snapping
+ */
+function dragMove(clientX, clientY, free) {
   const drag = moveDrag;
   if (!drag || drag.released) return;
+  drag.pointer = { x: clientX, y: clientY };
+  drag.free = free;
   if (!drag.moved && Math.hypot(clientX - drag.x, clientY - drag.y) < 3) return;
   drag.moved = true;
-  drag.dx = (clientX - drag.x) / drag.scale;
-  drag.dy = (clientY - drag.y) / drag.scale;
-  if (drag.picked) previewMove(drag);
+  if (!drag.picked) return;
+  snapMove(drag);
+  previewMove(drag);
+}
+
+/** Option pressed or let go mid-drag snaps or frees the element where it is. @param {boolean} free */
+function setMoveFree(free) {
+  const drag = moveDrag;
+  if (!drag || drag.free === free) return;
+  dragMove(drag.pointer.x, drag.pointer.y, free);
+}
+
+/**
+ * Where the drag puts the element: under the pointer, pulled onto a nearby edge or
+ * centre (or else the grid) when one is within a few screen px, unless Option is held.
+ * @param {NonNullable<typeof moveDrag>} drag
+ */
+function snapMove(drag) {
+  const rawX = (drag.pointer.x - drag.x) / drag.scale;
+  const rawY = (drag.pointer.y - drag.y) / drag.scale;
+  const snapped =
+    drag.free || !drag.box
+      ? null
+      : moveSnap(drag.box, drag.targets, drag.scroll, rawX, rawY, MOVE_SNAP_PX / drag.scale);
+  drag.dx = snapped ? snapped.dx : rawX;
+  drag.dy = snapped ? snapped.dy : rawY;
+  drawMoveGuides(drag, snapped ? snapped.guides : []);
+}
+
+/**
+ * Figma-style snapping on each axis: the moved box's start, centre and end against every
+ * target's, the nearest within `reach` winning; with none near, its start lands on the grid.
+ * @param {MoveBox} box where the element sat when grabbed, in frame px
+ * @param {MoveBox[]} targets
+ * @param {{ x: number, y: number }} scroll the frame's scroll, so the grid is the page's
+ * @param {number} rawX @param {number} rawY the pointer's drag, in frame px
+ * @param {number} reach
+ */
+function moveSnap(box, targets, scroll, rawX, rawY, reach) {
+  /** @type {{ axis: "x" | "y", at: number, from: number, to: number }[]} */
+  const guides = [];
+  /** @param {"x" | "y"} axis @param {number} raw */
+  const axis = (axis, raw) => {
+    const [start, end] = axis === "x" ? [box.left, box.right] : [box.top, box.bottom];
+    const lines = [start, (start + end) / 2, end];
+    let best = { gap: reach + 1e-6, shift: 0, at: 0, hits: /** @type {MoveBox[]} */ ([]) };
+    for (const target of targets) {
+      const [from, to] = axis === "x" ? [target.left, target.right] : [target.top, target.bottom];
+      for (const line of [from, (from + to) / 2, to]) {
+        for (const own of lines) {
+          const shift = line - (own + raw);
+          const gap = Math.abs(shift);
+          if (gap < best.gap - 0.01) best = { gap, shift, at: line, hits: [target] };
+          else if (Math.abs(gap - best.gap) <= 0.01 && Math.abs(line - best.at) <= 0.01) best.hits.push(target);
+        }
+      }
+    }
+    if (best.hits.length) {
+      const moved = raw + best.shift;
+      // The guide runs across the moved box and every box it lines up with.
+      const span = best.hits;
+      const cross = axis === "x" ? [box.top + rawY, box.bottom + rawY] : [box.left + rawX, box.right + rawX];
+      const from = Math.min(cross[0], ...span.map((hit) => (axis === "x" ? hit.top : hit.left)));
+      const to = Math.max(cross[1], ...span.map((hit) => (axis === "x" ? hit.bottom : hit.right)));
+      guides.push({ axis, at: best.at, from, to });
+      return moved;
+    }
+    const offset = axis === "x" ? scroll.x : scroll.y;
+    const page = start + raw + offset;
+    const onGrid = Math.round(page / MOVE_GRID) * MOVE_GRID;
+    return Math.abs(onGrid - page) <= reach ? raw + onGrid - page : raw;
+  };
+  const dx = axis("x", rawX);
+  const dy = axis("y", rawY);
+  return { dx, dy, guides };
+}
+
+/**
+ * Thin lines over the board where the moved element lines up, shown only while it snaps.
+ * @param {NonNullable<typeof moveDrag>} drag
+ * @param {{ axis: "x" | "y", at: number, from: number, to: number }[]} guides in frame px
+ */
+function drawMoveGuides(drag, guides) {
+  let layer = document.getElementById("moveGuides");
+  if (!guides.length) {
+    layer?.replaceChildren();
+    return;
+  }
+  if (!layer) {
+    layer = document.createElement("div");
+    layer.id = "moveGuides";
+    layer.className = "move-guides";
+    layer.setAttribute("aria-hidden", "true");
+    document.body.append(layer);
+  }
+  const rect = drag.record.iframe.getBoundingClientRect();
+  const scale = rect.width / drag.record.device.width || drag.scale;
+  layer.replaceChildren(
+    ...guides.map((guide) => {
+      const line = document.createElement("div");
+      line.className = `move-guide move-guide-${guide.axis}`;
+      const at = (guide.axis === "x" ? rect.left : rect.top) + guide.at * scale;
+      const from = (guide.axis === "x" ? rect.top : rect.left) + guide.from * scale;
+      const length = Math.max(0, (guide.to - guide.from) * scale);
+      if (guide.axis === "x") Object.assign(line.style, { left: `${at}px`, top: `${from}px`, height: `${length}px` });
+      else Object.assign(line.style, { top: `${at}px`, left: `${from}px`, width: `${length}px` });
+      return line;
+    }),
+  );
 }
 
 /** @param {boolean} keep a release keeps the move, a cancelled pointer takes it back */
 function endMove(keep) {
   const drag = moveDrag;
   if (!drag) return;
+  document.getElementById("moveGuides")?.replaceChildren();
   if (!keep || !drag.moved) {
     moveDrag = null;
     if (drag.picked && drag.moved) refreshElementStyle(drag.record.itemId, drag.selector, "translate");
@@ -5190,6 +5332,7 @@ function previewMove(drag) {
 /** @param {NonNullable<typeof moveDrag>} drag */
 function finishMove(drag) {
   moveDrag = null;
+  document.getElementById("moveGuides")?.replaceChildren();
   const { record, selector } = drag;
   const itemId = record.itemId;
   const deviceId = record.device.id;

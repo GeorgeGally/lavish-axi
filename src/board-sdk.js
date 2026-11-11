@@ -1565,6 +1565,45 @@
     return null;
   }
 
+  /** @param {Element} element a box in this frame's viewport, as plain numbers */
+  function boxOf(element) {
+    const rect = element.getBoundingClientRect();
+    return { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom };
+  }
+
+  /**
+   * What a moved element can snap to, Figma-style: its parent, its siblings and the
+   * parent's siblings, and the page itself. Boxes are in this frame's viewport.
+   * @param {Element} element
+   */
+  function moveSnapTargets(element) {
+    const page = document.documentElement;
+    const targets = [
+      {
+        left: -window.scrollX,
+        top: -window.scrollY,
+        right: page.clientWidth - window.scrollX,
+        bottom: page.scrollHeight - window.scrollY,
+      },
+    ];
+    const seen = new Set([element]);
+    /** @param {Element | null | undefined} node */
+    const add = (node) => {
+      if (!(node instanceof Element) || seen.has(node) || targets.length > 240) return;
+      seen.add(node);
+      if (node === page || node.closest("[data-liesel-ui]")) return;
+      if (node !== element.parentElement && node.contains(element)) return;
+      const box = boxOf(node);
+      if (box.right - box.left < 1 && box.bottom - box.top < 1) return;
+      targets.push(box);
+    };
+    const parent = element.parentElement;
+    add(parent);
+    for (const sibling of parent?.children ?? []) add(sibling);
+    for (const uncle of parent?.parentElement?.children ?? []) add(uncle);
+    return targets;
+  }
+
   /** What the board tunes when a controls-selector click lands on a point in the page. */
   function reportTuneTarget(x, y, depth = 0) {
     const { element, leaf } = tunePick(x, y, depth);
@@ -1776,6 +1815,10 @@
           type: "move-pick",
           selector: element ? selectorFor(element) : "",
           translate: element ? getComputedStyle(element).translate : "",
+          // Where it sits and what is near it, so the board can snap the drag.
+          box: element ? boxOf(element) : null,
+          targets: element ? moveSnapTargets(element) : [],
+          scroll: { x: window.scrollX, y: window.scrollY },
         });
         return;
       }

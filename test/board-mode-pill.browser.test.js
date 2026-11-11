@@ -138,6 +138,7 @@ test(
 
 // Move: a drag on a design moves the element under the pointer, saved as a translate on
 // the board like an Edit change, and loaded into Controls so it can be sent as a note.
+// Option held keeps the drag exactly under the pointer, with no snapping.
 test(
   "dragging in Move mode moves the element and saves it as a CSS change",
   { skip: !runBrowserE2e || !findChrome(), timeout: 120_000 },
@@ -160,13 +161,17 @@ test(
       const from = { x: frame.left + inner.x * frame.scale, y: frame.top + inner.y * frame.scale };
       await mouse("mouseMoved", from.x, from.y, { button: "none", clickCount: 0 });
       await sleep(200);
-      await mouse("mousePressed", from.x, from.y, { buttons: 1 });
+      const option = { modifiers: 1 };
+      await mouse("mousePressed", from.x, from.y, { buttons: 1, ...option });
       await sleep(200);
       for (let step = 1; step <= 6; step++) {
-        await mouse("mouseMoved", from.x + 10 * step * frame.scale, from.y + 5 * step * frame.scale, { buttons: 1 });
+        await mouse("mouseMoved", from.x + 10 * step * frame.scale, from.y + 5 * step * frame.scale, {
+          buttons: 1,
+          ...option,
+        });
         await sleep(40);
       }
-      await mouse("mouseReleased", from.x + 60 * frame.scale, from.y + 30 * frame.scale, { buttons: 0 });
+      await mouse("mouseReleased", from.x + 60 * frame.scale, from.y + 30 * frame.scale, { buttons: 0, ...option });
       await sleep(900);
 
       assert.equal(
@@ -188,6 +193,55 @@ test(
         await evaluate(`document.getElementById("tuneSend").disabled`),
         false,
         "Controls holds the moved element, ready to send",
+      );
+    });
+  },
+);
+
+// Snapping: a drag that brings the element's centre within a few screen px of the page's
+// centre lands it exactly there, with a thin guide shown only while it snaps.
+test(
+  "a Move drag snaps to a nearby centre and shows a guide while snapping",
+  { skip: !runBrowserE2e || !findChrome(), timeout: 120_000 },
+  async () => {
+    await withPillBoard(async (browser) => {
+      const { send, evaluate, list } = browser;
+      const { mouse, clickWord } = pillDriver(browser);
+      await clickWord("Move");
+      const target = (await list()).find((entry) => entry.type === "iframe" && entry.url.includes("device=desktop"));
+      assert.ok(target, "no desktop frame");
+      const { sessionId } = await send("Target.attachToTarget", { targetId: target.id, flatten: true });
+      const frame = await evaluate(
+        `(() => { const f = [...document.querySelectorAll(".artboard iframe")].find((f) => f.src.includes("device=desktop")); const r = f.getBoundingClientRect(); return { left: r.left, top: r.top, scale: r.width / f.offsetWidth }; })()`,
+      );
+      const inner = await evaluate(
+        `(() => { const r = document.getElementById("press").getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2, page: document.body.getBoundingClientRect().width }; })()`,
+        sessionId,
+      );
+      // Two design px short of centring the button on the page: inside the snap reach.
+      const want = Math.round(inner.page / 2 - inner.x);
+      const from = { x: frame.left + inner.x * frame.scale, y: frame.top + inner.y * frame.scale };
+      const to = { x: from.x + (want - 2) * frame.scale, y: from.y };
+      await mouse("mouseMoved", from.x, from.y, { button: "none", clickCount: 0 });
+      await sleep(200);
+      await mouse("mousePressed", from.x, from.y, { buttons: 1 });
+      await sleep(200);
+      for (let step = 1; step <= 6; step++) {
+        await mouse("mouseMoved", from.x + ((to.x - from.x) * step) / 6, from.y, { buttons: 1 });
+        await sleep(40);
+      }
+      await sleep(200);
+      const guides = await evaluate(`document.querySelectorAll("#moveGuides .move-guide-x").length`);
+      assert.ok(guides >= 1, "a vertical guide shows while the centre snaps");
+      await mouse("mouseReleased", to.x, to.y, { buttons: 0 });
+      await sleep(900);
+
+      const translate = await evaluate(`getComputedStyle(document.getElementById("press")).translate`, sessionId);
+      assert.equal(translate.split(" ")[0], `${want}px`, `the button snapped to the page centre (${translate})`);
+      assert.equal(
+        await evaluate(`document.querySelectorAll("#moveGuides .move-guide").length`),
+        0,
+        "the guide goes when the drag ends",
       );
     });
   },
