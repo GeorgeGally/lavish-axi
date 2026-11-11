@@ -1302,9 +1302,33 @@
   }
 
   /**
+   * The container a run of repeated siblings is anchored to, climbing past any that is
+   * one of several like it holding the same kind of element: the columns a masonry or
+   * split grid deals its cards into are one list, not one list per column.
+   * @param {Element} parent @param {string} step the repeated sibling's tag and classes
+   * @returns {{ anchor: Element, middle: string[] }}
+   */
+  function listAnchorOf(parent, step) {
+    const middle = [];
+    let anchor = parent;
+    while (anchor !== document.body && anchor.parentElement) {
+      const kind = `${anchor.tagName.toLowerCase()}${classPart(anchor)}`;
+      const split = [...anchor.parentElement.children].filter(
+        (child) => child !== anchor && child.matches(kind) && child.querySelector(`:scope > ${step}`),
+      );
+      if (split.length === 0) break;
+      middle.unshift(kind);
+      anchor = anchor.parentElement;
+    }
+    return { anchor, middle };
+  }
+
+  /**
    * The elements "like this one": the same spot inside each of a run of repeated
-   * siblings (every card's text block in a rail), or failing that every element with
-   * its tag and classes. Null when the element is one of a kind.
+   * siblings (every card's text block in a rail, every card in both columns of a
+   * grid), or failing that every element with its tag and classes. Null when the
+   * element is one of a kind. `stable` says the run is named by its own classes, not
+   * only by where it sits, so it is a component the reviewer means to tune as one.
    * @param {Element} element
    */
   function likeSelectorFor(element) {
@@ -1321,10 +1345,12 @@
       const signature = signatureOf(node);
       const repeats = [...parent.children].filter((child) => signatureOf(child) === signature).length > 1;
       if (repeats) {
-        const base = parent === document.body ? "body" : selectorFor(parent);
-        const selector = [base, `${node.tagName.toLowerCase()}${classPart(node)}`, ...path].join(" > ");
+        const step = `${node.tagName.toLowerCase()}${classPart(node)}`;
+        const { anchor, middle } = listAnchorOf(parent, step);
+        const base = anchor === document.body ? "body" : selectorFor(anchor);
+        const selector = [base, ...middle, step, ...path].join(" > ");
         const count = base ? usable(selector) : 0;
-        if (count) return { selector, count };
+        if (count) return { selector, count, stable: Boolean(classPart(node)) };
       }
       path.unshift(stepPart(node));
       if (path.length > 6) break;
@@ -1333,7 +1359,7 @@
     if (classes) {
       const selector = `${element.tagName.toLowerCase()}${classes}`;
       const count = usable(selector);
-      if (count) return { selector, count };
+      if (count) return { selector, count, stable: true };
     }
     return null;
   }

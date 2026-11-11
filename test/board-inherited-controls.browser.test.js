@@ -407,7 +407,8 @@ test(
         await crumbs(),
         "Page > main > section.rail-section > div.rail-window > div.rail-track > article.product > *div.product-meta",
       );
-      assert.deepEqual(await scopes(), ["*This one", "All like this (5)", "*All sizes", "Desktop only"]);
+      // A classed card block starts on all like this.
+      assert.deepEqual(await scopes(), ["This one", "*All like this (5)", "*All sizes", "Desktop only"]);
 
       // Chosen, one change reaches every card's block in this rail, in every size, and nothing else.
       await choose("All like");
@@ -551,6 +552,96 @@ test(
         `${keys[0]} names the picked paragraph alone`,
       );
       assert.equal(await evaluate(`document.querySelector(${JSON.stringify(keys[0])}).id`, desktop), "label");
+    } finally {
+      await b.close();
+    }
+  },
+);
+
+const GRID_HTML = `<!doctype html>
+<html><head><meta charset="utf-8"><title>grid</title><style>
+body { margin: 0; font-family: Helvetica, Arial, sans-serif; }
+.results { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; padding: 24px; }
+.results__column { display: flex; flex-direction: column; gap: 16px; }
+.result-card { padding: 12px; border: 1px solid rgb(200, 200, 200); }
+.result-card h3 { margin: 0; font-size: 18px; }
+.result-card p { margin: 0; font-size: 14px; }
+</style></head>
+<body><main><h1>Scan results</h1><div class="results">
+<div class="results__column">
+<article class="result-card" id="a1"><h3>One</h3><p>Clean</p></article>
+<article class="result-card" id="a2"><h3>Two</h3><p>Clean</p></article>
+<article class="result-card" id="a3"><h3>Three</h3><p>Clean</p></article>
+</div>
+<div class="results__column">
+<article class="result-card" id="b1"><h3>Four</h3><p>Clean</p></article>
+<article class="result-card" id="b2"><h3>Five</h3><p>Clean</p></article>
+</div>
+</div></main></body></html>
+`;
+
+// The CleanX results: identical cards dealt into two columns. "All like this" starts
+// on for a classed card and reaches every card in both columns, not one column's.
+test(
+  "Controls tunes all like this across both columns of a two-column card grid by default",
+  { skip: !runBrowserE2e || !findChrome(), timeout: 240_000 },
+  async () => {
+    const b = await startBoard("01-grid.html", GRID_HTML);
+    const { send, evaluate, tapAlt, click, design, pointInDesign, saved, url } = b;
+    try {
+      await send("Page.enable");
+      await send("Page.navigate", { url });
+      await sleep(2500);
+      const desktop = await design();
+      const scopes = () =>
+        evaluate(
+          `[...document.querySelectorAll(".tune-scope-option")].map((b) => (b.getAttribute("aria-checked") === "true" ? "*" : "") + b.textContent)`,
+        );
+
+      // Pick the second card in the right column by its padding.
+      const point = await pointInDesign(desktop, "#b2", { x: 0.5, y: 0.04 });
+      await tapAlt();
+      await click(point.x, point.y);
+      await tapAlt();
+      assert.deepEqual(await scopes(), ["This one", "*All like this (5)", "*All sizes", "Desktop only"]);
+
+      await evaluate(`(() => {
+        const control = [...document.querySelectorAll("#tuneBody > .tune-control")].find((c) => c.querySelector(".tune-control-label span")?.textContent === "Padding");
+        const input = control.querySelector("input[type=range]");
+        input.value = "30";
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        input.dispatchEvent(new Event("change", { bubbles: true }));
+      })()`);
+      await sleep(800);
+
+      assert.deepEqual(
+        await evaluate(
+          `[...document.querySelectorAll(".result-card")].map((e) => e.id + ":" + getComputedStyle(e).paddingTop)`,
+          desktop,
+        ),
+        ["a1:30px", "a2:30px", "a3:30px", "b1:30px", "b2:30px"],
+      );
+      const keys = Object.keys(await saved());
+      assert.equal(keys.length, 1, JSON.stringify(keys));
+      const selector = keys[0];
+      assert.doesNotMatch(selector, /nth-of-type|nth-child/, selector);
+      assert.equal(await evaluate(`document.querySelectorAll(${JSON.stringify(selector)}).length`, desktop), 5);
+
+      // The change record carries the whole run: scope repeated, its count and selector.
+      await evaluate(`(() => {
+        window.__sent = [];
+        const real = window.fetch;
+        window.fetch = (input, init) => {
+          if (String(input).endsWith("/prompts")) window.__sent.push(JSON.parse(init.body));
+          return real(input, init);
+        };
+        document.getElementById("tuneSend").click();
+      })()`);
+      await sleep(500);
+      const changes = await evaluate(`window.__sent[0].prompts[0].changes`);
+      const padding = changes.find((change) => change.property === "padding" || change.property === "padding-top");
+      assert.ok(padding, JSON.stringify(changes));
+      assert.deepEqual(padding.scope, { kind: "repeated", count: 5, selector });
     } finally {
       await b.close();
     }

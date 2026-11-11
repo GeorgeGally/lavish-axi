@@ -4822,7 +4822,7 @@ let tuneDeviceId = "";
  * What a controls-selector click last landed on: its selectors, its own controls and their live values.
  * Inherited groups are the elements it sits in that set something it inherits, nearest first.
  * @typedef {{ selector: string, label: string, controls: any[], values: Record<string, string> }} InheritedGroup
- * @type {null | { itemId: string, deviceId: string, selector?: string, sectionSelector?: string, label?: string, sectionLabel?: string, parentSelector?: string, parentLabel?: string, controls?: any[], values?: Record<string, string>, inherited?: InheritedGroup[], crumbs?: { selector: string, label: string }[], like?: null | { selector: string, count: number }, scope?: "one" | "all", sizes?: "all" | "one", error?: string, pending?: boolean, source?: any }}
+ * @type {null | { itemId: string, deviceId: string, selector?: string, sectionSelector?: string, label?: string, sectionLabel?: string, parentSelector?: string, parentLabel?: string, controls?: any[], values?: Record<string, string>, inherited?: InheritedGroup[], crumbs?: { selector: string, label: string }[], like?: null | { selector: string, count: number, stable?: boolean }, scope?: "one" | "all", sizes?: "all" | "one", error?: string, pending?: boolean, source?: any }}
  */
 let tuneTarget = null;
 /**
@@ -8546,7 +8546,7 @@ function onArtboardMessage(event) {
         .map((crumb) => ({ selector: String(crumb.selector), label: String(crumb.label || crumb.selector) }));
       const like =
         data.like && typeof data.like.selector === "string" && Number(data.like.count) > 1
-          ? { selector: String(data.like.selector), count: Number(data.like.count) }
+          ? { selector: String(data.like.selector), count: Number(data.like.count), stable: data.like.stable === true }
           : null;
       // A step along the clicked element's path keeps that path; anything else starts a new one.
       const selector = String(data.selector || "");
@@ -8565,8 +8565,10 @@ function onArtboardMessage(event) {
         inherited,
         crumbs,
         like,
-        // A pick tunes the element picked, never its siblings: "All like this" is opt-in.
-        scope: "one",
+        // A component named by its own classes (a card, a card's title) is tuned as one:
+        // "All like this" starts on. Elements alike only by where they sit, such as the
+        // plain paragraphs of one email cell, start on the picked one alone.
+        scope: like?.stable ? "all" : "one",
         sizes: "all",
         error: data.error ? String(data.error) : "",
         // A live page names the component and source file that render the element.
