@@ -625,11 +625,19 @@
       const hex = paletteHexOf(value);
       if (hex) uses.set(hex, (uses.get(hex) || 0) + 1);
     };
-    const elements = document.body ? Array.from(document.body.querySelectorAll("*")).slice(0, 1500) : [];
+    const elements = document.body
+      ? [document.documentElement, document.body, ...Array.from(document.body.querySelectorAll("*")).slice(0, 1500)]
+      : [];
     for (const element of elements) {
+      // The board's own pins and outlines are not the site's colours.
+      if (element.closest("[data-liesel-ui]")) continue;
       const style = getComputedStyle(element);
       if (style.display === "none") continue;
-      if (shortText(element.textContent)) count(style.color);
+      // A text colour counts where text shows in it, not on every box that passes it down.
+      const ownsText = Array.from(element.childNodes).some(
+        (node) => node.nodeType === 3 && String(node.textContent).trim(),
+      );
+      if (ownsText) count(style.color);
       count(style.backgroundColor);
       if (style.borderTopStyle !== "none" && style.borderTopWidth !== "0px") count(style.borderTopColor);
     }

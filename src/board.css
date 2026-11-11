@@ -2353,7 +2353,6 @@ body[data-dragging="true"] .shield {
 /* Five across: the turns round the wheel over the tones of this hue. */
 .tune-colour-suggested {
   flex: none;
-  width: 110px;
 }
 
 .tune-colour-suggested .tune-colour-options {
