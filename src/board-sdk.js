@@ -1009,13 +1009,17 @@
         const radii = BOX_CORNERS.map((corner) =>
           Math.max(0, Math.round(pxOf(style.getPropertyValue(`border-${corner.css}-radius`)))),
         );
-        const radiusMax = Math.max(32, Math.round(Math.max(...radii) * 4));
+        // A pill's 9999px (or a computed huge radius) must not set the slider's scale:
+        // past half the smaller side every corner is already fully round, so that is the
+        // slider's end, shown as "Full". The value stays as the file has it.
+        const radiusMax = Math.max(1, Math.floor(Math.min(rect.width, rect.height) / 2));
         add("radius", "border-radius", "Radius", {
           type: "number",
           unit: "px",
           value: String(radii[0]),
           min: 0,
           max: radiusMax,
+          full: radiusMax,
           step: 1,
           sides: BOX_CORNERS.map((corner, index) => ({
             id: `radius-${corner.css}`,
@@ -1027,6 +1031,7 @@
             value: String(radii[index]),
             min: 0,
             max: radiusMax,
+            full: radiusMax,
             step: 1,
             scope: "element",
           })),

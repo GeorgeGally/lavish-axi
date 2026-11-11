@@ -302,3 +302,111 @@ test(
     }
   },
 );
+
+const PILL_HTML = `<!doctype html>
+<html><head><meta charset="utf-8"><title>pill</title><style>
+body { margin: 0; padding: 40px; font: 16px sans-serif; }
+.pill { display: inline-block; box-sizing: border-box; width: 160px; height: 40px; line-height: 40px; padding: 0 16px; background: rgb(230, 230, 230); border-radius: 9999px; }
+</style></head>
+<body><span class="pill" id="p">Pill button</span></body></html>
+`;
+
+// A pill's 9999px radius must not set the Radius slider's scale: the slider runs from
+// square to half the smaller side, its end says Full, and typed values still go in.
+test(
+  "Radius on a pill ends at Full, drags smoothly in between, and keeps typed values",
+  { skip: !runBrowserE2e || !findChrome(), timeout: 240_000 },
+  async () => {
+    const b = await startBoard("01-pill.html", PILL_HTML);
+    const { send, evaluate, tapAlt, click, design, pointInDesign, url } = b;
+    try {
+      await send("Page.enable");
+      await send("Page.navigate", { url });
+      await sleep(2500);
+      const desktop = await design();
+      /** @param {string} css */
+      const cssOf = (css) =>
+        evaluate(`getComputedStyle(document.querySelector("#p")).getPropertyValue(${JSON.stringify(css)})`, desktop);
+      const radius = `[...document.querySelectorAll("#tuneBody > .tune-control")].find((c) => c.querySelector(".tune-control-label span")?.textContent === "Radius")`;
+      const range = `${radius}.querySelector('input[type="range"]')`;
+      const shown = () => evaluate(`${radius}.querySelector(".tune-control-value").textContent`);
+      /** @param {number} value */
+      const slide = async (value) => {
+        await evaluate(`(() => {
+          const input = ${range};
+          input.value = ${JSON.stringify(String(value))};
+          input.dispatchEvent(new Event("input", { bubbles: true }));
+          input.dispatchEvent(new Event("change", { bubbles: true }));
+        })()`);
+        await sleep(600);
+      };
+
+      const point = await pointInDesign(desktop, "#p");
+      await tapAlt();
+      await click(point.x, point.y);
+      await tapAlt();
+
+      // The pill reads Full, and the slider spans square to half the 40px height.
+      assert.equal(await shown(), "Full");
+      assert.equal(await evaluate(`${range}.max`), "20");
+      assert.equal(await evaluate(`${range}.value`), "20");
+
+      // In between is smooth px; the end is a pill again.
+      await slide(7);
+      assert.equal(await cssOf("border-top-left-radius"), "7px");
+      assert.equal(await shown(), "7");
+      await slide(13);
+      assert.equal(await cssOf("border-bottom-right-radius"), "13px");
+      await slide(20);
+      assert.equal(await cssOf("border-top-left-radius"), "9999px");
+      assert.equal(await shown(), "Full");
+
+      // A typed value goes in as typed, large ones too, without stretching the slider.
+      /** @param {string} text */
+      const type = async (text) => {
+        await evaluate(`${radius}.querySelector(".tune-control-value").click()`);
+        await sleep(200);
+        await evaluate(`(() => {
+          const field = ${radius}.querySelector(".tune-value-input");
+          field.value = ${JSON.stringify(text)};
+          field.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+        })()`);
+        await sleep(600);
+      };
+      await type("500");
+      assert.equal(await cssOf("border-top-left-radius"), "500px");
+      assert.equal(await evaluate(`${range}.max`), "20");
+      assert.equal(await shown(), "Full");
+      await type("4");
+      assert.equal(await cssOf("border-top-left-radius"), "4px");
+      assert.equal(await shown(), "4");
+
+      // The link toggle still opens the four corners, each on the same useful scale.
+      await evaluate(`${radius}.querySelector(".tune-link").click()`);
+      await sleep(400);
+      const corners = () =>
+        evaluate(
+          `[...${radius}.querySelectorAll(".tune-side")].map((s) => s.querySelector(".tune-control-label span").textContent + "=" + s.querySelector(".tune-control-value").textContent + "/" + s.querySelector('input[type="range"]').max)`,
+        );
+      assert.deepEqual(await corners(), ["Top left=4/20", "Top right=4/20", "Bottom right=4/20", "Bottom left=4/20"]);
+      await evaluate(`(() => {
+        const side = [...${radius}.querySelectorAll(".tune-side")].find((s) => s.querySelector(".tune-control-label span").textContent === "Top right");
+        const input = side.querySelector('input[type="range"]');
+        input.value = "20";
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        input.dispatchEvent(new Event("change", { bubbles: true }));
+      })()`);
+      await sleep(600);
+      assert.equal(await cssOf("border-top-right-radius"), "9999px");
+      assert.equal(await cssOf("border-top-left-radius"), "4px");
+      assert.deepEqual(await corners(), [
+        "Top left=4/20",
+        "Top right=Full/20",
+        "Bottom right=4/20",
+        "Bottom left=4/20",
+      ]);
+    } finally {
+      await b.close();
+    }
+  },
+);

@@ -3842,7 +3842,7 @@ input.agent-input {
   outline: none;
 }
 
-.tune-control-value[data-unit]:not(:empty):not([data-mixed])::after {
+.tune-control-value[data-unit]:not(:empty):not([data-mixed]):not([data-full])::after {
   content: attr(data-unit);
   opacity: 0.55;
   margin-left: 1px;

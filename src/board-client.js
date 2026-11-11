@@ -5753,10 +5753,11 @@ function applyBoxValue(control, sides, raw, all) {
 /** Show a value on a rendered slider without firing its input. @param {HTMLElement} node @param {string} raw */
 function showSliderValue(node, raw) {
   const input = /** @type {HTMLInputElement | null} */ (node.querySelector('input[type="range"]'));
-  const label = node.querySelector(".tune-control-value");
-  if (label) label.textContent = raw;
+  const label = /** @type {HTMLElement | null} */ (node.querySelector(".tune-control-value"));
+  if (label) showValueText(label, raw, Number(input?.dataset.full) || 0);
   if (!input) return;
   input.value = raw;
+  input.dataset.raw = raw;
   const low = Number(input.min) || 0;
   const high = Number(input.max) || 100;
   const percent = ((Number(input.value) - low) / (high - low || 1)) * 100;
@@ -6588,9 +6589,27 @@ function createColourControl(label, initial, apply, { palette = [], variable = "
   return root;
 }
 
+/**
+ * Radius past its "full" end-stop is a pill: the end of the slider says Full, not a raw
+ * number like 9999 (or a computed huge radius), and writes this.
+ */
+const FULL_RADIUS = "9999";
+
+/**
+ * A slider's value label: the value, or Full at (or past) the control's full end-stop.
+ * @param {HTMLElement} label @param {string} raw @param {number} full
+ */
+function showValueText(label, raw, full) {
+  const isFull = full > 0 && raw !== "" && Number(raw) >= full;
+  label.textContent = isFull ? "Full" : String(raw);
+  label.toggleAttribute("data-full", isFull);
+}
+
 function createTuneControl(item, control, onChange) {
   const wrapper = element("div", { class: "tune-control" });
-  const valueLabel = element("span", { class: "tune-control-value", text: String(item.tune[control.id] ?? "") });
+  const full = control.type === "number" && Number(control.full) > 0 ? Number(control.full) : 0;
+  const valueLabel = element("span", { class: "tune-control-value" });
+  showValueText(valueLabel, String(item.tune[control.id] ?? ""), full);
   const label = element("label", { class: "tune-control-label" });
   label.append(element("span", { text: control.label }), valueLabel);
   if (control.type === "color" || control.type === "font") valueLabel.hidden = true;
@@ -6599,7 +6618,7 @@ function createTuneControl(item, control, onChange) {
     // An element control opens its own undo step in applyTargetValue.
     if (!onChange) beginTuneEdit(item);
     item.tune[control.id] = raw;
-    valueLabel.textContent = String(raw);
+    showValueText(valueLabel, String(raw), full);
     if (onChange) {
       // After the change is saved, so Send sees it.
       onChange(raw);
@@ -6807,6 +6826,9 @@ function createTuneControl(item, control, onChange) {
       step: String(control.step ?? 1),
     });
     input.value = String(value);
+    // The value as set, which a full-ended slider can hold past its end.
+    input.dataset.raw = String(value);
+    if (full) input.dataset.full = String(full);
     const paint = () => {
       const low = Number(input.min) || 0;
       const high = Number(input.max) || 100;
@@ -6814,7 +6836,14 @@ function createTuneControl(item, control, onChange) {
       input.style.setProperty("--fill", `${Math.max(0, Math.min(100, percent))}%`);
     };
     input.addEventListener("input", paint);
-    input.addEventListener("input", () => apply(input.value));
+    input.addEventListener("input", () => {
+      // A typed value goes in as typed; a full-ended slider dragged to its end is a pill.
+      const typed = input.dataset.typed;
+      delete input.dataset.typed;
+      const raw = typed ?? (full && Number(input.value) >= full ? FULL_RADIUS : input.value);
+      input.dataset.raw = raw;
+      apply(raw);
+    });
     input.addEventListener("change", endTuneEdit);
     paint();
     wrapper.append(input);
@@ -6828,7 +6857,8 @@ function createTuneControl(item, control, onChange) {
  * A slider's value number is a field too: a click (or Enter) opens it with the value
  * selected; Enter or leaving applies what was typed, Escape puts the value back, and
  * the arrow keys nudge it by the slider's step (Shift for ten). A typed value past the
- * slider's ends is kept, and the slider's range widens to show it.
+ * slider's ends is kept, and the slider's range widens to show it, except past a full
+ * end-stop (Radius), where the slider stays at its end so its scale stays useful.
  * @param {HTMLElement} label @param {HTMLInputElement} range @param {string} name @param {string} unit
  */
 function bindValueEdit(label, range, name, unit) {
@@ -6840,7 +6870,8 @@ function bindValueEdit(label, range, name, unit) {
   /** @param {string} raw */
   const set = (raw) => {
     const value = Number(raw);
-    if (value > Number(range.max)) range.max = String(value);
+    if (range.dataset.full) range.dataset.typed = raw;
+    else if (value > Number(range.max)) range.max = String(value);
     if (value < Number(range.min)) range.min = String(value);
     // The slider snaps to its step; a typed value goes in exactly as typed.
     const step = range.step;
@@ -6851,7 +6882,8 @@ function bindValueEdit(label, range, name, unit) {
   };
   const open = () => {
     if (label.hidden) return;
-    const original = range.value;
+    const current = () => range.dataset.raw ?? range.value;
+    const original = current();
     const step = Number(range.step) || 1;
     const decimals = (String(step).split(".")[1] || "").length;
     const field = /** @type {HTMLInputElement} */ (
@@ -6873,10 +6905,10 @@ function bindValueEdit(label, range, name, unit) {
       if (closed) return;
       closed = true;
       const value = typed();
-      if (keep && value !== null && String(value) !== range.value) {
+      if (keep && value !== null && String(value) !== current()) {
         set(String(value));
         changed = true;
-      } else if (!keep && changed && range.value !== original) set(original);
+      } else if (!keep && changed && current() !== original) set(original);
       field.remove();
       label.hidden = false;
       // One undo step for whatever the field changed.
@@ -6888,7 +6920,7 @@ function bindValueEdit(label, range, name, unit) {
       else if (event.key === "Escape") close(false);
       else if (event.key === "ArrowUp" || event.key === "ArrowDown") {
         const by = step * (event.shiftKey ? 10 : 1) * (event.key === "ArrowUp" ? 1 : -1);
-        const next = String(Number(((typed() ?? Number(range.value)) + by).toFixed(decimals)));
+        const next = String(Number(((typed() ?? Number(current())) + by).toFixed(decimals)));
         field.value = `${next}${unit}`;
         field.select();
         set(next);
