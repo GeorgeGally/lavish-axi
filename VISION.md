@@ -1,66 +1,80 @@
 # Vision
 
-`liesel` exists so that a person reviewing what an agent rendered can point at it and be understood exactly.
-It is operated by the agent and serves the collaboration between that agent and its human user, turning the person's pointing, selecting, drawing, and typing into instructions the agent receives as their own words.
-It owns exactly one thing: the review loop between one person and one agent over one local HTML file.
+Liesel lets a person review what a coding agent made by pointing at it, and makes sure the agent understands exactly what they meant.
+The agent runs Liesel. The person points, selects, tunes, moves, draws and types, and Liesel turns that into notes the agent receives in the person's own words.
 
-## The artifact stays the author's
+Liesel started as a review loop over one local HTML file. It is now a local board for HTML designs and for a project's running pages. This file draws the line around that product, so a change that crosses the line is easy to spot.
 
-The saved HTML file is the source of truth, and serving it adds exactly one script tag and nothing else.
-Nothing else is injected, because an artifact must render identically when it is opened directly with Liesel absent.
-A rendered Mermaid diagram can be edited as a whiteboard, but the Mermaid source stays authoritative and the edits return as a summary the agent applies to that source.
-Export inlines local assets only and makes no outbound request, so exporting can never become fetching.
-A change that makes the served artifact differ from the file on disk is refused.
+## What Liesel is today
 
-## Interaction beats prose
+- **A board.** A folder (`board.json` plus one HTML file per design) shown in the browser at real device widths, with tabs, versions side by side, a line of builds and History, Duplicate, Accept and Final.
+- **Project previews.** A board for a real project: its running dev server, shown through a local proxy in the same device frames, with notes that carry the page path and selector so the agent edits the project's own source.
+- **Notes to agents.** Pins on elements, text selections, table cells, diagram nodes, image drops and chat messages. Each note goes to the agent with what it points at, a picture of the spot and the viewport width, and shows Seen, Working and Done as the agent picks it up.
+- **View, Chat, Edit and Move.** Edit tunes a page's custom properties or one element's type, colour, spacing and size. Move drags an element. Both are previews kept on the board, and **Send** hands the change to the agent as a note.
+- **Ways to reach the agent.** The CLI long poll (`liesel poll`), an MCP server (`liesel mcp`) that wraps the same loop for chat apps, a notify command, and an agent runner that starts one headless agent run per send for a board whose reviewer picked an agent in Settings.
+- **The single-file review.** `liesel <html-file>` still opens one artifact in the review chrome, with layout warnings, whiteboards for Mermaid diagrams, export and opt-in sharing.
 
-An artifact earns its format by letting the reader understand and answer through the page itself instead of through a wall of text.
-Elements that can be pointed at, diagrams that can be drawn on, and controls that collect an answer are the substance; any one of them, the whiteboard included, is an instance of that and not a feature in its own right.
-A page that could have been a paragraph should have been a paragraph.
+## Is / is not
 
-## An artifact's design is chosen, never defaulted into
+Liesel **is**:
 
-An agent picks a design direction deliberately, in a stated priority order, and says which source it used.
-The artifact matches the project it is about before it matches anything Liesel would prefer.
-Liesel may offer building blocks that are correct by construction, and they stay opt-in, written in by the artifact's author, and reachable when Liesel is not running.
-An artifact that arrives styled at random is a defect in Liesel's guidance before it is a defect in the agent.
+- a review surface between one person and the agents working on their HTML designs and project pages;
+- local: one server on the user's machine, reachable from their own devices (loopback, and Tailscale when it is running);
+- a channel that carries the person's intent to an agent: notes, picks, tunes and moves, all as notes the agent reads;
+- a way to compare versions of a design and see what changed between builds;
+- a place where Edit and Move preview a change on the board and hand it to the agent, who makes the real edit;
+- able to start one headless agent run per send, when the reviewer picked that agent for the board;
+- an MCP server that exposes the same open, poll and reply loop the CLI already has.
 
-## Nothing interrupts the human
+Liesel **is not**:
 
-Time to first interaction is the number that matters, and every check is weighed against the friction it adds for the person waiting.
-Detection is passive: Liesel files what it finds where the user can see it, and only the user selecting an issue turns it into work.
-No detection wakes the agent, returns a poll, or repairs anything; the single exception is a failure that leaves the human nothing to review, where waiting on them to act is pointless.
-Every check fails open, because a false warning on every open costs more than a miss, and a cosmetic finding is never worth a blocked page.
-Only a deliberate human action in the browser becomes feedback the agent receives.
-A warning is cleared by a fresh artifact load and a check that no longer finds it, never by the user being asked to declare it settled.
-A check that blocks the review, edits the artifact, or nags persistently is removed, and machinery that no longer does the job it was built for is deleted rather than kept.
+- a design tool or page builder: it never writes a tune, a move or a dropped image into a design file or a project's source, and the agent does all source edits;
+- an agent supervisor: it does not plan work, retry failed runs, run several agents on one board, keep a task queue or decide when work is finished;
+- a collaboration space for two or more people;
+- a hosting service: publishing goes only to a named third party, never by default;
+- a code editor, an IDE or a deploy tool;
+- a reviewer of Markdown, PDFs or images that have no HTML file behind them;
+- a marketplace or a plugin host.
 
-## Every token is spent on purpose
+## How Liesel behaves
 
-Token efficiency is a first-class concern rather than a later optimization pass.
-Output is compact, waiting is a long poll instead of repeated checks, and guidance is disclosed when it is needed rather than all at once.
-A surface that costs the agent tokens on every run has to earn them on every run.
-Efficiency is never bought with capability: a rule moves behind a command only once agents are shown to follow the pointer, never on the assumption that they will.
-Work a capable agent already does is not rebuilt inside Liesel and then explained back to it.
+**The file stays the author's.** The design file or project source on disk is the truth. Liesel serves it with its own script added and nothing else, and Liesel's own drawing (pins, tags, outlines, guides) never ends up in the saved page, History or an export. Tunes, moves and image drops live in `board.json` until the agent applies them.
 
-## The instructions are the product
+**Only the person's actions become work.** Detection is passive and fails open. A layout warning or any other finding is shown to the person and never wakes the agent, returns a poll or repairs anything. The one exception is a failure that leaves the person nothing to review.
 
-Liesel is a CLI an agent discovers by running it, so its output is an interface and not documentation.
-Every behavior contract has exactly one owner surface, and every other surface points at it instead of restating it.
-The installable skill is a generated stub that points at the CLI for all actual guidance, and the build fails when that stub drifts from its generator.
-When agents behave badly, changing what Liesel tells them is a real fix and is preferred over new machinery.
-Guidance steers the agent's judgment and stops short of rigid rules it can satisfy without thinking.
-Liesel keeps its own files in its own places and never modifies a file the user or another tool owns without being asked, because that trust is spent once.
+**Nothing interrupts the person.** Time to the first interaction is the number that matters. A check that blocks the review, edits the page or nags is removed.
 
-## Scope
+**Interaction beats prose.** A page earns its format by letting the reader answer through the page. A page that could have been a paragraph should have been one.
 
-The review loop runs on the user's machine, and anything that leaves it is opt-in, named, and disclosed at the moment it happens.
-Liesel reviews HTML, and it does not adopt Markdown, PDFs, or images by wrapping them in a page that has no saved file behind it.
-It is one person and one agent, however many windows or screens that person uses; it is not a place for two people to collaborate with each other.
-It is not a hosting service, and publishing goes to a named third party that is never on by default.
-It expects to run inside an agent harness, and the long poll is how that harness holds a continuous session; Liesel does not launch, drive, or supervise the agent itself.
-It is not an MCP server and it has no marketplace, because the CLI is already the agent interface and an installed copy is already complete.
-It does not translate a whiteboard back into Mermaid, and it does not repair artifacts on the user's behalf.
+**Design is chosen, not defaulted.** An agent picks a design direction in a stated order and says which source it used. A page matches the project it is about before it matches anything Liesel prefers.
 
-A change aligns when it carries a human's intent to the agent more precisely, when it keeps the artifact portable and the review uninterrupted, and when it lands in the one surface that already owns the contract it touches.
-A change should be resisted when it acts on the artifact without the reviewer asking, when it makes the served artifact diverge from the saved file, when it spends the agent's tokens or the human's waiting time without earning them, or when it quietly widens Liesel past one person, one agent, and one local HTML file.
+**Every token is spent on purpose.** Output is compact, waiting is a long poll, and guidance is shown when it is needed. Each contract has one owner surface (the CLI output for agents, README for users), and every other surface points at it.
+
+**Liesel touches only its own files unless asked.** It keeps its state in its own places (`~/.liesel`, a board folder, a project's `.liesel/`). It changes a file the user or another tool owns only when a command the user ran says it will (`liesel init`, `liesel setup hooks`, `liesel setup plugin`).
+
+**Anything that leaves the machine is opt-in, named and disclosed when it happens.**
+
+## A change fits when
+
+it carries the person's intent to the agent more exactly, keeps the file on disk the truth, keeps the review uninterrupted, and lands in the one surface that already owns the contract it touches.
+
+A change should be resisted when it edits a design or source file without the agent, acts without the person asking, makes Liesel decide or schedule the agent's work, adds a second person to the loop, or sends something off the machine without saying so.
+
+## Next
+
+These two features are in the vision and are queued:
+
+- **Source-aware inspection.** Map a selected element to the component and source file that render it, so a note on a project page names where to make the change, not only a selector.
+- **A structured change contract for tune handoffs.** Send hands the agent each Edit and Move change as a defined record (element, property, old and new value, scope, device size) instead of loose CSS, so the agent can apply it without guessing.
+
+## Open questions
+
+The source does these today. Their place in the vision is not decided yet:
+
+- **Project setup runs code and uses the network.** Opening a project can clone a GitHub repository, install its dependencies and run its dev command. Is that inside "opt-in, named and disclosed", and should Liesel ask first?
+- **`.git/info/exclude`.** Opening a project adds `/.liesel/` to the repository's exclude file without a separate prompt. Is that Liesel's own file, or a file it should ask before changing?
+- **Google Fonts in the font picker.** Picking a Google font loads it from Google into the design frame. Is that an outbound request that needs disclosing?
+- **The agent runner's edge.** One headless run per send is in. Where it stops (retries, choosing a model, running several boards' agents at once, long-running runs) is not settled.
+- **The single-file review and the board.** Both are kept and work differently (layout warnings, whiteboards and sharing exist only in the single-file review). Should one become a mode of the other?
+- **Whiteboards.** Mermaid diagrams become editable Excalidraw whiteboards in the single-file review. Do they belong on boards too, or stay where they are?
+- **Hosted sharing.** `liesel share` publishes to ht-ml.app. It is opt-in and named, but is publishing still part of a local review tool?
