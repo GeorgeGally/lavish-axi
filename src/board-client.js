@@ -5488,13 +5488,15 @@ function outlineInFrame(selector) {
   postToArtboard(tuneTarget.itemId, tuneTarget.deviceId, { type: "outline", selector });
 }
 
-/** @param {"element" | "section"} [scope] */
+/** @param {"element" | "section" | "after" | "before"} [scope] */
 function targetSelector(scope) {
   if (!tuneTarget) return "";
   if (scope === "section") return tuneTarget.sectionSelector || "";
   // "All like this" tunes every element in the same spot, under one shared selector.
-  if (tuneTarget.scope === "all" && tuneTarget.like) return tuneTarget.like.selector;
-  return tuneTarget.selector || "";
+  const base = tuneTarget.scope === "all" && tuneTarget.like ? tuneTarget.like.selector : tuneTarget.selector || "";
+  // An underline drawn by a pseudo-element is tuned through that pseudo-element's rule.
+  if (base && (scope === "after" || scope === "before")) return `${base}::${scope}`;
+  return base;
 }
 
 /** @type {ReturnType<typeof setTimeout> | undefined} */
@@ -5802,6 +5804,7 @@ function renderBoxControl(control) {
     const current = sideValues(control);
     const same = current.every((value) => value === current[0]);
     showSliderValue(node, same ? current[0] : String(values[control.id] ?? control.value ?? ""));
+    valueLabel?.toggleAttribute("data-mixed", !same);
     if (!same && valueLabel) valueLabel.textContent = "Mixed";
   };
   function fill() {
@@ -5970,6 +5973,12 @@ function panelSelectors() {
   if (!tuneTarget) return [];
   const selectors = [tuneTarget.selector || "", tuneTarget.like?.selector || "", tuneTarget.sectionSelector || ""];
   for (const group of tuneTarget.inherited || []) selectors.push(group.selector);
+  // A pseudo-element's line, for the element alone and for all like it.
+  for (const control of tuneTarget.controls || []) {
+    if (control.scope !== "after" && control.scope !== "before") continue;
+    for (const base of [tuneTarget.selector, tuneTarget.like?.selector])
+      if (base) selectors.push(`${base}::${control.scope}`);
+  }
   return [...new Set(selectors.filter(Boolean))];
 }
 
@@ -6087,6 +6096,12 @@ function tuneChanges() {
  */
 function changeTarget(selector) {
   if (!tuneTarget) return { label: "Page tokens", scope: { kind: "page" } };
+  // A pseudo-element's line reaches what its element reaches.
+  const pseudo = /::(after|before)$/.exec(selector);
+  if (pseudo) {
+    const target = changeTarget(selector.slice(0, pseudo.index));
+    return { ...target, label: `${target.label}::${pseudo[1]}` };
+  }
   if (tuneTarget.like && selector === tuneTarget.like.selector && selector !== tuneTarget.selector)
     return {
       label: tuneTarget.label || selector,
@@ -6453,6 +6468,7 @@ function createColourControl(label, initial, apply) {
       apply(current);
     });
     input.addEventListener("change", endTuneEdit);
+    bindValueEdit(value, input, `${label} ${name}`, unit);
     row.append(title, input);
     return {
       row,
@@ -6744,8 +6760,97 @@ function createTuneControl(item, control, onChange) {
     input.addEventListener("change", endTuneEdit);
     paint();
     wrapper.append(input);
+    if (control.unit) valueLabel.dataset.unit = control.unit;
+    bindValueEdit(valueLabel, /** @type {HTMLInputElement} */ (input), control.label, control.unit || "");
   }
   return wrapper;
+}
+
+/**
+ * A slider's value number is a field too: a click (or Enter) opens it with the value
+ * selected; Enter or leaving applies what was typed, Escape puts the value back, and
+ * the arrow keys nudge it by the slider's step (Shift for ten). A typed value past the
+ * slider's ends is kept, and the slider's range widens to show it.
+ * @param {HTMLElement} label @param {HTMLInputElement} range @param {string} name @param {string} unit
+ */
+function bindValueEdit(label, range, name, unit) {
+  label.classList.add("tune-value-edit");
+  label.tabIndex = 0;
+  label.setAttribute("role", "button");
+  label.setAttribute("aria-label", `${name}: type a value`);
+  label.title = "Click to type a value";
+  /** @param {string} raw */
+  const set = (raw) => {
+    const value = Number(raw);
+    if (value > Number(range.max)) range.max = String(value);
+    if (value < Number(range.min)) range.min = String(value);
+    // The slider snaps to its step; a typed value goes in exactly as typed.
+    const step = range.step;
+    range.step = "any";
+    range.value = raw;
+    range.dispatchEvent(new Event("input", { bubbles: true }));
+    range.step = step;
+  };
+  const open = () => {
+    if (label.hidden) return;
+    const original = range.value;
+    const step = Number(range.step) || 1;
+    const decimals = (String(step).split(".")[1] || "").length;
+    const field = /** @type {HTMLInputElement} */ (
+      element("input", { class: "tune-value-input", type: "text", inputmode: "decimal", "aria-label": `${name} value` })
+    );
+    field.value = `${original}${unit}`;
+    label.hidden = true;
+    label.after(field);
+    field.focus();
+    field.select();
+    let changed = false;
+    let closed = false;
+    const typed = () => {
+      const value = Number.parseFloat(field.value);
+      return Number.isFinite(value) ? value : null;
+    };
+    /** @param {boolean} keep */
+    const close = (keep) => {
+      if (closed) return;
+      closed = true;
+      const value = typed();
+      if (keep && value !== null && String(value) !== range.value) {
+        set(String(value));
+        changed = true;
+      } else if (!keep && changed && range.value !== original) set(original);
+      field.remove();
+      label.hidden = false;
+      // One undo step for whatever the field changed.
+      if (changed) range.dispatchEvent(new Event("change", { bubbles: true }));
+      if (keep || !changed) label.focus();
+    };
+    field.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") close(true);
+      else if (event.key === "Escape") close(false);
+      else if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+        const by = step * (event.shiftKey ? 10 : 1) * (event.key === "ArrowUp" ? 1 : -1);
+        const next = String(Number(((typed() ?? Number(range.value)) + by).toFixed(decimals)));
+        field.value = `${next}${unit}`;
+        field.select();
+        set(next);
+        changed = true;
+      } else return;
+      event.preventDefault();
+      event.stopPropagation();
+    });
+    field.addEventListener("blur", () => close(true));
+  };
+  label.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    open();
+  });
+  label.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    open();
+  });
 }
 
 /** @type {null | { select: HTMLSelectElement, close: (keep: boolean) => void }} */

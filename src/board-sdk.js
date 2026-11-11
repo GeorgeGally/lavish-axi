@@ -638,6 +638,167 @@
    * @param {Element} element
    * @param {Element | null} section
    */
+  const DECORATION_LINES = [
+    { value: "none", label: "None" },
+    { value: "underline", label: "Underline" },
+    { value: "overline", label: "Overline" },
+    { value: "line-through", label: "Strike" },
+  ];
+  const DECORATION_STYLES = ["solid", "double", "dotted", "dashed", "wavy"].map((value) => ({ value, label: value }));
+
+  /**
+   * The line under a piece of text, wherever the page draws it: text-decoration (its
+   * line, colour, thickness and offset), a bottom border alone (its width, colour, and
+   * the padding that sets its offset), or a thin ::after or ::before bar (its colour,
+   * thickness and offset, tuned through the pseudo-element's own selector).
+   * @param {Element} element @param {CSSStyleDeclaration} style @param {boolean} bordered
+   */
+  function underlineControls(element, style, bordered) {
+    /** @type {any[]} */
+    const controls = [];
+    /** @param {string} id @param {string} css @param {string} label @param {Record<string, unknown>} control @param {string} [scope] */
+    const add = (id, css, label, control, scope = "element") => controls.push({ id, css, label, scope, ...control });
+    const fontSize = pxOf(style.fontSize) || 16;
+    const line = String(style.textDecorationLine || "none");
+    add("text-decoration-line", "text-decoration-line", "Underline", {
+      type: "select",
+      value: line,
+      options: DECORATION_LINES.some((option) => option.value === line)
+        ? DECORATION_LINES
+        : [{ value: line, label: line }, ...DECORATION_LINES],
+    });
+    if (line !== "none") {
+      add("text-decoration-color", "text-decoration-color", "Line colour", {
+        type: "color",
+        value: hexOf(style.textDecorationColor || style.color),
+      });
+      add("text-decoration-style", "text-decoration-style", "Line style", {
+        type: "select",
+        value: String(style.textDecorationStyle || "solid"),
+        options: DECORATION_STYLES,
+      });
+      const thickness = style.textDecorationThickness;
+      add("text-decoration-thickness", "text-decoration-thickness", "Line thickness", {
+        type: "number",
+        unit: "px",
+        value: String(
+          thickness.endsWith("px") ? Math.round(pxOf(thickness) * 10) / 10 : Math.max(1, Math.round(fontSize / 14)),
+        ),
+        min: 0,
+        max: Math.max(8, Math.round(fontSize / 2)),
+        step: 0.5,
+      });
+      const offset = style.textUnderlineOffset;
+      add("text-underline-offset", "text-underline-offset", "Line offset", {
+        type: "number",
+        unit: "px",
+        value: String(offset.endsWith("px") ? Math.round(pxOf(offset) * 10) / 10 : 0),
+        min: -8,
+        max: Math.max(16, Math.round(fontSize)),
+        step: 0.5,
+      });
+    }
+    // A bottom border on its own is an underline; a full border is Border's.
+    const bottom = pxOf(style.borderBottomWidth);
+    if (!bordered && bottom > 0 && style.borderBottomStyle !== "none") {
+      add("underline-border-color", "border-bottom-color", "Line colour", {
+        type: "color",
+        value: hexOf(style.borderBottomColor),
+      });
+      add("underline-border-width", "border-bottom-width", "Line thickness", {
+        type: "number",
+        unit: "px",
+        value: String(Math.round(bottom * 10) / 10),
+        min: 0,
+        max: 12,
+        step: 0.5,
+      });
+      const below = Math.round(pxOf(style.paddingBottom));
+      add("underline-border-offset", "padding-bottom", "Line offset", {
+        type: "number",
+        unit: "px",
+        value: String(below),
+        min: 0,
+        max: Math.max(24, below * 3),
+        step: 1,
+      });
+    }
+    for (const pseudo of /** @type {const} */ (["after", "before"])) {
+      const bar = getComputedStyle(element, `::${pseudo}`);
+      if (!bar || bar.content === "none" || bar.content === "normal" || bar.display === "none") continue;
+      const ownBorder = pxOf(bar.borderBottomWidth) > 0 && bar.borderBottomStyle !== "none";
+      const height = pxOf(bar.height);
+      // A bar: a thin painted strip or a bottom border under an empty box.
+      const painted = !/^rgba?\(0,\s*0,\s*0,\s*0\)$|^transparent$/.test(bar.backgroundColor.trim());
+      if (!(ownBorder && height <= 1) && !(painted && height > 0 && height <= 8)) continue;
+      const prefix = `${pseudo}-line`;
+      if (ownBorder)
+        add(
+          `${prefix}-color`,
+          "border-bottom-color",
+          `Line colour (::${pseudo})`,
+          { type: "color", value: hexOf(bar.borderBottomColor) },
+          pseudo,
+        );
+      else
+        add(
+          `${prefix}-color`,
+          "background-color",
+          `Line colour (::${pseudo})`,
+          { type: "color", value: hexOf(bar.backgroundColor) },
+          pseudo,
+        );
+      const thick = ownBorder ? pxOf(bar.borderBottomWidth) : height;
+      add(
+        `${prefix}-thickness`,
+        ownBorder ? "border-bottom-width" : "height",
+        `Line thickness (::${pseudo})`,
+        { type: "number", unit: "px", value: String(Math.round(thick * 10) / 10), min: 0, max: 12, step: 0.5 },
+        pseudo,
+      );
+      if (bar.position === "absolute" || bar.position === "fixed") {
+        const fromBottom = bar.bottom.endsWith("px") ? Math.round(pxOf(bar.bottom)) : 0;
+        add(
+          `${prefix}-offset`,
+          "bottom",
+          `Line offset (::${pseudo})`,
+          { type: "number", unit: "px", value: String(fromBottom), min: -24, max: 24, step: 1 },
+          pseudo,
+        );
+      }
+    }
+    return controls;
+  }
+
+  /**
+   * Which property sets this element's rendered width, so the Width control changes
+   * what the reader sees: a flex item in a row is sized by its basis (and grows into
+   * spare room), a max-width caps a wider width, and a min-width that holds the box
+   * open is offered beside it. Anything else is sized by width itself.
+   * @param {Element} element @param {CSSStyleDeclaration} style @param {number} width
+   * @returns {{ css: string, label: string, value: number, grow: number, minWidth: number }}
+   */
+  function widthSizingOf(element, style, width) {
+    const parent = element.parentElement;
+    const parentStyle = parent ? getComputedStyle(parent) : null;
+    const flexRow =
+      Boolean(parentStyle) &&
+      /flex/.test(parentStyle?.display || "") &&
+      /^row/.test(parentStyle?.flexDirection || "row");
+    const grow = flexRow ? Number(style.flexGrow) || 0 : 0;
+    // Compared with the used width, which counts padding the way box-sizing says to.
+    const used = pxOf(style.width) || width;
+    const minPx = style.minWidth.endsWith("px") ? Math.round(pxOf(style.minWidth)) : 0;
+    // A min-width at (or over) the rendered width is what keeps it from getting narrower.
+    const minWidth = minPx > 0 && minPx >= used - 1 ? minPx : 0;
+    if (flexRow && (style.flexBasis !== "auto" || grow > 0))
+      return { css: "flex-basis", label: "Width (flex-basis)", value: Math.round(used), grow, minWidth };
+    // A max-width that the box sits at is the cap: a wider width would never show.
+    if (style.maxWidth.endsWith("px") && Math.abs(pxOf(style.maxWidth) - used) <= 1)
+      return { css: "max-width", label: "Max width", value: Math.round(used), grow, minWidth };
+    return { css: "width", label: "Width", value: width, grow, minWidth };
+  }
+
   function elementTuneControls(element, section) {
     const style = getComputedStyle(element);
     const box = style.display !== "inline" && element.tagName !== "BR";
@@ -696,6 +857,7 @@
         step: 1,
       });
     }
+    if (text) controls.push(...underlineControls(element, style, bordered));
     if (paints) {
       add("fill", "background-color", "Fill", { type: "color", value: hexOf(style.backgroundColor) });
     }
@@ -735,14 +897,27 @@
         sides: boxSides("margin", margins, marginMin, marginMax),
       });
       const width = Math.round(element.getBoundingClientRect().width);
-      add("width", "width", "Width", {
+      const sizing = widthSizingOf(element, style, width);
+      add("width", sizing.css, sizing.label, {
         type: "number",
         unit: "px",
-        value: String(width),
+        value: String(sizing.value),
         min: 40,
         max: Math.max(320, Math.round(width * 2)),
         step: 1,
       });
+      // A flex item that grows takes the row's spare room whatever its basis: say so beside it.
+      if (sizing.grow > 0)
+        add("flex-grow", "flex-grow", "Grow", { type: "number", value: String(sizing.grow), min: 0, max: 10, step: 1 });
+      if (sizing.minWidth > 0)
+        add("min-width", "min-width", "Min width", {
+          type: "number",
+          unit: "px",
+          value: String(sizing.minWidth),
+          min: 0,
+          max: Math.max(320, sizing.minWidth * 2),
+          step: 1,
+        });
       const rect = element.getBoundingClientRect();
       add("height", "height", "Height", {
         type: "number",
@@ -1184,8 +1359,50 @@
   /** @type {Map<string, Map<string, string>>} */
   const groupStyles = new Map();
 
-  /** @param {string} selector */
+  /** A selector that names a pseudo-element: its rule, not an element, takes the value. */
+  const PSEUDO_SELECTOR = /::(?:after|before)$/;
+  /** What the panel set on pseudo-elements, by selector. Inline styles cannot reach them. */
+  /** @type {Map<string, Map<string, string>>} */
+  const pseudoStyles = new Map();
+  /** @type {HTMLStyleElement | null} */
+  let pseudoSheet = null;
+
+  /** @param {string} selector @param {string} css @param {string} value */
+  function applyPseudoStyle(selector, css, value) {
+    // The sheet takes text, so a selector or value that could close the rule is dropped.
+    if (/[{}<;]/.test(selector + css + value) || elementsFor(selector).length === 0) return;
+    const values = pseudoStyles.get(selector) || new Map();
+    if (value) values.set(css, value);
+    else values.delete(css);
+    if (values.size > 0) pseudoStyles.set(selector, values);
+    else pseudoStyles.delete(selector);
+    writePseudoSheet();
+  }
+
+  function writePseudoSheet() {
+    if (!pseudoSheet) {
+      if (pseudoStyles.size === 0) return;
+      pseudoSheet = document.createElement("style");
+      pseudoSheet.setAttribute("data-liesel-ui", "");
+      document.head.append(pseudoSheet);
+    }
+    // A preview over the page's own rule for it, so it wins whatever that rule's weight.
+    pseudoSheet.textContent = [...pseudoStyles]
+      .map(
+        ([selector, values]) =>
+          `${selector} { ${[...values].map(([css, value]) => `${css}: ${value} !important;`).join(" ")} }`,
+      )
+      .join("\n");
+  }
+
+  /** Take the pseudo-element preview off while the page's own values are read, and back. @param {boolean} on */
+  function pseudoPreview(on) {
+    if (pseudoSheet) pseudoSheet.media = on ? "" : "not all";
+  }
+
+  /** @param {string} selector the elements a selector names, a pseudo-element's by its element */
   function elementsFor(selector) {
+    selector = selector.replace(PSEUDO_SELECTOR, "");
     try {
       return [...document.querySelectorAll(selector)].filter(
         (node) => (node instanceof HTMLElement || node instanceof SVGElement) && !node.closest("[data-liesel-ui]"),
@@ -1213,6 +1430,10 @@
   /** @param {string} selector @param {string} css @param {string} value */
   function applyElementStyle(selector, css, value) {
     if (!selector || !css) return;
+    if (PSEUDO_SELECTOR.test(selector)) {
+      applyPseudoStyle(selector, css, value);
+      return;
+    }
     const elements = elementsFor(selector);
     const group = elements.length > 1;
     if (group) {
@@ -1273,6 +1494,8 @@
     }
     elementStyles.clear();
     groupStyles.clear();
+    pseudoStyles.clear();
+    writePseudoSheet();
   }
 
   /** @param {Element} node */
@@ -1726,7 +1949,7 @@
     let element = null;
     if (editLabel.selector) {
       try {
-        element = document.querySelector(editLabel.selector);
+        element = document.querySelector(editLabel.selector.replace(PSEUDO_SELECTOR, ""));
       } catch {
         element = null;
       }
@@ -1891,6 +2114,7 @@
     for (const [node, applied] of held) {
       if (applied) for (const css of applied.keys()) node.style.removeProperty(css);
     }
+    pseudoPreview(false);
     /** @type {any[]} */
     const controls = page ? pageControls() : elementTuneControls(element, owner);
     // A box's text settings reach only the text that does not set its own.
@@ -1953,6 +2177,7 @@
     for (const [node, applied] of held) {
       if (applied) restyle(node, applied);
     }
+    pseudoPreview(true);
     post({ type: "tune-target", ...payload, controls });
   }
 

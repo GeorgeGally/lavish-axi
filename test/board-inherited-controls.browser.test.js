@@ -647,3 +647,216 @@ test(
     }
   },
 );
+
+/**
+ * Pick an element in the desktop design and read or set the Controls panel by label.
+ * @param {Awaited<ReturnType<typeof startBoard>>} b @param {string} desktop
+ */
+function controlsOf(b, desktop) {
+  const { evaluate, tapAlt, click, pointInDesign } = b;
+  return {
+    /** @param {string} selector */
+    async pick(selector) {
+      const point = await pointInDesign(desktop, selector);
+      await tapAlt();
+      await click(point.x, point.y);
+      await tapAlt();
+    },
+    labels: () =>
+      evaluate(
+        `[...document.querySelectorAll("#tuneBody > .tune-control .tune-control-label span:first-child")].map((s) => s.textContent)`,
+      ),
+    /** @param {string} label @param {string} value */
+    async set(label, value) {
+      const found = await evaluate(`(() => {
+        const control = [...document.querySelectorAll("#tuneBody > .tune-control")].find((c) => c.querySelector(".tune-control-label span")?.textContent === ${JSON.stringify(label)});
+        if (!control) return false;
+        const input = control.querySelector("input[type=range]") || control.querySelector("select");
+        input.value = ${JSON.stringify(value)};
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        input.dispatchEvent(new Event("change", { bubbles: true }));
+        return true;
+      })()`);
+      assert.ok(found, `no ${label} control`);
+      await sleep(600);
+    },
+  };
+}
+
+const WIDTH_HTML = `<!doctype html>
+<html><head><meta charset="utf-8"><title>width</title><style>
+body { margin: 0; font-family: Helvetica, Arial, sans-serif; }
+main { padding: 24px; width: 900px; }
+.row { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 24px; }
+.basis-full { flex-basis: 100%; margin: 0; }
+.capped { max-width: 300px; padding: 8px; background: rgb(240, 240, 240); }
+</style></head>
+<body><main>
+<div class="row"><span id="label">Inactive for</span><p class="basis-full" id="note">Reckless is on: after one confirmation it starts straight away.</p></div>
+<div class="capped" id="capped">A block capped by its max-width, sitting in a much wider page.</div>
+</main></body></html>
+`;
+
+// Width changes what shows: a flex item set by its basis, a box held by its max-width.
+test(
+  "Controls width drives flex-basis in a flex row and max-width on a capped box",
+  { skip: !runBrowserE2e || !findChrome(), timeout: 240_000 },
+  async () => {
+    const b = await startBoard("01-width.html", WIDTH_HTML);
+    const { send, evaluate, design, saved, url } = b;
+    try {
+      await send("Page.enable");
+      await send("Page.navigate", { url });
+      await sleep(2500);
+      const desktop = await design();
+      const panel = controlsOf(b, desktop);
+      /** @param {string} selector */
+      const widthOf = (selector) =>
+        evaluate(
+          `Math.round(document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect().width)`,
+          desktop,
+        );
+
+      await panel.pick("#note");
+      assert.ok((await panel.labels()).includes("Width (flex-basis)"), JSON.stringify(await panel.labels()));
+      await panel.set("Width (flex-basis)", "320");
+      assert.equal(await widthOf("#note"), 320);
+
+      await panel.pick("#capped");
+      const labels = await panel.labels();
+      assert.ok(labels.includes("Max width"), JSON.stringify(labels));
+      assert.ok(!labels.includes("Width"), JSON.stringify(labels));
+      await panel.set("Max width", "520");
+      // Content-box: the cap is the content width, and its 8px padding shows either side.
+      assert.equal(await widthOf("#capped"), 536);
+
+      const tunes = Object.values(await saved());
+      assert.ok(
+        tunes.some((css) => css["flex-basis"] === "320px"),
+        JSON.stringify(tunes),
+      );
+      assert.ok(
+        tunes.some((css) => css["max-width"] === "520px"),
+        JSON.stringify(tunes),
+      );
+    } finally {
+      await b.close();
+    }
+  },
+);
+
+const UNDERLINE_HTML = `<!doctype html>
+<html><head><meta charset="utf-8"><title>underline</title><style>
+body { margin: 0; font-family: Helvetica, Arial, sans-serif; }
+main { padding: 40px; }
+#promo { display: inline-block; font-size: 24px; text-decoration: underline; text-decoration-color: rgb(207, 202, 194); text-underline-offset: 4px; }
+#bar { position: relative; display: inline-block; margin: 40px 0; font-size: 28px; }
+#bar::after { content: ""; position: absolute; left: 0; right: 0; bottom: -6px; height: 2px; background: rgb(255, 0, 0); }
+#rule { display: inline-block; font-size: 20px; border-bottom: 2px solid rgb(0, 0, 255); padding-bottom: 2px; }
+</style></head>
+<body><main>
+<div><button id="promo">Have a promo code?</button></div>
+<div><h2 id="bar">Bar under a heading</h2></div>
+<div><span id="rule">Ruled with a border</span></div>
+</main></body></html>
+`;
+
+// The line under text is reachable however the page draws it.
+test(
+  "Controls tunes an underline drawn by text-decoration, a ::after bar or a bottom border",
+  { skip: !runBrowserE2e || !findChrome(), timeout: 240_000 },
+  async () => {
+    const b = await startBoard("01-underline.html", UNDERLINE_HTML);
+    const { send, evaluate, design, saved, url } = b;
+    try {
+      await send("Page.enable");
+      await send("Page.navigate", { url });
+      await sleep(2500);
+      const desktop = await design();
+      const panel = controlsOf(b, desktop);
+      /** @param {string} selector @param {string} css @param {string} [pseudo] */
+      const styleOf = (selector, css, pseudo = "") =>
+        evaluate(
+          `getComputedStyle(document.querySelector(${JSON.stringify(selector)})${pseudo ? `, ${JSON.stringify(pseudo)}` : ""}).getPropertyValue(${JSON.stringify(css)})`,
+          desktop,
+        );
+
+      await panel.pick("#promo");
+      for (const label of ["Underline", "Line colour", "Line thickness", "Line offset"])
+        assert.ok((await panel.labels()).includes(label), `${label} in ${JSON.stringify(await panel.labels())}`);
+      await panel.set("Line offset", "10");
+      await panel.set("Line thickness", "3");
+      assert.equal(await styleOf("#promo", "text-underline-offset"), "10px");
+      assert.equal(await styleOf("#promo", "text-decoration-thickness"), "3px");
+
+      await panel.pick("#bar");
+      assert.ok((await panel.labels()).includes("Line thickness (::after)"), JSON.stringify(await panel.labels()));
+      await panel.set("Line thickness (::after)", "5");
+      await panel.set("Line offset (::after)", "-12");
+      assert.equal(await styleOf("#bar", "height", "::after"), "5px");
+      assert.equal(await styleOf("#bar", "bottom", "::after"), "-12px");
+
+      await panel.pick("#rule");
+      await panel.set("Line thickness", "4");
+      assert.equal(await styleOf("#rule", "border-bottom-width"), "4px");
+
+      const tunes = await saved();
+      const after = Object.keys(tunes).find((key) => key.endsWith("::after"));
+      assert.ok(after, JSON.stringify(tunes));
+      assert.deepEqual(tunes[after], { height: "5px", bottom: "-12px" });
+    } finally {
+      await b.close();
+    }
+  },
+);
+
+// Every slider's number is a field: type, nudge with the arrows, or put it back.
+test(
+  "Controls slider values are click-to-edit with Enter, arrows and Escape",
+  { skip: !runBrowserE2e || !findChrome(), timeout: 240_000 },
+  async () => {
+    const b = await startBoard("01-width.html", WIDTH_HTML);
+    const { send, evaluate, design, url } = b;
+    try {
+      await send("Page.enable");
+      await send("Page.navigate", { url });
+      await sleep(2500);
+      const desktop = await design();
+      const panel = controlsOf(b, desktop);
+      const tracking = () => evaluate(`getComputedStyle(document.querySelector("#capped")).letterSpacing`, desktop);
+      /** @param {string} key @param {boolean} [shift] */
+      const key = (key, shift = false) =>
+        evaluate(`(() => {
+          const field = document.querySelector(".tune-value-input");
+          field.dispatchEvent(new KeyboardEvent("keydown", { key: ${JSON.stringify(key)}, shiftKey: ${shift}, bubbles: true }));
+          return document.querySelector(".tune-value-input")?.value ?? null;
+        })()`).then(async (value) => (await sleep(300), value));
+      const open = () =>
+        evaluate(`(() => {
+          const control = [...document.querySelectorAll("#tuneBody > .tune-control")].find((c) => c.querySelector(".tune-control-label span")?.textContent === "Tracking");
+          control.querySelector(".tune-control-value").click();
+          const field = document.querySelector(".tune-value-input");
+          return { value: field.value, focused: document.activeElement === field, selected: field.selectionEnd - field.selectionStart };
+        })()`);
+
+      await panel.pick("#capped");
+      const field = await open();
+      assert.equal(field.value, "0px");
+      assert.ok(field.focused);
+      assert.equal(field.selected, 3, "the value is selected");
+      await evaluate(`document.querySelector(".tune-value-input").value = "2.5"`);
+      assert.equal(await key("Enter"), null, "Enter closes the field");
+      assert.equal(await tracking(), "2.5px");
+
+      await open();
+      assert.equal(await key("ArrowUp", true), "3.5px", "Shift+Up nudges by ten steps");
+      assert.equal(await tracking(), "3.5px");
+      await key("ArrowDown");
+      assert.equal(await tracking(), "3.4px");
+      assert.equal(await key("Escape"), null);
+      assert.equal(await tracking(), "2.5px", "Escape puts the value back");
+    } finally {
+      await b.close();
+    }
+  },
+);

@@ -700,8 +700,9 @@ body[data-gesture="annotate"] .shield {
   cursor: crosshair;
 }
 
+/* Edit points at elements, so it reads as pointing. */
 body[data-gesture="tune"] .shield {
-  cursor: cell;
+  cursor: pointer;
 }
 
 body[data-gesture="move"] .shield {
@@ -3782,6 +3783,37 @@ input.agent-input {
   align-items: center;
   gap: 6px;
   min-width: 0;
+}
+
+/* A slider's value is click-to-type, with its unit shown quietly after it. */
+.tune-value-edit {
+  cursor: text;
+  border-radius: 4px;
+}
+
+.tune-value-edit:hover,
+.tune-value-edit:focus-visible {
+  background: var(--bg);
+  outline: none;
+}
+
+.tune-control-value[data-unit]:not(:empty):not([data-mixed])::after {
+  content: attr(data-unit);
+  opacity: 0.55;
+  margin-left: 1px;
+}
+
+.tune-value-input {
+  width: 64px;
+  font: inherit;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  padding: 0 4px;
+  border: 1px solid var(--select);
+  border-radius: 4px;
+  background: var(--surface-strong);
+  color: var(--ink);
 }
 
 .tune-control-end .tune-control-value {
