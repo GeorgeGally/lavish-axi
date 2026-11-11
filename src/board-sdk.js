@@ -653,6 +653,11 @@
     const round = (value) => Math.round(pxOf(value) * 100) / 100;
 
     if (text) {
+      add("font-family", "font-family", "Font", {
+        type: "font",
+        value: style.fontFamily,
+        options: fontOptions(style.fontFamily),
+      });
       add("color", "color", "Colour", { type: "color", value: hexOf(style.color) });
       const fontSize = Math.max(8, Math.round(pxOf(style.fontSize)));
       add("font-size", "font-size", "Type size", {
@@ -828,12 +833,62 @@
     "text-align": (value) => value === "start" || value === "left",
     "text-transform": (value) => value === "none",
   };
+  // Stacks every machine can show without loading anything. The board adds Google Fonts.
   const FONT_STACKS = [
     { value: "system-ui, -apple-system, sans-serif", label: "System sans" },
+    { value: 'ui-rounded, "SF Pro Rounded", system-ui, sans-serif', label: "System rounded" },
     { value: '"Helvetica Neue", Helvetica, Arial, sans-serif', label: "Helvetica" },
-    { value: "Georgia, 'Times New Roman', serif", label: "Serif" },
+    { value: "Arial, Helvetica, sans-serif", label: "Arial" },
+    { value: '"Avenir Next", Avenir, "Segoe UI", sans-serif', label: "Avenir" },
+    { value: 'Futura, "Century Gothic", sans-serif', label: "Futura" },
+    { value: '"Gill Sans", "Gill Sans MT", Calibri, sans-serif', label: "Gill Sans" },
+    { value: "Verdana, Geneva, sans-serif", label: "Verdana" },
+    { value: "Georgia, 'Times New Roman', serif", label: "Georgia" },
+    { value: '"Times New Roman", Times, serif', label: "Times" },
+    { value: 'Palatino, "Palatino Linotype", "Book Antiqua", serif', label: "Palatino" },
+    { value: "Baskerville, Garamond, serif", label: "Baskerville" },
     { value: "ui-monospace, SFMono-Regular, Menlo, monospace", label: "Mono" },
-  ];
+    { value: '"Courier New", Courier, monospace', label: "Courier" },
+  ].map((stack) => ({ ...stack, group: "system" }));
+
+  /**
+   * The fonts the page itself loads (its @font-face and font links) and the stacks its
+   * text is set in, for the font picker's "On this page".
+   */
+  function pageFonts() {
+    /** @type {Map<string, { value: string, label: string, group: string }>} */
+    const found = new Map();
+    const stacks = new Set();
+    for (const node of Array.from(document.body?.querySelectorAll("*") || []).slice(0, 1500)) {
+      if (node.closest("[data-liesel-ui]") || !shortText(node.textContent)) continue;
+      stacks.add(getComputedStyle(node).fontFamily);
+    }
+    if (document.body) stacks.add(getComputedStyle(document.body).fontFamily);
+    for (const stack of stacks) {
+      const label = fontName(stack);
+      if (stack && !found.has(label.toLowerCase()))
+        found.set(label.toLowerCase(), { value: stack, label, group: "page" });
+    }
+    try {
+      document.fonts.forEach((face) => {
+        if (face.status === "error") return;
+        const label = String(face.family).replace(/["']/g, "").trim();
+        // A font the board loaded for a pick is not one the page loads.
+        if (!label || found.has(label.toLowerCase()) || loadedFontFamilies.has(label.toLowerCase())) return;
+        found.set(label.toLowerCase(), { value: `"${label}", sans-serif`, label, group: "page" });
+      });
+    } catch {
+      // No FontFaceSet: the stacks alone.
+    }
+    return [...found.values()].slice(0, 40);
+  }
+
+  /** @param {string} value the current stack */
+  function fontOptions(value) {
+    const page = pageFonts();
+    const known = [...page, ...FONT_STACKS].some((stack) => stack.value === value);
+    return [...(known || !value ? [] : [{ value, label: fontName(value), group: "page" }]), ...page, ...FONT_STACKS];
+  }
 
   /** @param {string} family */
   function fontName(family) {
@@ -863,15 +918,7 @@
       };
     }
     if (css === "font-family") {
-      const known = FONT_STACKS.some((stack) => stack.value === value);
-      return {
-        id: css,
-        css,
-        label: label || "Font",
-        type: "select",
-        value,
-        options: known ? FONT_STACKS : [{ value, label: fontName(value) }, ...FONT_STACKS],
-      };
+      return { id: css, css, label: label || "Font", type: "font", value, options: fontOptions(value) };
     }
     if (css === "font-weight") {
       const weights = ["300", "400", "500", "600", "700", "800", "900"];
@@ -1368,6 +1415,140 @@
     if (groupOutline) drawGroupOutline();
   });
 
+  /*
+   * Edit's tag: a small black label just above the element Controls holds, naming it and
+   * the property being changed, like DevTools' element tag. Its thin outline shows only
+   * when the board asks (the pointer on the controls, or just after a change) and fades,
+   * so nothing sits on the design while it is judged. The board sends the zoom it draws
+   * the frame at, so the tag stays one size on screen.
+   */
+  /** @type {{ selector: string, property: string, outline: boolean, scale: number }} */
+  const editLabel = { selector: "", property: "", outline: false, scale: 1 };
+  /** @type {ResizeObserver | null} */
+  let editLabelWatch = null;
+  /** @type {Element | null} */
+  let editLabelTarget = null;
+
+  function editLabelLayer() {
+    let layer = document.getElementById("liesel-edit");
+    if (layer) return layer;
+    layer = document.createElement("div");
+    layer.id = "liesel-edit";
+    layer.setAttribute("data-liesel-ui", "edit");
+    layer.style.cssText = "position:absolute;left:0;top:0;width:0;height:0;pointer-events:none;z-index:2147482950";
+    const box = document.createElement("div");
+    box.id = "liesel-edit-box";
+    box.style.cssText = [
+      "position:absolute",
+      "box-sizing:border-box",
+      "border:1px solid #111",
+      "box-shadow:0 0 0 1px rgba(255,255,255,.7)",
+      "opacity:0",
+      "transition:opacity .3s ease",
+    ].join(";");
+    const tag = document.createElement("div");
+    tag.id = "liesel-edit-tag";
+    tag.style.cssText = [
+      "position:absolute",
+      "white-space:nowrap",
+      "background:#111",
+      "color:#fff",
+      "font:500 11px/16px ui-monospace,SFMono-Regular,Menlo,monospace",
+      "letter-spacing:0",
+      "padding:2px 6px",
+      "border-radius:3px",
+      "box-shadow:0 1px 3px rgba(0,0,0,.25)",
+      "transform-origin:0 0",
+    ].join(";");
+    layer.append(box, tag);
+    document.body.appendChild(layer);
+    return layer;
+  }
+
+  function drawEditLabel() {
+    /** @type {Element | null} */
+    let element = null;
+    if (editLabel.selector) {
+      try {
+        element = document.querySelector(editLabel.selector);
+      } catch {
+        element = null;
+      }
+    }
+    if (element && element.closest("[data-liesel-ui]")) element = null;
+    if (element !== editLabelTarget) {
+      editLabelWatch?.disconnect();
+      editLabelTarget = element;
+      if (element && typeof ResizeObserver === "function") {
+        editLabelWatch = editLabelWatch || new ResizeObserver(() => drawEditLabel());
+        editLabelWatch.observe(element);
+      }
+    }
+    const rect = element?.getBoundingClientRect();
+    if (!element || !rect || (rect.width === 0 && rect.height === 0)) {
+      document.getElementById("liesel-edit")?.remove();
+      return;
+    }
+    const layer = editLabelLayer();
+    const box = /** @type {HTMLElement} */ (layer.querySelector("#liesel-edit-box"));
+    const tag = /** @type {HTMLElement} */ (layer.querySelector("#liesel-edit-tag"));
+    const left = rect.left + window.scrollX;
+    const top = rect.top + window.scrollY;
+    box.style.left = `${left}px`;
+    box.style.top = `${top}px`;
+    box.style.width = `${rect.width}px`;
+    box.style.height = `${rect.height}px`;
+    box.style.opacity = editLabel.outline ? "1" : "0";
+    const name = element === document.body ? "body" : crumbLabel(element);
+    tag.textContent = editLabel.property ? `${name} \u00b7 ${editLabel.property}` : name;
+    // One size on screen at any zoom, within reason.
+    const scale = Math.min(4, Math.max(0.5, 1 / (editLabel.scale || 1)));
+    tag.style.transform = `scale(${scale})`;
+    const width = tag.offsetWidth * scale;
+    const height = tag.offsetHeight * scale;
+    const gap = 3 * scale;
+    // Above the element, out of its pixels; below it when the page has no room above.
+    const above = top - height - gap;
+    const pageHeight = document.documentElement.scrollHeight;
+    const below = top + rect.height + gap;
+    const y = above >= 0 ? above : below + height <= pageHeight ? below : top + gap;
+    const pageWidth = document.documentElement.scrollWidth;
+    tag.style.left = `${Math.max(0, Math.min(left, pageWidth - width))}px`;
+    tag.style.top = `${y}px`;
+  }
+  window.addEventListener("resize", () => {
+    if (editLabel.selector) drawEditLabel();
+  });
+
+  /*
+   * A font picked from Google Fonts loads in the design from its stylesheet link, marked
+   * as the board's own so it never reaches History or an export. The board names the
+   * link; only Google Fonts' own stylesheet host is taken.
+   */
+  const loadedFontFamilies = new Set();
+  /** @param {string} href @param {string} family */
+  function loadFontLink(href, family) {
+    let url;
+    try {
+      url = new URL(href);
+    } catch {
+      return;
+    }
+    if (url.origin !== "https://fonts.googleapis.com" || !url.pathname.startsWith("/css2")) return;
+    if (family) loadedFontFamilies.add(family.toLowerCase());
+    if (
+      [...document.querySelectorAll("link[data-liesel-ui='font']")].some(
+        (link) => link.getAttribute("href") === url.href,
+      )
+    )
+      return;
+    const link = document.createElement("link");
+    link.rel = "stylesheet";
+    link.href = url.href;
+    link.setAttribute("data-liesel-ui", "font");
+    (document.head || document.documentElement).appendChild(link);
+  }
+
   /**
    * What a Move drag at a point takes hold of: the element under it, or the nearest box
    * around it when that is inline text a translate cannot move. Never the page itself.
@@ -1554,6 +1735,18 @@
         reportTuneTarget(Number(data.x), Number(data.y), Math.max(0, Number(data.depth) || 0));
         return;
       }
+      if (data.type === "edit-label") {
+        editLabel.selector = String(data.selector || "");
+        editLabel.property = String(data.property || "").slice(0, 60);
+        editLabel.outline = data.outline === true;
+        editLabel.scale = Number(data.scale) > 0 ? Number(data.scale) : 1;
+        drawEditLabel();
+        return;
+      }
+      if (data.type === "font-link") {
+        loadFontLink(String(data.href || ""), String(data.family || ""));
+        return;
+      }
       if (data.type === "outline-all") {
         drawGroupOutline(String(data.selector || ""));
         return;
@@ -1588,6 +1781,7 @@
       }
       if (data.type === "style") {
         applyElementStyle(String(data.selector || ""), String(data.css || ""), String(data.value ?? ""));
+        if (editLabel.selector) drawEditLabel();
         return;
       }
       if (data.type === "style-reset") {
@@ -1721,6 +1915,7 @@
     "]",
     "d",
     "D",
+    "v",
   ]);
   const MODIFIER_KEYS = new Set(["Meta", "Alt", "Control", "Shift"]);
   function forwardKey(event) {

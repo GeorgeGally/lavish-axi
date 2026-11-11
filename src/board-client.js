@@ -2108,6 +2108,7 @@ function applyCamera() {
   canvas.style.transform = `translate(${x}px, ${y}px) scale(${zoom})`;
   canvas.style.setProperty("--zoom", String(zoom));
   zoomLabel.textContent = `${Math.round(zoom * 100)}%`;
+  if (editTagFrame) syncEditTag();
   // Parked pins are sized for the zoom, so a new zoom re-spaces them.
   if (zoom !== parkedZoom) {
     parkedZoom = zoom;
@@ -3012,6 +3013,7 @@ function setDeviceMode(mode) {
 function postToArtboard(itemId, deviceId, message) {
   const record = state.artboards.get(artboardKey(itemId, deviceId));
   if (!record || !record.iframe.contentWindow) return;
+  if (message.type === "style" || message.type === "element-tune") sendFontLinks(itemId, deviceId, message);
   record.iframe.contentWindow.postMessage({ channel: "liesel", item: itemId, device: deviceId, ...message }, "*");
 }
 
@@ -4504,6 +4506,14 @@ function markEnded() {
 
 /** @type {"chat" | "controls"} */
 let sideView = "chat";
+/* Edit's tag over the edited element: see syncEditTag. */
+const EDIT_OUTLINE_HOLD_MS = 1500;
+/** What the tag shows, for the element it was set for. */
+const editTag = { for: "", selector: "", property: "", hover: false, flash: false };
+/** @type {null | { itemId: string, deviceId: string }} the frame that shows the tag */
+let editTagFrame = null;
+/** @type {ReturnType<typeof setTimeout> | undefined} */
+let editFlashTimer;
 
 /**
  * The sidebar shows one of its tabs: Chat or Controls. Showing one opens a closed
@@ -4514,6 +4524,7 @@ let sideView = "chat";
 function showSideView(view, reveal = true) {
   const chat = document.getElementById("chat");
   sideView = view === "controls" ? view : "chat";
+  syncEditTag();
   if (chat) chat.dataset.view = sideView;
   const panes = {
     chat: document.getElementById("chatPane"),
@@ -4981,8 +4992,9 @@ function elementTuneFor(itemId, deviceId) {
 
 function postElementTune(itemId, deviceId) {
   const values = elementTuneFor(itemId, deviceId);
-  if (Object.keys(values).length === 0) return;
-  postToArtboard(itemId, deviceId, { type: "element-tune", values });
+  if (Object.keys(values).length > 0) postToArtboard(itemId, deviceId, { type: "element-tune", values });
+  // A reloaded frame draws the tag again.
+  if (editTagFrame?.itemId === itemId && editTagFrame.deviceId === deviceId) syncEditTag();
 }
 
 /**
@@ -5049,6 +5061,7 @@ function closeTune() {
   showTuneLoaded(false);
   tuneItemId = "";
   tuneTarget = null;
+  syncEditTag();
 }
 
 /** Controls shows what is being tuned, or how to start when nothing is. */
@@ -5262,6 +5275,64 @@ function stepTuneSelection(direction) {
   return true;
 }
 
+/*
+ * Edit's tag: the frame draws a small black label over the element Controls holds,
+ * naming it and the property being changed. Its thin outline shows only while the
+ * pointer is on the controls and for a moment after a change, then fades.
+ */
+
+/** How large the board draws a frame: a frame pixel is this many screen pixels. @param {string} itemId @param {string} deviceId */
+function frameScale(itemId, deviceId) {
+  const record = state.artboards.get(artboardKey(itemId, deviceId));
+  if (!record) return state.camera.zoom;
+  return record.iframe.getBoundingClientRect().width / record.device.width || state.camera.zoom;
+}
+
+/** Send the tag to the tuned frame, or take it down when nothing is being edited. */
+function syncEditTag() {
+  const target = tuneTarget && !tuneTarget.pending && !tuneTarget.error && sideView === "controls" ? tuneTarget : null;
+  if (target && editTag.for !== `${target.itemId}\n${target.deviceId}\n${target.selector}`) {
+    editTag.for = `${target.itemId}\n${target.deviceId}\n${target.selector}`;
+    editTag.selector = "";
+    editTag.property = "";
+  }
+  const at = target ? { itemId: target.itemId, deviceId: target.deviceId } : null;
+  if (editTagFrame && (!at || editTagFrame.itemId !== at.itemId || editTagFrame.deviceId !== at.deviceId))
+    postToArtboard(editTagFrame.itemId, editTagFrame.deviceId, { type: "edit-label", selector: "" });
+  editTagFrame = at;
+  if (!target || !at) {
+    editTag.for = "";
+    return;
+  }
+  postToArtboard(at.itemId, at.deviceId, {
+    type: "edit-label",
+    selector: editTag.selector || target.selector || "",
+    property: editTag.property,
+    outline: editTag.hover || editTag.flash,
+    scale: frameScale(at.itemId, at.deviceId),
+  });
+}
+
+/** The pointer is on a control: the tag names its property. @param {string} selector @param {string} property */
+function pointEditTag(selector, property) {
+  editTag.selector = selector;
+  editTag.property = property;
+  syncEditTag();
+}
+
+/** A value changed: the tag names it and the outline shows for a moment. @param {string} selector @param {string} property */
+function flashEditTag(selector, property) {
+  editTag.selector = selector;
+  editTag.property = property;
+  editTag.flash = true;
+  clearTimeout(editFlashTimer);
+  editFlashTimer = setTimeout(() => {
+    editTag.flash = false;
+    syncEditTag();
+  }, EDIT_OUTLINE_HOLD_MS);
+  syncEditTag();
+}
+
 /** Outline one element in the tuned frame, or clear the outline. @param {string} selector */
 function outlineInFrame(selector) {
   if (!tuneTarget) return;
@@ -5462,6 +5533,7 @@ function applyTargetWrites(writes, selector) {
   );
   for (const write of writes) persistElementTune({ itemId, selector: key, css: write.css, value: write.value });
   for (const write of writes) refreshElementStyle(itemId, selector, write.css);
+  if (writes[0]) flashEditTag(selector, writes[0].css);
 }
 
 /*
@@ -5813,6 +5885,10 @@ function tuneChanges() {
       for (const [property, value] of Object.entries(css)) {
         if (!deviceId && file.get(`${selector}\n${property}`) === String(value)) continue;
         const rule = `${selector} { ${property}: ${value}; }`;
+        // A Google font picked here reaches the agent with the stylesheet that loads it.
+        const font = property === "font-family" ? googleFontFor(String(value)) : null;
+        const load = font ? `@import url("${googleFontHref(font)}");` : "";
+        if (load && !changes.some((change) => change.line === load)) changes.push({ selector, line: load });
         changes.push({ selector, line: deviceId ? `${sizeMedia(deviceId)} { ${rule} }` : rule });
       }
     }
@@ -5935,6 +6011,7 @@ function renderTargetTune() {
                   );
             for (const note of [renderOverrides(control), renderSizeNote(targetSelector(control.scope), control)])
               if (note) node.append(note);
+            node.addEventListener("pointerenter", () => pointEditTag(targetSelector(control.scope), control.css));
             return node;
           });
     if (tuneTarget.error) {
@@ -5960,6 +6037,7 @@ function renderTargetTune() {
         tuneTarget.pending || ((tuneTarget.controls || []).length === 0 && (tuneTarget.inherited || []).length === 0);
   }
   syncTuneSend();
+  syncEditTag();
 }
 
 /**
@@ -6012,6 +6090,7 @@ function renderInheritedGroup(group) {
       );
       const note = renderSizeNote(group.selector, control);
       if (note) node.append(note);
+      node.addEventListener("pointerenter", () => pointEditTag(group.selector, control.css));
       return node;
     }),
   );
@@ -6189,7 +6268,7 @@ function createTuneControl(item, control, onChange) {
   const valueLabel = element("span", { class: "tune-control-value", text: String(item.tune[control.id] ?? "") });
   const label = element("label", { class: "tune-control-label" });
   label.append(element("span", { text: control.label }), valueLabel);
-  if (control.type === "color") valueLabel.hidden = true;
+  if (control.type === "color" || control.type === "font") valueLabel.hidden = true;
   if (control.type !== "spring" && control.type !== "pad") wrapper.append(label);
   const apply = (raw) => {
     // An element control opens its own undo step in applyTargetValue.
@@ -6375,6 +6454,8 @@ function createTuneControl(item, control, onChange) {
     });
   } else if (control.type === "color") {
     wrapper.append(createColourControl(control.label, item.tune[control.id], apply));
+  } else if (control.type === "font") {
+    wrapper.append(createFontControl(control, String(item.tune[control.id] ?? control.value ?? ""), apply));
   } else if (control.type === "select") {
     const select = element("select", {});
     for (const option of control.options || [])
@@ -6518,6 +6599,590 @@ function openTuneOptions(select, label, apply) {
   window.addEventListener("scroll", onOutside, true);
   window.addEventListener("blur", onBlur);
   show(active);
+}
+
+/*
+ * Font: one picker at page and element level. It lists the fonts the page already uses
+ * and loads, stacks every machine has, and Google Fonts, each name set in its own face,
+ * with a search field that also takes any stack typed in. Moving through the list shows
+ * each font live in the design; a click keeps it, Escape or a click away puts it back.
+ */
+// The 300 most popular Latin families on Google Fonts (https://fonts.google.com/metadata/fonts):
+// name|kind (s sans, r serif, d display, h handwriting, m mono)|weights for the css2 API.
+const GOOGLE_FONTS = `Inter|s|100..900
+Montserrat|s|100..900
+Open Sans|s|300..800
+Roboto|s|100..900
+Google Sans|s|400..700
+Lato|s|100;300;400;700;900
+Oswald|s|200..700
+Arimo|s|400..700
+Mulish|s|200..1000
+Playfair Display|r|400..900
+Poppins|s|100;200;300;400;500;600;700;800;900
+Quicksand|s|300..700
+Raleway|s|100..900
+Roboto Mono|m|100..700
+Titillium Web|s|200;300;400;600;700;900
+Barlow|s|100;200;300;400;500;600;700;800;900
+IBM Plex Sans|s|100..700
+Libre Franklin|s|100..900
+Nunito|s|200..1000
+Roboto Condensed|s|100..900
+EB Garamond|r|400..800
+Nunito Sans|s|200..1000
+Rubik|s|300..900
+DM Sans|s|100..1000
+IBM Plex Mono|m|100;200;300;400;500;600;700
+Karla|s|200..800
+Manrope|s|200..800
+Source Sans 3|s|200..900
+Cabin|s|400..700
+Anton|s|
+Exo 2|s|100..900
+Outfit|s|100..900
+Public Sans|s|100..900
+Oxygen|s|300;400;700
+PT Serif|r|400;700
+Ubuntu|s|300;400;500;700
+Bitter|r|100..900
+Kanit|s|100;200;300;400;500;600;700;800;900
+Prompt|s|100;200;300;400;500;600;700;800;900
+Roboto Slab|r|100..900
+Slabo 27px|r|
+Be Vietnam Pro|s|100;200;300;400;500;600;700;800;900
+Newsreader|r|200..800
+Lilita One|d|
+Plus Jakarta Sans|s|200..800
+Lexend Deca|s|100..900
+Merriweather|r|300..900
+ABeeZee|s|
+Bricolage Grotesque|s|200..800
+Figtree|s|300..900
+Lora|r|400..700
+Work Sans|s|100..900
+Archivo|s|100..900
+Bebas Neue|s|
+Red Hat Display|s|300..900
+Tajawal|s|200;300;400;500;700;800;900
+Barlow Condensed|s|100;200;300;400;500;600;700;800;900
+Black Ops One|d|
+Inter Tight|s|100..900
+JetBrains Mono|m|100..800
+Titan One|d|
+LINE Seed JP|s|100;400;700;800
+PT Sans|s|400;700
+Archivo Narrow|s|400..700
+Jost|s|100..900
+Saira|s|100..900
+Archivo Black|s|
+Fugaz One|d|
+Sofia Sans|s|1..1000
+Source Code Pro|m|200..900
+Inconsolata|m|200..900
+Sora|s|100..800
+Space Grotesk|s|300..700
+Epilogue|s|100..900
+Golos Text|s|400..900
+IBM Plex Sans Arabic|s|100;200;300;400;500;600;700
+Indie Flower|h|
+Share Tech|s|
+Cormorant Garamond|r|300..700
+Forum|d|
+Mukta|s|200;300;400;500;600;700;800
+Red Hat Text|s|300..700
+Cormorant|r|300..700
+Fira Sans|s|100;200;300;400;500;600;700;800;900
+Marcellus|r|
+Quattrocento Sans|s|400;700
+Balsamiq Sans|d|400;700
+Zeyada|h|
+Audiowide|d|
+Libre Baskerville|r|400..700
+Monda|s|400..700
+Sanchez|r|
+Smooch Sans|s|100..900
+Aleo|r|100..900
+Heebo|s|100..900
+Fira Sans Extra Condensed|s|100;200;300;400;500;600;700;800;900
+Instrument Serif|r|
+News Cycle|s|400;700
+Share Tech Mono|m|
+Handlee|h|
+Prata|r|
+Courgette|h|
+Fraunces|r|100..900
+League Gothic|s|
+Merriweather Sans|s|300..800
+Alegreya|r|400..900
+Righteous|d|
+Cardo|r|400;700
+Dancing Script|h|400..700
+Gothic A1|s|100;200;300;400;500;600;700;800;900
+Averia Serif Libre|d|300;400;700
+Geist|s|100..900
+Cairo|s|200..1000
+Google Sans Code|m|300..800
+Arapey|r|
+Biryani|s|200;300;400;600;700;800;900
+Changa One|d|
+Pinyon Script|h|
+Rajdhani|s|300;400;500;600;700
+Reenie Beanie|h|
+Google Sans Flex|s|1..1000
+Josefin Sans|s|100..700
+PT Sans Caption|s|400;700
+Assistant|s|200..800
+Italianno|h|
+Krub|s|200;300;400;500;600;700
+Alfa Slab One|d|
+Mitr|s|200;300;400;500;600;700
+Unbounded|s|200..900
+Caveat|h|400..700
+Kaushan Script|h|
+Palanquin|s|100;200;300;400;500;600;700
+Aboreto|d|
+Bowlby One SC|d|
+Gelasio|r|400..700
+Goldman|d|400;700
+Lexend|s|100..900
+Libre Caslon Display|r|
+Orbitron|s|400..900
+Rubik Mono One|s|
+Schibsted Grotesk|s|400..900
+Covered By Your Grace|h|
+Fjalla One|s|
+Merienda|h|300..900
+Ramabhadra|s|
+Roboto Serif|r|100..900
+Anonymous Pro|m|400;700
+Carlito|s|400;700
+Exo|s|100..900
+Familjen Grotesk|s|400..700
+Special Gothic Expanded One|s|
+STIX Two Text|r|400..700
+Urbanist|s|100..900
+Hanken Grotesk|s|100..900
+Instrument Sans|s|400..700
+Tiro Devanagari Hindi|r|
+Zen Kaku Gothic Antique|s|300;400;500;700;900
+Alumni Sans|s|100..900
+Courier Prime|m|400;700
+Hind Siliguri|s|300;400;500;600;700
+Six Caps|s|
+Varela|s|
+Bodoni Moda|r|400..900
+DM Serif Display|r|
+Funnel Sans|s|300..800
+Wix Madefor Display|s|400..800
+Lobster Two|d|400;700
+Source Serif 4|r|200..900
+Crimson Pro|r|200..900
+Geo|s|
+Nanum Gothic|s|400;700;800
+Cuprum|s|400..700
+Gabarito|d|400..900
+Lobster|d|
+Anek Latin|s|100..800
+Big Shoulders|d|100..900
+Domine|r|400..700
+Roboto Flex|s|100..1000
+Alef|s|400;700
+Cinzel|r|400..900
+Jura|s|300..700
+Dosis|s|200..800
+Fredoka|s|300..700
+Ultra|r|
+Alegreya Sans|s|100;300;400;500;700;800;900
+Norican|h|
+Questrial|s|
+Geist Mono|m|100..900
+Satisfy|h|
+Bree Serif|r|
+Chivo Mono|m|100..900
+M PLUS Rounded 1c|s|100;300;400;500;700;800;900
+Sedgwick Ave Display|h|
+Andika|s|400;700
+Anek Telugu|s|100..800
+IBM Plex Sans Condensed|s|100;200;300;400;500;600;700
+Limelight|d|
+Marcellus SC|r|
+Shadows Into Light Two|h|
+Zilla Slab|r|300;400;500;600;700
+Anuphan|s|100..700
+Hind|s|300;400;500;600;700
+Tinos|r|400;700
+Ysabeau Office|s|1..1000
+Mali|h|200;300;400;500;600;700
+Pacifico|h|
+Crimson Text|r|400;600;700
+Lexend Giga|s|100..900
+Barlow Semi Condensed|s|100;200;300;400;500;600;700;800;900
+DM Mono|m|300;400;500
+Fredericka the Great|d|
+Rozha One|r|
+Russo One|s|
+Arvo|r|400;700
+Encode Sans|s|100..900
+Overpass|s|100..900
+Kantumruy Pro|s|100..700
+Karma|r|300;400;500;600;700
+Kreon|r|300..700
+Teko|s|300..700
+Cantata One|r|
+Comfortaa|d|300..700
+Oleo Script Swash Caps|d|400;700
+Red Hat Mono|m|300..700
+Chakra Petch|s|300;400;500;600;700
+Khand|s|300;400;500;600;700
+Schoolbell|h|
+Fragment Mono|m|
+Frank Ruhl Libre|r|300..900
+Great Vibes|h|
+Kodchasan|s|200;300;400;500;600;700
+Numans|s|
+PT Sans Narrow|s|400;700
+Sacramento|h|
+Arbutus Slab|r|
+Bungee|d|
+David Libre|r|400;500;700
+Asul|r|400;700
+Candal|s|
+Mandali|s|
+Mansalva|h|
+Martian Mono|m|100..800
+Zen Kaku Gothic New|s|300;400;500;700;900
+Faustina|r|300..800
+Geologica|s|100..900
+Hepta Slab|r|1..900
+Abel|s|
+Gotu|s|
+Petrona|r|100..900
+Varela Round|s|
+Klee One|h|400;600
+Onest|s|100..900
+Sancreek|d|
+Sigmar One|d|
+Sometype Mono|m|400..700
+M PLUS 1p|s|100;300;400;500;700;800;900
+Mrs Saint Delafield|h|
+Sofia Sans Semi Condensed|s|1..1000
+Almendra|r|400;700
+Calistoga|d|
+Gravitas One|d|
+Kalam|h|300;400;700
+Maven Pro|s|400..900
+Sarabun|s|100;200;300;400;500;600;700;800
+Space Mono|m|400;700
+Almarai|s|300;400;700;800
+Dela Gothic One|d|
+Palanquin Dark|s|400;500;600;700
+Seaweed Script|d|
+Shadows Into Light|h|
+Zen Antique Soft|r|
+Baloo 2|d|400..800
+DynaPuff|d|400..700
+Fira Code|m|300..700
+Albert Sans|s|100..900
+Asap|s|100..900
+Abril Fatface|d|
+Cinzel Decorative|d|400;700;900
+Fondamento|h|
+Hi Melody|h|
+Just Another Hand|h|
+Rubik Dirt|d|
+Kablammo|d|
+Lustria|r|
+Saira Condensed|s|100;200;300;400;500;600;700;800;900
+Cactus Classical Serif|r|
+Luckiest Guy|d|
+Syne|s|400..800
+Agbalumo|d|
+Hammersmith One|s|
+Play|s|400;700
+Playfair Display SC|r|400;700;900
+Baskervville|r|400..700
+Permanent Marker|h|
+Spline Sans|s|300..700
+Halant|r|300;400;500;600;700
+IBM Plex Serif|r|100;200;300;400;500;600;700
+Overlock|d|400;700;900
+Sofia Sans Condensed|s|1..1000
+Dongle|s|300;400;700`
+  .split("\n")
+  .map((line) => {
+    const [name, kind, weights] = line.split("|");
+    return { name, kind, weights };
+  });
+/** @type {Record<string, string>} */
+const GOOGLE_GENERIC = { s: "sans-serif", r: "serif", d: "sans-serif", h: "cursive", m: "monospace" };
+const GOOGLE_FONT_BY_NAME = new Map(GOOGLE_FONTS.map((font) => [font.name.toLowerCase(), font]));
+
+/** The first family a stack names, unquoted. @param {string} stack */
+function fontName(stack) {
+  return (
+    String(stack || "")
+      .split(",")[0]
+      .replace(/["']/g, "")
+      .trim() || "Font"
+  );
+}
+
+/** The Google font a stack starts with, if it is one. @param {string} stack */
+function googleFontFor(stack) {
+  return GOOGLE_FONT_BY_NAME.get(fontName(stack).toLowerCase()) || null;
+}
+
+/** @param {{ name: string, kind: string, weights: string }} font */
+function googleFontStack(font) {
+  return `"${font.name}", ${GOOGLE_GENERIC[font.kind] || "sans-serif"}`;
+}
+
+/** Google Fonts' stylesheet for a family; with `text`, only the letters a preview needs. @param {{ name: string, weights: string }} font @param {string} [text] */
+function googleFontHref(font, text = "") {
+  const family = encodeURIComponent(font.name).replace(/%20/g, "+");
+  const axis = font.weights ? `:wght@${font.weights}` : "";
+  const only = text ? `&text=${encodeURIComponent(text)}` : "";
+  return `https://fonts.googleapis.com/css2?family=${family}${axis}&display=swap${only}`;
+}
+
+const previewedFonts = new Set();
+/** Load just enough of a Google font for the picker to set its name in it. @param {{ name: string, weights: string }} font */
+function previewGoogleFont(font) {
+  if (previewedFonts.has(font.name)) return;
+  previewedFonts.add(font.name);
+  const link = document.createElement("link");
+  link.rel = "stylesheet";
+  link.href = googleFontHref({ name: font.name, weights: "" }, font.name);
+  document.head.append(link);
+}
+
+/**
+ * A design shows a Google font only once it loads it: before a font-family reaches a
+ * frame, the frame is handed that font's stylesheet.
+ * @param {string} itemId @param {string} deviceId @param {any} message
+ */
+function sendFontLinks(itemId, deviceId, message) {
+  /** @type {string[]} */
+  const stacks = [];
+  if (message.type === "style" && message.css === "font-family") stacks.push(String(message.value || ""));
+  if (message.type === "element-tune" && message.values && typeof message.values === "object") {
+    for (const css of Object.values(message.values))
+      if (css && css["font-family"]) stacks.push(String(css["font-family"]));
+  }
+  for (const stack of stacks) {
+    const font = googleFontFor(stack);
+    if (font) postToArtboard(itemId, deviceId, { type: "font-link", href: googleFontHref(font), family: font.name });
+  }
+}
+
+/** @param {any} control @param {string} value @param {(raw: string) => void} apply */
+function createFontControl(control, value, apply) {
+  const field = element("button", { class: "tune-font-field", type: "button", "aria-haspopup": "listbox" });
+  /** @param {string} stack */
+  const show = (stack) => {
+    field.textContent = fontName(stack);
+    field.style.fontFamily = stack;
+    const font = googleFontFor(stack);
+    if (font) previewGoogleFont(font);
+  };
+  show(value);
+  let current = value;
+  field.addEventListener("click", () => {
+    if (fontPicker?.field === field) {
+      fontPicker.close(true);
+      return;
+    }
+    openFontPicker(
+      field,
+      control,
+      current,
+      (raw) => {
+        show(raw);
+        apply(raw);
+      },
+      (kept) => {
+        current = kept;
+        show(kept);
+      },
+    );
+  });
+  tuneCleanup.push(() => {
+    if (fontPicker?.field === field) fontPicker.close(false);
+  });
+  return field;
+}
+
+/** @type {null | { field: HTMLElement, close: (keep: boolean) => void }} */
+let fontPicker = null;
+
+/**
+ * @param {HTMLElement} field @param {any} control @param {string} original
+ * @param {(raw: string) => void} apply @param {(kept: string) => void} done
+ */
+function openFontPicker(field, control, original, apply, done) {
+  fontPicker?.close(true);
+  tuneOptions?.close(true);
+  const options = Array.isArray(control.options) ? control.options : [];
+  /** @type {{ value: string, label: string, group: string, google?: any }[]} */
+  const all = [
+    ...options.filter((option) => option.group !== "system").map((option) => ({ ...option, group: "page" })),
+    ...options.filter((option) => option.group === "system"),
+    ...GOOGLE_FONTS.filter((font) => !options.some((option) => fontName(option.value) === font.name)).map((font) => ({
+      value: googleFontStack(font),
+      label: font.name,
+      group: "google",
+      google: font,
+    })),
+  ];
+  const GROUPS = /** @type {Record<string, string>} */ ({
+    page: "On this page",
+    system: "System",
+    google: "Google Fonts",
+  });
+  const menu = element("div", { class: "tune-fonts", role: "dialog", "aria-label": `${control.label} picker` });
+  const search = /** @type {HTMLInputElement} */ (
+    element("input", {
+      class: "tune-fonts-search",
+      type: "search",
+      placeholder: "Search fonts, or type a font stack",
+      "aria-label": "Search fonts",
+      spellcheck: "false",
+      autocomplete: "off",
+    })
+  );
+  const list = element("div", { class: "tune-fonts-list", role: "listbox", "aria-label": control.label });
+  menu.append(search, list);
+  /** @type {{ row: HTMLElement, value: string }[]} */
+  let rows = [];
+  let active = -1;
+  let live = original;
+  const seen = new IntersectionObserver(
+    (entries) => {
+      for (const entry of entries) {
+        if (!entry.isIntersecting) continue;
+        const font = GOOGLE_FONT_BY_NAME.get(String(/** @type {HTMLElement} */ (entry.target).dataset.google));
+        if (font) previewGoogleFont(font);
+        seen.unobserve(entry.target);
+      }
+    },
+    { root: list, rootMargin: "120px 0px" },
+  );
+  /** @param {number} index @param {boolean} [scroll] */
+  const point = (index, scroll = true) => {
+    active = index;
+    rows.forEach((entry, at) => entry.row.setAttribute("aria-selected", String(at === index)));
+    const entry = rows[index];
+    if (!entry) return;
+    if (scroll) entry.row.scrollIntoView({ block: "nearest" });
+    if (entry.value === live) return;
+    live = entry.value;
+    apply(entry.value);
+  };
+  const render = () => {
+    const query = search.value.trim();
+    const needle = query.toLowerCase();
+    const found = needle ? all.filter((option) => option.label.toLowerCase().includes(needle)) : all;
+    /** @type {HTMLElement[]} */
+    const nodes = [];
+    rows = [];
+    // Anything typed is a stack of its own, for a font the lists do not have.
+    if (query && !found.some((option) => option.label.toLowerCase() === needle)) {
+      nodes.push(element("div", { class: "tune-fonts-group", text: "Use as typed" }));
+      const row = fontRow(query, query);
+      nodes.push(row);
+      rows.push({ row, value: query });
+    }
+    let group = "";
+    for (const option of found) {
+      if (option.group !== group) {
+        group = option.group;
+        nodes.push(element("div", { class: "tune-fonts-group", text: GROUPS[group] || group }));
+      }
+      const row = fontRow(option.label, option.value);
+      if (option.google) {
+        row.dataset.google = option.google.name.toLowerCase();
+        seen.observe(row);
+      }
+      nodes.push(row);
+      rows.push({ row, value: option.value });
+    }
+    if (rows.length === 0) nodes.push(element("p", { class: "tune-fonts-empty", text: "No font by that name." }));
+    list.replaceChildren(...nodes);
+    active = rows.findIndex((entry) => entry.value === live);
+    rows.forEach((entry, at) => entry.row.setAttribute("aria-selected", String(at === active)));
+    rows[active]?.row.scrollIntoView({ block: "nearest" });
+  };
+  /** @param {string} label @param {string} value */
+  function fontRow(label, value) {
+    const row = element("button", { class: "tune-font-option", type: "button", role: "option", text: label });
+    row.tabIndex = -1;
+    row.style.fontFamily = value;
+    row.addEventListener("pointermove", () => {
+      const index = rows.findIndex((entry) => entry.row === row);
+      if (index !== active) point(index, false);
+    });
+    row.addEventListener("mousedown", (event) => event.preventDefault());
+    row.addEventListener("click", () => {
+      point(rows.findIndex((entry) => entry.row === row));
+      close(true);
+    });
+    return row;
+  }
+  search.addEventListener("input", render);
+  /** @param {KeyboardEvent} event */
+  const onKey = (event) => {
+    const last = rows.length - 1;
+    if (event.key === "ArrowDown") point(Math.min(last, active + 1));
+    else if (event.key === "ArrowUp") point(Math.max(0, active - 1));
+    else if (event.key === "Enter") {
+      if (active < 0 && rows.length > 0) point(0);
+      close(true);
+    } else if (event.key === "Escape") close(false);
+    else if (event.key === "Tab") close(true);
+    else return;
+    if (event.key !== "Tab") event.preventDefault();
+    event.stopPropagation();
+  };
+  /** @param {Event} event */
+  const onOutside = (event) => {
+    const target = /** @type {Node} */ (event.target);
+    if (!menu.contains(target) && target !== field) close(false);
+  };
+  const onBlur = () => close(false);
+  /** @param {boolean} keep */
+  function close(keep) {
+    window.removeEventListener("keydown", onKey, true);
+    window.removeEventListener("pointerdown", onOutside, true);
+    window.removeEventListener("blur", onBlur);
+    seen.disconnect();
+    menu.remove();
+    fontPicker = null;
+    if (!keep && live !== original) {
+      live = original;
+      apply(original);
+    }
+    done(live);
+    tuneEditHeld = false;
+    endTuneEdit();
+    field.focus();
+  }
+  document.body.append(menu);
+  const at = field.getBoundingClientRect();
+  const below = window.innerHeight - at.bottom - 12;
+  const upward = below < 320 && at.top > below;
+  menu.style.left = `${at.left}px`;
+  menu.style.width = `${Math.max(at.width, 240)}px`;
+  menu.style.maxHeight = `${Math.min(420, Math.max(160, (upward ? at.top : below + 8) - 12))}px`;
+  menu.style.top = upward ? "" : `${at.bottom + 4}px`;
+  menu.style.bottom = upward ? `${window.innerHeight - at.top + 4}px` : "";
+  tuneEditHeld = true;
+  fontPicker = { field, close };
+  window.addEventListener("keydown", onKey, true);
+  window.addEventListener("pointerdown", onOutside, true);
+  window.addEventListener("blur", onBlur);
+  render();
+  search.focus();
 }
 
 function flushTune(item) {
@@ -7736,6 +8401,8 @@ function boardKey(event, preventDefault, fromItem = "") {
   } else if (event.key === "1") actualSize();
   else if (event.key === "+" || event.key === "=") zoomBy(1.25);
   else if (event.key === "-") zoomBy(1 / 1.25);
+  // V is View: notes, the controls selector and Move all off, so a click reaches the page.
+  else if (event.key === "v" && !event.shiftKey) setArmedMode("");
   else if (event.key === "Escape") {
     // Escape closes an open note or history first, then turns notes or the controls
     // selector off, and with neither on it closes the tuned element.
@@ -7838,6 +8505,16 @@ window.addEventListener("resize", () => {
 
 document.getElementById("sideTabChat")?.addEventListener("click", () => showSideView("chat"));
 document.getElementById("sideTabControls")?.addEventListener("click", () => showSideView("controls"));
+// The edited element's outline shows while the pointer is on the controls.
+for (const [type, on] of /** @type {const} */ ([
+  ["pointerenter", true],
+  ["pointerleave", false],
+])) {
+  document.getElementById("tune")?.addEventListener(type, () => {
+    editTag.hover = on;
+    syncEditTag();
+  });
+}
 settingsToggle?.addEventListener("click", () => setSettingsOpen(!settingsOpen()));
 document.getElementById("settingsClose")?.addEventListener("click", () => setSettingsOpen(false));
 document.getElementById("newMenu")?.addEventListener("toggle", (event) => {
