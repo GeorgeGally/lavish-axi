@@ -15,6 +15,7 @@ import {
   serializeLayoutWarnings,
 } from "./layout-warnings.js";
 import { AsyncMutex } from "./async-mutex.js";
+import { normalizeChangeRecords } from "./board-changes.js";
 import {
   boundStoredChat,
   chatEntryForPrompt,
@@ -892,6 +893,9 @@ function normalizePrompt(prompt) {
   if (pin) normalized.pin = pin;
   const target = normalizeTarget(prompt.target);
   if (target) normalized.target = target;
+  // A board tune hands over one record per changed property (src/board-changes.js).
+  const changes = normalizeChangeRecords(prompt.changes);
+  if (changes.length > 0) normalized.changes = changes;
   // Board threads: every note is a conversation the reviewer and the agent can both
   // answer into, and a follow-up says whether it replies to, edits or withdraws a note.
   const thread = normalizeThreadId(prompt.thread);

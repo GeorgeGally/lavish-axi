@@ -14,6 +14,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { AsyncMutex } from "./async-mutex.js";
+import { CHANGE_CONTRACT_RULE, changeRecordLines } from "./board-changes.js";
 
 /** @type {typeof import("node:child_process").spawn} */
 const crossSpawn = createRequire(import.meta.url)("cross-spawn");
@@ -229,6 +230,9 @@ export function buildRunnerPrompt({ boardDir, boardName, items, prompts, cwd, pr
   lines.push(
     "Do not run `liesel poll` or `liesel reply`: Liesel posts your final message to the user as your reply when you exit.",
     "When you are done, end with a short message to the user (one to three sentences) saying what you changed, or what you need from them.",
+    ...(prompts.some((prompt) => Array.isArray(prompt?.changes) && prompt.changes.length > 0)
+      ? [CHANGE_CONTRACT_RULE]
+      : []),
     "",
     "Notes:",
   );
@@ -258,6 +262,7 @@ export function buildRunnerPrompt({ boardDir, boardName, items, prompts, cwd, pr
     }
     const text = String(prompt?.prompt ?? "").trim();
     lines.push(`   Note: ${text ? text.replace(/\n/g, "\n   ") : "(no text)"}`);
+    lines.push(...changeRecordLines(prompt?.changes));
     const attachments = Array.isArray(prompt?.attachments) ? prompt.attachments : [];
     for (const attachment of attachments) {
       if (attachment?.path) lines.push(`   Image: ${attachment.path}`);

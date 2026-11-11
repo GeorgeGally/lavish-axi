@@ -6001,7 +6001,11 @@ function tuneValue(control, raw) {
     : String(raw);
 }
 
-/** The only properties that differ from what the file has, as CSS. */
+/**
+ * The only properties that differ from what the file has: each as the CSS line Copy
+ * shows, plus the facts the change contract carries to the agent (see sendTune).
+ * @returns {Array<{ selector: string, line: string, property?: string, before?: string, after?: string, deviceId?: string, variable?: any, fontImport?: string }>}
+ */
 function tuneChanges() {
   if (tuneTarget) {
     // What is saved for the selectors this panel shows, each in the rule it needs: a
@@ -6010,29 +6014,42 @@ function tuneChanges() {
     const selectors = new Set(panelSelectors());
     /** @type {Map<string, string>} the file's own value per selector and property, where the panel read it */
     const file = new Map();
+    /** @type {Map<string, any>} the custom property the frame found behind each value */
+    const variables = new Map();
+    /** @param {string} selector @param {any} control @param {boolean} [even] */
+    const read = (selector, control, even = true) => {
+      if (even) file.set(`${selector}\n${control.css}`, tuneValue(control, control.value ?? ""));
+      if (control.variable) variables.set(`${selector}\n${control.css}`, control.variable);
+    };
     for (const control of tuneTarget.controls || []) {
       // An all-sides value matches the file only when the file's sides are all that value.
       const uneven = (control.sides || []).some((side) => String(side.value) !== String(control.value));
-      if (!uneven)
-        file.set(`${targetSelector(control.scope)}\n${control.css}`, tuneValue(control, control.value ?? ""));
-      for (const side of control.sides || [])
-        file.set(`${targetSelector(control.scope)}\n${side.css}`, tuneValue(side, side.value ?? ""));
+      read(targetSelector(control.scope), control, !uneven);
+      for (const side of control.sides || []) read(targetSelector(control.scope), side);
     }
-    for (const group of tuneTarget.inherited || [])
-      for (const control of group.controls)
-        file.set(`${group.selector}\n${control.css}`, tuneValue(control, control.value ?? ""));
+    for (const group of tuneTarget.inherited || []) for (const control of group.controls) read(group.selector, control);
     const changes = [];
     for (const [key, css] of Object.entries(saved)) {
       const { deviceId, selector } = parseTuneKey(key);
       if (!selectors.has(selector)) continue;
       for (const [property, value] of Object.entries(css)) {
-        if (!deviceId && file.get(`${selector}\n${property}`) === String(value)) continue;
+        const where = `${selector}\n${property}`;
+        if (!deviceId && file.get(where) === String(value)) continue;
         const rule = `${selector} { ${property}: ${value}; }`;
         // A Google font picked here reaches the agent with the stylesheet that loads it.
         const font = property === "font-family" ? googleFontFor(String(value)) : null;
         const load = font ? `@import url("${googleFontHref(font)}");` : "";
         if (load && !changes.some((change) => change.line === load)) changes.push({ selector, line: load });
-        changes.push({ selector, line: deviceId ? `${sizeMedia(deviceId)} { ${rule} }` : rule });
+        changes.push({
+          selector,
+          line: deviceId ? `${sizeMedia(deviceId)} { ${rule} }` : rule,
+          property,
+          before: file.get(where) ?? "",
+          after: String(value),
+          deviceId,
+          ...(variables.has(where) ? { variable: variables.get(where) } : {}),
+          ...(font ? { fontImport: googleFontHref(font) } : {}),
+        });
       }
     }
     return changes;
@@ -6049,7 +6066,75 @@ function tuneChanges() {
     .map((control) => ({
       selector: ":root",
       line: `:root { ${control.css}: ${tuneValue(control, item.tune[control.id])}; }`,
+      property: control.css,
+      before: tuneValue(control, control.value ?? ""),
+      after: tuneValue(control, item.tune[control.id]),
+      // A declared tune control is itself the custom property.
+      ...(String(control.css).startsWith("--") ? { variable: { name: control.css } } : {}),
     }));
+}
+
+/**
+ * Which elements a selector this panel tuned reaches, and what the reviewer calls them:
+ * the picked element alone, every element "like this", its section, or an ancestor.
+ * @param {string} selector
+ */
+function changeTarget(selector) {
+  if (!tuneTarget) return { label: "Page tokens", scope: { kind: "page" } };
+  if (tuneTarget.like && selector === tuneTarget.like.selector && selector !== tuneTarget.selector)
+    return {
+      label: tuneTarget.label || selector,
+      scope: { kind: "repeated", count: tuneTarget.like.count, selector: tuneTarget.like.selector },
+    };
+  if (selector === tuneTarget.sectionSelector && selector !== tuneTarget.selector)
+    return { label: tuneTarget.sectionLabel || selector, scope: { kind: "element", count: 1, role: "section" } };
+  const group = (tuneTarget.inherited || []).find((entry) => entry.selector === selector);
+  if (group && selector !== tuneTarget.selector)
+    return { label: group.label || selector, scope: { kind: "element", count: 1, role: "ancestor" } };
+  return {
+    label: tuneTarget.label || selector,
+    scope: {
+      kind: "element",
+      count: 1,
+      // It has siblings like it that this change leaves alone.
+      ...(tuneTarget.like ? { like: { count: tuneTarget.like.count, selector: tuneTarget.like.selector } } : {}),
+    },
+  };
+}
+
+/**
+ * The change contract: one record per changed property, so the agent edits the source
+ * of the value (a variable, a class, a component) instead of pasting the CSS line.
+ * The server normalizes these and writes each one's summary line (src/board-changes.js).
+ * @param {any} item
+ */
+function tuneChangeRecords(item) {
+  const deviceId = tuneTarget ? tuneTarget.deviceId : tuneDeviceId;
+  return tuneChanges()
+    .filter((change) => change.property)
+    .map((change) => {
+      const device = deviceById(change.deviceId || deviceId);
+      const target = changeTarget(change.selector);
+      return {
+        selector: change.selector,
+        label: target.label,
+        property: change.property,
+        old_value: change.before ?? "",
+        new_value: change.after ?? "",
+        viewport: {
+          width: device.width,
+          height: device.height,
+          zoom: Math.round((state.camera.zoom || 1) * 1000) / 1000,
+          device: device.id,
+          // A change kept for one size names the media query that size reads as.
+          ...(change.deviceId ? { only: true, media: sizeMedia(change.deviceId) } : {}),
+        },
+        scope: target.scope,
+        ...(change.variable ? { variable: change.variable } : {}),
+        ...(change.fontImport ? { font_import: change.fontImport } : {}),
+        frame: { item: item.id, device: device.id, ...(item.page ? { page: item.page } : { file: item.file }) },
+      };
+    });
 }
 
 /** After Send the panel says so; a further change makes it a Send again. */
@@ -6092,7 +6177,12 @@ function sendTune() {
   const where = tuneTarget
     ? `${item.label} (${item.file}), element ${tuneTarget.selector || ""}`
     : `${item.label} (${item.file})`;
-  const prompt = `Tune ${where}. Only these differ from the file:\n${changes.map((change) => change.line).join("\n")}`;
+  const records = tuneChangeRecords(item);
+  // The reviewer's view of the change; the records carry the contract the agent works from.
+  const lines = records.map(
+    (record) => `- ${record.label}: ${record.property} ${record.old_value || "(unset)"} → ${record.new_value}`,
+  );
+  const prompt = `Tune ${where}. Changed on the board, not yet in the file:\n${lines.join("\n")}`;
   markTuneSent(true);
   fetch(`/api/${encodeURIComponent(key)}/prompts`, {
     method: "POST",
@@ -6107,6 +6197,7 @@ function sendTune() {
           thread: `item:${item.id}`,
           selector: changes[0]?.selector || "",
           item: itemRef(item),
+          changes: records,
         },
       ],
       domSnapshot: "",

@@ -31,6 +31,7 @@ import {
   resolveBoardTarget,
   writeBoard,
 } from "./board.js";
+import { CHANGE_CONTRACT_RULE } from "./board-changes.js";
 import {
   adoptLegacyEnv,
   BOARD_FILE_NAME,
@@ -665,6 +666,11 @@ export function createPollOutput({ file, response, agent = "generic" }) {
   };
 }
 
+/** Whether any prompt carries board change records (src/board-changes.js). @param {any[]} prompts */
+function hasChangeRecords(prompts) {
+  return (prompts || []).some((prompt) => Array.isArray(prompt?.changes) && prompt.changes.length > 0);
+}
+
 function createFeedbackNextStep(file, artifactFailures, sessionEnded, endedBy, prompts = [], agent = "generic") {
   const count = artifactFailures.length;
   const whiteboardNote = prompts.some((prompt) => prompt && prompt.tag === "whiteboard")
@@ -673,6 +679,7 @@ function createFeedbackNextStep(file, artifactFailures, sessionEnded, endedBy, p
   const layoutNote = prompts.some((prompt) => prompt && prompt.tag === "layout-warnings")
     ? `This feedback includes layout issues the user selected from the Liesel Layout issues inbox (tag "layout-warnings"): the target lists the exact warning ids and targets. Apply every listed fix in one pass before saving so the user's review refreshes once. Queueing is a repair request, not a resolution - Liesel only marks a warning resolved after a newer artifact load and a complete check at the same viewport no longer detects it. `
     : "";
+  const changeNote = hasChangeRecords(prompts) ? `${CHANGE_CONTRACT_RULE} ` : "";
   const attachmentNote = prompts.some((prompt) => Array.isArray(prompt?.attachments) && prompt.attachments.length)
     ? `Some prompts carry image attachments the user added: each is an object in the prompt's \`attachments\` array with an absolute local \`path\` (plus id, mime, and dimensions). Open those image files to see what the user is referring to. `
     : "";
@@ -688,9 +695,9 @@ function createFeedbackNextStep(file, artifactFailures, sessionEnded, endedBy, p
         count > 0
           ? ""
           : ` Only run \`liesel ${file} --reopen\` if the user explicitly asks for further review or something genuinely important needs their visual attention.`;
-      return `${failureNote}${layoutNote}${whiteboardNote}${attachmentNote}This was the last feedback before the user ended the session. Stop polling ${file} and do not reopen it - deliver any remaining updates directly in this conversation instead.${reopenNote}`;
+      return `${failureNote}${layoutNote}${whiteboardNote}${attachmentNote}${changeNote}This was the last feedback before the user ended the session. Stop polling ${file} and do not reopen it - deliver any remaining updates directly in this conversation instead.${reopenNote}`;
     }
-    return `${failureNote}${layoutNote}${whiteboardNote}${attachmentNote}This was the last feedback before the Liesel session ended. Stop polling ${file}. Deliver any remaining updates directly in this conversation, or run \`liesel ${file}\` to open a fresh session if the user needs further visual review.`;
+    return `${failureNote}${layoutNote}${whiteboardNote}${attachmentNote}${changeNote}This was the last feedback before the Liesel session ended. Stop polling ${file}. Deliver any remaining updates directly in this conversation, or run \`liesel ${file}\` to open a fresh session if the user needs further visual review.`;
   }
   const isBoard = path.basename(file) === BOARD_FILE_NAME;
   const prefix =
@@ -699,7 +706,7 @@ function createFeedbackNextStep(file, artifactFailures, sessionEnded, endedBy, p
       : isBoard
         ? `This feedback is about items on the board in ${path.dirname(file)}. Apply each prompt to the HTML file of the item it names (its target carries the item id and label); board.json holds only positions, labels and notes, never an item's content. `
         : `Apply the requested changes to ${file}. `;
-  return `${prefix}${layoutNote}${whiteboardNote}${attachmentNote}Do not respond to the user just yet. If you are continuing to wait for feedback, run \`liesel poll ${file} --agent-reply "<message for the user>"\` without --timeout-ms to reply and keep polling. If instead you are handing back a result without starting another long-poll, run \`liesel reply ${file} --agent-reply "<message for the user>"\` to post it and receive an acceptance receipt. ${POLL_AGENT_REPLY_RULE} ${POLL_AGENT_REPLY_NEXT_POINTER} The poll waits silently until the user sends more feedback, ends the session, or leaves every review window disconnected past the reconnect grace period - never kill it. ${pollExecutionGuidance({ agent })}`;
+  return `${prefix}${layoutNote}${whiteboardNote}${attachmentNote}${changeNote}Do not respond to the user just yet. If you are continuing to wait for feedback, run \`liesel poll ${file} --agent-reply "<message for the user>"\` without --timeout-ms to reply and keep polling. If instead you are handing back a result without starting another long-poll, run \`liesel reply ${file} --agent-reply "<message for the user>"\` to post it and receive an acceptance receipt. ${POLL_AGENT_REPLY_RULE} ${POLL_AGENT_REPLY_NEXT_POINTER} The poll waits silently until the user sends more feedback, ends the session, or leaves every review window disconnected past the reconnect grace period - never kill it. ${pollExecutionGuidance({ agent })}`;
 }
 
 // The narrow fatal path. Ordinary layout findings never reach the poll: they wait in the user's
@@ -2144,7 +2151,7 @@ async function mcpCommand() {
         ...output,
         next_step:
           output.session.status === "feedback"
-            ? "Apply each prompt to the HTML file of the item it names (liesel_board_status maps item ids to files), then call liesel_reply with a short answer, or liesel_poll with `reply` to answer and keep waiting."
+            ? `Apply each prompt to the HTML file of the item it names (liesel_board_status maps item ids to files), then call liesel_reply with a short answer, or liesel_poll with \`reply\` to answer and keep waiting.${hasChangeRecords(output.prompts) ? ` ${CHANGE_CONTRACT_RULE}` : ""}`
             : output.session.status === "waiting"
               ? "No notes yet. Call liesel_poll again to keep waiting."
               : output.next_step,

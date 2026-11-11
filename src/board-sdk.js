@@ -1335,6 +1335,233 @@
     return null;
   }
 
+  /* ------------------------------------------- the custom property behind a value */
+
+  /**
+   * A selector's specificity as [ids, classes, types]. :where() counts nothing, and
+   * :is(), :not() and :has() count their most specific argument, as the cascade does.
+   * @param {string} selector one complex selector, no top-level commas
+   * @returns {number[]}
+   */
+  function specificityOf(selector) {
+    const total = [0, 0, 0];
+    const text = String(selector);
+    let index = 0;
+    const ident = () => {
+      const match = /^(?:\\.|[\w-])+/.exec(text.slice(index));
+      index += match ? match[0].length : 1;
+      return match ? match[0] : "";
+    };
+    const args = () => {
+      let depth = 0;
+      const start = index;
+      for (; index < text.length; index += 1) {
+        if (text[index] === "(") depth += 1;
+        else if (text[index] === ")" && --depth === 0) break;
+      }
+      index += 1;
+      return text.slice(start + 1, index - 1);
+    };
+    while (index < text.length) {
+      const char = text[index];
+      if (char === "#") {
+        index += 1;
+        ident();
+        total[0] += 1;
+      } else if (char === ".") {
+        index += 1;
+        ident();
+        total[1] += 1;
+      } else if (char === "[") {
+        index = text.indexOf("]", index) + 1 || text.length;
+        total[1] += 1;
+      } else if (char === ":") {
+        const element = text[index + 1] === ":";
+        index += element ? 2 : 1;
+        const name = ident().toLowerCase();
+        const inner = text[index] === "(" ? args() : null;
+        if (element) total[2] += 1;
+        else if (name === "where") continue;
+        else if (["is", "not", "has", "matches"].includes(name) && inner !== null) {
+          const best = splitSelectorList(inner)
+            .map(specificityOf)
+            .reduce((a, b) => (compareSpecificity(a, b) >= 0 ? a : b), [0, 0, 0]);
+          for (let part = 0; part < 3; part += 1) total[part] += best[part];
+        } else total[1] += 1;
+      } else if (/[A-Za-z_-]/.test(char)) {
+        ident();
+        total[2] += 1;
+      } else index += 1;
+    }
+    return total;
+  }
+
+  /** @param {number[]} a @param {number[]} b */
+  function compareSpecificity(a, b) {
+    for (let part = 0; part < 3; part += 1) if (a[part] !== b[part]) return a[part] - b[part];
+    return 0;
+  }
+
+  /** A selector list split on its top-level commas. @param {string} list */
+  function splitSelectorList(list) {
+    const parts = [];
+    let depth = 0;
+    let current = "";
+    for (const char of String(list)) {
+      if (char === "(" || char === "[") depth += 1;
+      if (char === ")" || char === "]") depth -= 1;
+      if (char === "," && depth === 0) {
+        parts.push(current.trim());
+        current = "";
+      } else current += char;
+    }
+    if (current.trim()) parts.push(current.trim());
+    return parts;
+  }
+
+  /** The shorthands a longhand can be written through: padding-top through padding. @param {string} property */
+  function shorthandsOf(property) {
+    if (/^border-(top|bottom)-(left|right)-radius$/.test(property)) return ["border-radius"];
+    if (property === "row-gap" || property === "column-gap") return ["gap"];
+    if (/^font-/.test(property) || property === "line-height") return ["font"];
+    if (/^background-/.test(property)) return ["background"];
+    const side = /^(padding|margin|inset)-(top|right|bottom|left)$/.exec(property);
+    if (side) return [side[1]];
+    const edge = /^border-(top|right|bottom|left)-(width|style|color)$/.exec(property);
+    if (edge) return [`border-${edge[1]}`, `border-${edge[2]}`, "border"];
+    return /^border-(width|style|color)$/.test(property) ? ["border"] : [];
+  }
+
+  /** Every style rule the page's stylesheets hold that applies at this viewport, in cascade order. */
+  function activeStyleRules() {
+    /** @type {CSSStyleRule[]} */
+    const rules = [];
+    /** @param {any} list */
+    const walk = (list) => {
+      for (const rule of list || []) {
+        if (rule.selectorText !== undefined && rule.style) rules.push(rule);
+        else if (rule.media && rule.cssRules) {
+          let applies;
+          try {
+            applies = !rule.media.mediaText || window.matchMedia(rule.media.mediaText).matches;
+          } catch {
+            applies = false;
+          }
+          if (applies) walk(rule.cssRules);
+        } else if (rule.cssRules && rule.conditionText === undefined) walk(rule.cssRules);
+        else if (rule.cssRules) {
+          let applies;
+          try {
+            applies = CSS.supports(rule.conditionText);
+          } catch {
+            applies = true;
+          }
+          if (applies) walk(rule.cssRules);
+        }
+      }
+    };
+    for (const sheet of document.styleSheets) {
+      if (sheet.ownerNode instanceof Element && sheet.ownerNode.closest("[data-liesel-ui]")) continue;
+      try {
+        walk(sheet.cssRules);
+      } catch {
+        // A cross-origin stylesheet keeps its rules to itself.
+      }
+    }
+    return rules;
+  }
+
+  /**
+   * The declaration that wins the cascade for one property on one element, as written
+   * in the page (var() and all), or "" when no rule or inline style sets it.
+   * @param {Element} element @param {string} property @param {CSSStyleRule[]} rules
+   */
+  function winningDeclaration(element, property, rules) {
+    const names = [property, ...shorthandsOf(property)];
+    /** @param {CSSStyleDeclaration} style */
+    const read = (style) => {
+      for (const name of names) {
+        const value = style.getPropertyValue(name);
+        if (value) return { value, important: style.getPropertyPriority(name) === "important" };
+      }
+      return null;
+    };
+    /** @type {{ value: string, important: boolean, specificity: number[], order: number } | null} */
+    let best = null;
+    rules.forEach((rule, order) => {
+      const declared = read(rule.style);
+      if (!declared) return;
+      let specificity = null;
+      for (const selector of splitSelectorList(rule.selectorText)) {
+        let matches;
+        try {
+          matches = element.matches(selector);
+        } catch {
+          matches = false;
+        }
+        if (!matches) continue;
+        const own = specificityOf(selector);
+        if (!specificity || compareSpecificity(own, specificity) > 0) specificity = own;
+      }
+      if (!specificity) return;
+      const candidate = { ...declared, specificity, order };
+      if (
+        !best ||
+        (candidate.important && !best.important) ||
+        (candidate.important === best.important && compareSpecificity(candidate.specificity, best.specificity) >= 0)
+      )
+        best = candidate;
+    });
+    const inline = element instanceof HTMLElement || element instanceof SVGElement ? read(element.style) : null;
+    if (inline && (!best || !best.important || inline.important)) return inline.value;
+    return best ? best.value : "";
+  }
+
+  /**
+   * The CSS custom property that drives a property's value on an element, read from the
+   * cascade: the first var() in the winning declaration, followed down a variable that
+   * is itself only another variable. An inheritable property no rule sets on the element
+   * is followed up to the ancestor that sets it. Null when no variable drives it.
+   * @param {Element} element @param {string} property @param {CSSStyleRule[]} rules
+   * @returns {{ name: string, value: string, declared: string } | null}
+   */
+  function drivingVariable(element, property, rules) {
+    const inheritable = INHERITED_PROPERTIES.includes(property);
+    for (let node = element; node instanceof Element; node = inheritable ? node.parentElement : null) {
+      const declared = winningDeclaration(node, property, rules);
+      if (!declared) continue;
+      const first = /var\(\s*(--[\w-]+)/.exec(declared);
+      if (!first) return null;
+      let name = first[1];
+      // --button-bg: var(--brand) is driven by --brand: the agent edits the source of the value.
+      for (let hop = 0; hop < 4; hop += 1) {
+        // A custom property inherits: its definition is on the nearest ancestor that sets it.
+        let own = "";
+        for (let holder = node; holder instanceof Element && !own; holder = holder.parentElement)
+          own = winningDeclaration(holder, name, rules);
+        const next = /^\s*var\(\s*(--[\w-]+)\s*\)\s*$/.exec(own);
+        if (!next) break;
+        name = next[1];
+      }
+      return { name, value: getComputedStyle(node).getPropertyValue(name).trim(), declared: declared.trim() };
+    }
+    return null;
+  }
+
+  /**
+   * Note on each control the custom property behind its value, where one drives it.
+   * @param {any[]} controls @param {Element} element @param {Element | null} section @param {CSSStyleRule[]} rules
+   */
+  function markDrivingVariables(controls, element, section, rules) {
+    for (const control of controls) {
+      const node = control.scope === "section" ? section : element;
+      if (!(node instanceof Element) || typeof control.css !== "string" || control.css.startsWith("--")) continue;
+      const variable = drivingVariable(node, control.css, rules);
+      if (variable) control.variable = variable;
+      if (Array.isArray(control.sides)) markDrivingVariables(control.sides, node, null, rules);
+    }
+  }
+
   /**
    * Text inside a tuned box that sets this property itself, so changing the box will
    * not reach it: the panel names them and offers a jump to the first.
@@ -1648,6 +1875,18 @@
     const like = page ? null : likeSelectorFor(element);
     const text = shortText(element.textContent).length > 0;
     const inherited = text ? inheritedGroups(element, chain) : [];
+    // The variable behind each value, so the agent edits the token, not the element.
+    const rules = activeStyleRules();
+    markDrivingVariables(controls, element, owner, rules);
+    for (const group of inherited) {
+      let node;
+      try {
+        node = document.querySelector(group.selector);
+      } catch {
+        node = null;
+      }
+      if (node) markDrivingVariables(group.controls, node, null, rules);
+    }
     const path = [];
     for (let node = trail; node && node !== element; node = node.parentElement) path.push(node);
     const crumbs = [...(element.contains(trail) ? path : []), element, ...chain]
